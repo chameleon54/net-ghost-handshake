@@ -87,71 +87,130 @@ describe('LedgeProbe against the test room', () => {
 
 describe('Mantle (the scripted move)', () => {
   const settings = {
-    vaultRiseSec: 0.2,
-    vaultOverSec: 0.2,
-    climbLowTopSec: 0.2,
+    vaultMinSpeedMps: 3,
+    vaultMinSec: 0.2,
+    vaultMaxSec: 0.6,
+    vaultArcHeightM: 0.4,
+    vaultArcMinHeightM: 0.25,
+    vaultHoldDecisionSec: 0.1,
+    climbLowSec: 0.4,
     climbRiseSec: 0.4,
     climbTopSec: 0.2,
-    vaultApexClearanceM: 0.1,
+    mantleMinHeightM: 0.3,
+    vaultMaxHeightM: 1.1,
   };
   const spot = (x: number, y: number, z: number): Spot => ({ x, y, z });
+  // A 1.0 m obstacle 1 m in front of the player, vaulted to a landing 2 m ahead (z is forward, negative).
   const lowPlan: MantlePlan = { band: 'low', topYM: 1, onTop: spot(0, 1, -1), over: spot(0, 0, -2) };
   const highPlan: MantlePlan = { band: 'high', topYM: 1.5, onTop: spot(0, 1.5, -1), over: null };
-  const out = spot(0, 0, 0);
+  const stepSec = 0.01;
 
-  function finish(m: Mantle, spaceHeld: boolean, stepSec = 0.05): number {
-    let elapsed = 0;
-    while (m.active && elapsed < 5) {
-      m.update(stepSec, spaceHeld, out);
-      elapsed += stepSec;
+  /** Runs a move to its end, returning every position it passed through and how long it took. */
+  function run(m: Mantle, heldFor: number): { path: Spot[]; seconds: number } {
+    const path: Spot[] = [];
+    let seconds = 0;
+    while (m.active && seconds < 5) {
+      const out = spot(0, 0, 0);
+      seconds += stepSec;
+      m.update(stepSec, seconds <= heldFor, out);
+      path.push(out);
     }
-    return elapsed;
+    return { path, seconds };
   }
-
-  it('a tap goes over a low obstacle and lands at the landing spot, keeping its speed', () => {
+  const vault = (entryZ: number, plan = lowPlan, heldFor = 0): { m: Mantle } & ReturnType<typeof run> => {
     const m = new Mantle(settings);
-    m.start(spot(0, 0, 0), lowPlan, { x: 0, z: -5 });
-    finish(m, false);
-    expect(out).toEqual({ x: 0, y: 0, z: -2 });
+    m.start(spot(0, 0, 0), plan, { x: 0, z: entryZ });
+    return { m, ...run(m, heldFor) };
+  };
+
+  it('a tap goes over and lands at the landing spot, keeping the speed it came in with', () => {
+    const { m, path } = vault(-5);
+    expect(path[path.length - 1]).toEqual({ x: 0, y: 0, z: -2 });
     expect(m.exitVelocity.x).toBeCloseTo(0);
     expect(m.exitVelocity.z).toBeCloseTo(-5);
   });
 
-  it('holding Space at the top stays on top of a low obstacle, standing still', () => {
-    const m = new Mantle(settings);
-    m.start(spot(0, 0, 0), lowPlan, { x: 0, z: -5 });
-    finish(m, true);
-    expect(out).toEqual({ x: 0, y: 1, z: -1 });
+  it('moves forward and up together from the very start, as one arc, never going backwards', () => {
+    const { path } = vault(-5);
+    const quarter = path[Math.floor(path.length / 4)];
+    expect(quarter.z).toBeLessThan(-0.1); // already well on its way forward ...
+    expect(quarter.y).toBeGreaterThan(0.02); // ... and already lifting
+    for (let i = 1; i < path.length; i++) expect(path[i].z, `step ${i}`).toBeLessThanOrEqual(path[i - 1].z + 1e-9);
+  });
+
+  it('lifts only a little: nowhere near the height of the obstacle, which is what made the old vault feel like climbing on it', () => {
+    const { path } = vault(-5);
+    const highest = Math.max(...path.map((p) => p.y));
+    expect(highest).toBeLessThanOrEqual(0.4 + 1e-6);
+    expect(highest).toBeLessThan(lowPlan.topYM / 2);
+  });
+
+  it('is a smooth arc: up to a peak in the middle and back down, with no jump between steps', () => {
+    const { path } = vault(-5);
+    const ys = path.map((p) => p.y);
+    const peak = ys.indexOf(Math.max(...ys));
+    expect(peak).toBeGreaterThan(path.length * 0.3);
+    expect(peak).toBeLessThan(path.length * 0.7);
+    for (let i = 1; i <= peak; i++) expect(ys[i], `rising ${i}`).toBeGreaterThanOrEqual(ys[i - 1] - 1e-9);
+    for (let i = peak + 1; i < ys.length; i++) expect(ys[i], `falling ${i}`).toBeLessThanOrEqual(ys[i - 1] + 1e-9);
+    for (let i = 1; i < path.length; i++) {
+      const stepM = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y, path[i].z - path[i - 1].z);
+      expect(stepM, `step ${i}`).toBeLessThan(0.13); // at most about 13 m/s: no teleport
+    }
+  });
+
+  it('takes less time at speed and more when slow, within the limits', () => {
+    const sprint = vault(-6).seconds;
+    const walk = vault(-4).seconds;
+    const standing = vault(0).seconds;
+    expect(sprint).toBeLessThan(walk);
+    expect(walk).toBeLessThanOrEqual(standing + stepSec);
+    expect(vault(-100).seconds).toBeGreaterThanOrEqual(settings.vaultMinSec - stepSec); // never faster than the shortest time
+    expect(standing).toBeLessThanOrEqual(settings.vaultMaxSec + stepSec); // never slower than the longest
+  });
+
+  it('a higher obstacle gets a bigger lift, between the two limits', () => {
+    const lowest = vault(-5, { ...lowPlan, topYM: 0.3 });
+    const highest = vault(-5, { ...lowPlan, topYM: 1.1 });
+    const peak = (r: { path: Spot[] }) => Math.max(...r.path.map((p) => p.y));
+    expect(peak(lowest)).toBeCloseTo(0.25, 2);
+    expect(peak(highest)).toBeCloseTo(0.4, 2);
+    expect(vault(-5, { ...lowPlan, topYM: 0.7 }).path.length).toBeGreaterThan(0);
+    expect(peak(vault(-5, { ...lowPlan, topYM: 0.7 }))).toBeGreaterThan(peak(lowest));
+    expect(peak(vault(-5, { ...lowPlan, topYM: 0.7 }))).toBeLessThan(peak(highest));
+  });
+
+  it('holding Space past the decision time turns the vault into climbing onto the obstacle, without a jump', () => {
+    const { m, path } = vault(-5, lowPlan, 5);
+    expect(path[path.length - 1]).toEqual({ x: 0, y: 1, z: -1 });
     expect(m.exitVelocity.z).toBeCloseTo(0);
+    for (let i = 1; i < path.length; i++) {
+      const stepM = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y, path[i].z - path[i - 1].z);
+      expect(stepM, `step ${i}`).toBeLessThan(0.13);
+    }
   });
 
-  it('a tall ledge is always climbed onto, even without holding Space', () => {
-    const m = new Mantle(settings);
-    m.start(spot(0, 0, 0), highPlan, { x: 0, z: 0 });
-    finish(m, false);
-    expect(out).toEqual({ x: 0, y: 1.5, z: -1 });
+  it('releasing Space before the decision time is still a vault', () => {
+    const { path } = vault(-5, lowPlan, 0.05);
+    expect(path[path.length - 1]).toEqual({ x: 0, y: 0, z: -2 });
   });
 
-  it('rises above the top during a vault, and the tall climb takes longer than the vault', () => {
-    const m = new Mantle(settings);
-    m.start(spot(0, 0, 0), lowPlan, { x: 0, z: -5 });
-    m.update(0.2, false, out); // end of the rise
-    expect(out.y).toBeCloseTo(1.1); // top 1.0 + apex clearance 0.1
-    const vaultSec = 0.2 + finish(m, false);
-
-    const climb = new Mantle(settings);
-    climb.start(spot(0, 0, 0), highPlan, { x: 0, z: 0 });
-    const climbSec = finish(climb, false);
-    expect(climbSec).toBeGreaterThan(vaultSec);
+  it('holding Space where there is no room to stand on top just vaults', () => {
+    const { path } = vault(-5, { ...lowPlan, onTop: null }, 5);
+    expect(path[path.length - 1]).toEqual({ x: 0, y: 0, z: -2 });
   });
 
-  it('never moves sideways during the rise', () => {
-    const m = new Mantle(settings);
-    m.start(spot(3, 0, 4), lowPlan, { x: 0, z: -5 });
-    m.update(0.1, false, out);
-    expect(out.x).toBe(3);
-    expect(out.z).toBe(4);
-    expect(out.y).toBeGreaterThan(0);
+  it('low cover too deep to vault is climbed onto', () => {
+    const { path } = vault(-5, { ...lowPlan, over: null }, 0);
+    expect(path[path.length - 1]).toEqual({ x: 0, y: 1, z: -1 });
+  });
+
+  it('a tall ledge is always climbed (rise, then onto the top), taking longer than a vault', () => {
+    const climb = vault(0, highPlan);
+    expect(climb.path[climb.path.length - 1]).toEqual({ x: 0, y: 1.5, z: -1 });
+    expect(climb.seconds).toBeGreaterThan(vault(-5).seconds);
+    // The tall climb is unchanged: it rises first without moving forward.
+    expect(climb.path[Math.floor(0.3 / stepSec)].z).toBe(0);
   });
 });
 

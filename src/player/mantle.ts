@@ -132,91 +132,180 @@ export class LedgeProbe {
 }
 
 export interface MantleSettings {
-  vaultRiseSec: number;
-  vaultOverSec: number;
-  climbLowTopSec: number;
+  vaultMinSpeedMps: number;
+  vaultMinSec: number;
+  vaultMaxSec: number;
+  vaultArcHeightM: number;
+  vaultArcMinHeightM: number;
+  vaultHoldDecisionSec: number;
+  climbLowSec: number;
   climbRiseSec: number;
   climbTopSec: number;
-  vaultApexClearanceM: number;
+  mantleMinHeightM: number;
+  vaultMaxHeightM: number;
 }
 
 const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
-const easeIn = (t: number): number => t * t;
 const smooth = (t: number): number => t * t * (3 - 2 * t);
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const clamp01 = (t: number): number => Math.min(Math.max(t, 0), 1);
+
+type Phase = 'vault' | 'toTop' | 'rise' | 'forward';
 
 // The scripted move. Collision is off while it runs, because the end spot was checked when it started.
-// Rise first; at the top, a low obstacle goes over unless Space is still held (then the player stays on top).
+//  - Vault (low cover): ONE smooth arc, forward and up a little at the same time, at the speed the player came in with,
+//    landing on the far side. In first person only the camera shows, so the feet only need to lift a little, not to the
+//    obstacle's height. A tap vaults; if Space is still held a moment in, the move turns into climbing onto the obstacle.
+//  - Climbing onto low cover: eases from wherever the player is, up and onto the top.
+//  - Tall climb: rise to the top, then onto it (unchanged).
 export class Mantle {
   active = false;
   /** Speed to carry on with after the move: the entry speed after a vault, zero otherwise. */
   readonly exitVelocity = { x: 0, z: 0 };
 
   private plan: MantlePlan | null = null;
+  /** Where the current phase started. Moves when a vault turns into a climb. */
   private readonly from: Spot = { x: 0, y: 0, z: 0 };
+  /** Where the player was at the last update. */
+  private readonly current: Spot = { x: 0, y: 0, z: 0 };
   private entrySpeedMps = 0;
   private elapsedSec = 0;
-  private rising = true;
-  private goOnTop = false;
-  private apexYM = 0;
+  private phase: Phase = 'vault';
+  private holdDecided = false;
+  // Vault arc, worked out when the move starts.
+  private vaultSec = 0;
+  private vaultLinearWeight = 1;
+  private vaultArcM = 0;
+  private vaultDirX = 0;
+  private vaultDirZ = 0;
 
   constructor(private readonly settings: MantleSettings = playerConfig) {}
 
   start(feet: Spot, plan: MantlePlan, entryVelocity: { x: number; z: number }): void {
+    const s = this.settings;
     this.plan = plan;
-    this.from.x = feet.x;
-    this.from.y = feet.y;
-    this.from.z = feet.z;
+    this.from.x = this.current.x = feet.x;
+    this.from.y = this.current.y = feet.y;
+    this.from.z = this.current.z = feet.z;
     this.entrySpeedMps = Math.hypot(entryVelocity.x, entryVelocity.z);
     this.elapsedSec = 0;
-    this.rising = true;
+    this.holdDecided = false;
     this.active = true;
     this.exitVelocity.x = 0;
     this.exitVelocity.z = 0;
-    this.apexYM = plan.topYM + (plan.band === 'low' ? this.settings.vaultApexClearanceM : 0);
+
+    if (plan.band === 'high') {
+      this.phase = 'rise';
+    } else if (plan.over) {
+      this.phase = 'vault';
+      const dx = plan.over.x - feet.x;
+      const dz = plan.over.z - feet.z;
+      const distanceM = Math.hypot(dx, dz);
+      this.vaultDirX = dx / distanceM;
+      this.vaultDirZ = dz / distanceM;
+      // Cross at the speed we came in with, so there is no stop or jerk; a standing start is slower and eases in.
+      const speed = Math.max(this.entrySpeedMps, s.vaultMinSpeedMps);
+      this.vaultSec = Math.min(Math.max(distanceM / speed, s.vaultMinSec), s.vaultMaxSec);
+      this.vaultLinearWeight = clamp01(this.entrySpeedMps / s.vaultMinSpeedMps);
+      // A higher obstacle gets a bigger lift, between the two limits.
+      const heightFraction = clamp01((plan.topYM - feet.y - s.mantleMinHeightM) / (s.vaultMaxHeightM - s.mantleMinHeightM));
+      this.vaultArcM = lerp(s.vaultArcMinHeightM, s.vaultArcHeightM, heightFraction);
+    } else {
+      this.phase = 'toTop'; // too deep to go over: climb onto it instead
+    }
   }
 
   /** Advances the move and writes where the feet are now into `out`. */
   update(dtSec: number, spaceHeld: boolean, out: Spot): void {
     const plan = this.plan;
     if (!this.active || !plan) return;
-    const s = this.settings;
     this.elapsedSec += dtSec;
 
-    if (this.rising) {
-      const riseSec = plan.band === 'low' ? s.vaultRiseSec : s.climbRiseSec;
-      if (this.elapsedSec < riseSec) {
-        out.x = this.from.x;
-        out.z = this.from.z;
-        out.y = lerp(this.from.y, this.apexYM, easeOut(this.elapsedSec / riseSec));
-        return;
+    if (this.phase === 'vault') this.updateVault(plan, spaceHeld, out);
+    if (this.phase === 'toTop') this.updateToTop(plan, out);
+    else if (this.phase === 'rise') this.updateRise(plan, out);
+    else if (this.phase === 'forward') this.updateForward(plan, out);
+
+    this.current.x = out.x;
+    this.current.y = out.y;
+    this.current.z = out.z;
+  }
+
+  private updateVault(plan: MantlePlan, spaceHeld: boolean, out: Spot): void {
+    const over = plan.over;
+    if (!over) return; // cannot happen: a vault phase always has a landing
+
+    // A moment in, decide between going over (tap) and climbing onto the obstacle (Space still held).
+    if (!this.holdDecided && this.elapsedSec >= this.settings.vaultHoldDecisionSec) {
+      this.holdDecided = true;
+      if (spaceHeld && plan.onTop) {
+        this.phase = 'toTop';
+        this.from.x = this.current.x;
+        this.from.y = this.current.y;
+        this.from.z = this.current.z;
+        this.elapsedSec = 0;
+        return; // update() carries on with the toTop phase this same frame
       }
-      // At the top: decide between going over and staying on top.
-      this.elapsedSec -= riseSec;
-      this.rising = false;
-      this.goOnTop = plan.band === 'high' || plan.over === null || (spaceHeld && plan.onTop !== null);
     }
 
-    const end = this.goOnTop ? plan.onTop : plan.over;
+    const t = Math.min(this.elapsedSec / this.vaultSec, 1);
+    const along = this.vaultLinearWeight * t + (1 - this.vaultLinearWeight) * smooth(t);
+    out.x = lerp(this.from.x, over.x, along);
+    out.z = lerp(this.from.z, over.z, along);
+    // sin squared: zero slope at both ends and the highest point in the middle, so the lift neither pops nor drops.
+    out.y = lerp(this.from.y, over.y, smooth(t)) + this.vaultArcM * Math.sin(Math.PI * t) ** 2;
+
+    if (t >= 1) {
+      // Land exactly on the landing spot (the arc's maths leaves a tiny residue).
+      out.x = over.x;
+      out.y = over.y;
+      out.z = over.z;
+      this.active = false;
+      this.exitVelocity.x = this.vaultDirX * this.entrySpeedMps;
+      this.exitVelocity.z = this.vaultDirZ * this.entrySpeedMps;
+    }
+  }
+
+  /** Eases from where the player is, up and onto the top: rises first, the forward part overlaps the end of the rise. */
+  private updateToTop(plan: MantlePlan, out: Spot): void {
+    const end = plan.onTop;
     if (!end) {
       this.active = false; // cannot happen for a plan from LedgeProbe; stop rather than move to nowhere
       return;
     }
-    const forwardSec = this.goOnTop ? (plan.band === 'low' ? s.climbLowTopSec : s.climbTopSec) : s.vaultOverSec;
-    const t = Math.min(this.elapsedSec / forwardSec, 1);
+    const t = Math.min(this.elapsedSec / this.settings.climbLowSec, 1);
+    out.y = lerp(this.from.y, end.y, easeOut(clamp01(t / 0.7)));
+    const forward = smooth(clamp01((t - 0.25) / 0.75));
+    out.x = lerp(this.from.x, end.x, forward);
+    out.z = lerp(this.from.z, end.z, forward);
+    if (t >= 1) this.active = false;
+  }
+
+  /** Tall climb, first part: straight up to the top. */
+  private updateRise(plan: MantlePlan, out: Spot): void {
+    const riseSec = this.settings.climbRiseSec;
+    if (this.elapsedSec < riseSec) {
+      out.x = this.from.x;
+      out.z = this.from.z;
+      out.y = lerp(this.from.y, plan.topYM, easeOut(this.elapsedSec / riseSec));
+      return;
+    }
+    this.elapsedSec -= riseSec;
+    this.phase = 'forward';
+    this.updateForward(plan, out);
+  }
+
+  /** Tall climb, second part: onto the top. */
+  private updateForward(plan: MantlePlan, out: Spot): void {
+    const end = plan.onTop;
+    if (!end) {
+      this.active = false;
+      return;
+    }
+    const t = Math.min(this.elapsedSec / this.settings.climbTopSec, 1);
     out.x = lerp(this.from.x, end.x, smooth(t));
     out.z = lerp(this.from.z, end.z, smooth(t));
-    out.y = lerp(this.apexYM, end.y, this.goOnTop ? t : easeIn(t));
-
-    if (t >= 1) {
-      this.active = false;
-      if (!this.goOnTop) {
-        const dx = end.x - this.from.x;
-        const dz = end.z - this.from.z;
-        const length = Math.hypot(dx, dz);
-        this.exitVelocity.x = (dx / length) * this.entrySpeedMps;
-        this.exitVelocity.z = (dz / length) * this.entrySpeedMps;
-      }
-    }
+    out.y = lerp(plan.topYM, end.y, t);
+    if (t >= 1) this.active = false;
   }
 }
