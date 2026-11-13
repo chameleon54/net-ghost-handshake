@@ -154,6 +154,8 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
       if (!(gun?.jammed ?? false)) jamLine.untilMs = 0;
 
       // The pictures. A check wins over a reload while it lasts.
+      // The pictures stay for as long as the check lasts (R may be held), and fade a few seconds after it ends.
+      if (checked !== null && (gun?.checking ?? false) && nowMs < checked.untilMs) checked.untilMs = nowMs + healthFx.magazinePictureShowSec * msPerSec;
       const checking = checked !== null && nowMs < checked.untilMs ? checked.check : null;
       const reloading = checking === null && gun !== null && nowMs < reloadUntilMs;
       const spares = checking ? checking.spares.map((spare) => fillShare(spare.feel)) : reloading && gun ? Array.from({ length: gun.magazines.spareCount }, () => null) : [];
@@ -163,9 +165,9 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
         pictures.replaceChildren(...spares.map((fill) => magazinePicture(fill)));
       }
       const gunFill = checking ? fillShare(checking.gun.feel) : null;
-      if (gunFill !== null && locator.magazineScreen(locatorOut)) {
+      if (gunFill !== null && (gun?.checking ?? false) && locator.magazineScreen(locatorOut)) {
         floating.style.opacity = '1';
-        const x = (locatorOut.x * 0.5 + 0.5) * window.innerWidth + healthFx.gunMagazineOffsetPx;
+        const x = (locatorOut.x * 0.5 + 0.5) * window.innerWidth;
         const y = (0.5 - locatorOut.y * 0.5) * window.innerHeight - pictureHeightPx / 2;
         floating.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
         if (floating.dataset.fill !== String(gunFill)) {

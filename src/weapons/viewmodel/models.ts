@@ -31,7 +31,7 @@ export interface WeaponModel {
   rest: { x: number; y: number; z: number; pitchRad: number; yawRad: number; rollRad: number };
   aimed: { x: number; y: number; z: number };
   /** The parts' rest places, so the pose can be added to them. */
-  base: { magY: number; slideZ: number; handOff: THREE.Vector3 };
+  base: { magX: number; magY: number; magZ: number; slideZ: number; handOff: THREE.Vector3 };
 }
 
 const colours = {
@@ -110,7 +110,7 @@ function buildRifle(): WeaponModel {
     root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing, held: null,
     rest: { x: 0.17, y: -0.2, z: -0.4, ...noRotation },
     aimed: { x: 0, y: -0.095, z: -0.4 },
-    base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
+    base: { magX: mag.position.x, magY: mag.position.y, magZ: mag.position.z, slideZ: slide.position.z, handOff: handOff.position.clone() },
   };
 }
 
@@ -136,7 +136,7 @@ function buildPistol(): WeaponModel {
     root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing, held: null,
     rest: { x: 0.13, y: -0.17, z: -0.33, ...noRotation },
     aimed: { x: 0, y: -0.075, z: -0.33 },
-    base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
+    base: { magX: mag.position.x, magY: mag.position.y, magZ: mag.position.z, slideZ: slide.position.z, handOff: handOff.position.clone() },
   };
 }
 
@@ -152,7 +152,7 @@ function buildKnife(): WeaponModel {
     // Held blade-up and angled across, ready to swing.
     rest: { x: 0.14, y: -0.17, z: -0.36, pitchRad: 0.6, yawRad: 0.3, rollRad: -0.2 },
     aimed: { x: 0.14, y: -0.17, z: -0.36 },
-    base: { magY: 0, slideZ: 0, handOff: new THREE.Vector3() },
+    base: { magX: 0, magY: 0, magZ: 0, slideZ: 0, handOff: new THREE.Vector3() },
   };
 }
 
@@ -169,7 +169,7 @@ function buildGrenade(): WeaponModel {
     root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null, stuckCasing: null, held,
     rest: { x: 0.14, y: -0.16, z: -0.32, ...noRotation },
     aimed: { x: 0.14, y: -0.16, z: -0.32 },
-    base: { magY: 0, slideZ: 0, handOff: new THREE.Vector3() },
+    base: { magX: 0, magY: 0, magZ: 0, slideZ: 0, handOff: new THREE.Vector3() },
   };
 }
 

@@ -29,6 +29,8 @@ export type WeaponEvents = {
   'weapon:reload-started': { weapon: GunId; durationSec: number; rackShare: number };
   /** The player started checking the magazine; it takes `durationSec`. */
   'weapon:check-started': { weapon: GunId; durationSec: number };
+  /** The put-back of the magazine began (R was let go, or the check ran through); `remainingSec` is how long it has left. */
+  'weapon:check-returning': { weapon: GunId; remainingSec: number };
   /** The player started inspecting the weapon; it takes `durationSec`. */
   'weapon:inspect-started': { weapon: WeaponId; durationSec: number };
   /** A reload or a magazine check was stopped before it finished (switching weapon, sprinting). */

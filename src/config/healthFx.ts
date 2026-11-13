@@ -38,8 +38,6 @@ export const healthFxDefaults = {
   hudFadeSec: 0.5,
   /** The magazine pictures stay this long after a check or a reload. */
   magazinePictureShowSec: 3,
-  /** The floating picture of the gun's magazine sits this far left of the magazine on screen. */
-  gunMagazineOffsetPx: -64,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

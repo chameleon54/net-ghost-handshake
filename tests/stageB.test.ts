@@ -170,14 +170,17 @@ describe('ViewmodelAnimator, stage B', () => {
     }
   });
 
-  it('checking the magazine pulls it part way out and puts it back', () => {
+  it('checking the magazine lifts it up and toward the camera, tipped to face it, and puts it back', () => {
     const animator = new ViewmodelAnimator();
-    animator.update(dtSec, { ...idle, checkProgress: 0.5 });
-    expect(animator.pose.magY).toBeCloseTo(-viewmodelConfigDefaults.checkMagPullM, 2);
+    animator.update(dtSec, { ...idle, checkProgress: 0.6 });
+    expect(animator.pose.magY).toBeCloseTo(viewmodelConfigDefaults.checkLiftUpM, 2);
+    expect(animator.pose.magX).toBeCloseTo(-viewmodelConfigDefaults.checkLiftSideM, 2);
+    expect(animator.pose.magZ).toBeCloseTo(viewmodelConfigDefaults.checkLiftTowardM, 2);
+    expect(animator.pose.magPitchRad).toBeCloseTo(viewmodelConfigDefaults.checkMagTiltRad, 2);
     expect(animator.pose.magVisible).toBe(true);
     expect(animator.pose.handZ).toBeGreaterThan(0.05);
     animator.update(dtSec, { ...idle, checkProgress: null });
-    expect(animator.pose.magY).toBe(0);
+    expect([animator.pose.magX, animator.pose.magY, animator.pose.magZ, animator.pose.magPitchRad, animator.pose.magRollRad]).toEqual([0, 0, 0, 0, 0]);
   });
 
   it('an inspect plays once and ends at rest; the chamber check moves the bolt', () => {

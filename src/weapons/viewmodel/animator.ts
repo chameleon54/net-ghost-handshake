@@ -4,6 +4,8 @@ import type { ViewWeapon } from './models';
 import { Spring } from './spring';
 import {
   checkPose,
+  type CheckPose,
+  type CheckShape,
   clamp01,
   easeOutBack,
   grenadeThrowKeys,
@@ -33,6 +35,11 @@ export interface Pose {
   rollRad: number;
   /** The magazine, and whether it is in view. */
   magY: number;
+  /** The magazine's sideways and forward offsets and its tilt (a check lifts it up and turns it toward the camera). */
+  magX: number;
+  magZ: number;
+  magPitchRad: number;
+  magRollRad: number;
   magVisible: boolean;
   /** The slide (pistol) or bolt (rifle), moved toward the player. */
   slideZ: number;
@@ -95,7 +102,7 @@ const softLimit = (value: number, limit: number): number => (limit <= 0 ? 0 : li
 export class ViewmodelAnimator {
   readonly pose: Pose = {
     x: 0, y: 0, z: 0, pitchRad: 0, yawRad: 0, rollRad: 0,
-    magY: 0, magVisible: true, slideZ: 0, stuckCasing: false, handX: 0, handY: 0, handZ: 0,
+    magY: 0, magX: 0, magZ: 0, magPitchRad: 0, magRollRad: 0, magVisible: true, slideZ: 0, stuckCasing: false, handX: 0, handY: 0, handZ: 0,
   };
 
   private readonly kickBack = new Spring(config.kickFrequencyHz, config.kickDampingRatio);
@@ -103,6 +110,8 @@ export class ViewmodelAnimator {
   private readonly swayYaw = new Spring(config.swayFrequencyHz, config.swayDampingRatio);
   private readonly swayPitch = new Spring(config.swayFrequencyHz, config.swayDampingRatio);
   private readonly reload: ReloadPose = { handX: 0, handY: 0, handZ: 0, magY: 0, magVisible: true, tilt: 0 };
+  private readonly check: CheckPose = { handX: 0, handY: 0, handZ: 0, magY: 0, magVisible: true, tilt: 0, magX: 0, magZ: 0, magPitchRad: 0, magRollRad: 0 };
+  private readonly checkShape: CheckShape = { handReachM: 0, magPullM: 0, liftUpM: 0, liftSideM: 0, liftTowardM: 0, magTiltRad: 0, magRollRad: 0 };
   private readonly rack: RackPose = { slideShare: 0, handY: 0, handZ: 0 };
   private readonly keyed: Transform = { x: 0, y: 0, z: 0, pitchRad: 0, yawRad: 0, rollRad: 0 };
   private sinceShotSec = notStarted;
@@ -213,6 +222,7 @@ export class ViewmodelAnimator {
     pose.yawRad = sprint * config.sprintYawRad;
     pose.rollRad = sprint * config.sprintRollRad;
     pose.handX = pose.handY = pose.handZ = pose.magY = 0;
+    pose.magX = pose.magZ = pose.magPitchRad = pose.magRollRad = 0;
     pose.magVisible = true;
 
     this.addBobAndSway(dtSec, input, pose);
@@ -255,13 +265,24 @@ export class ViewmodelAnimator {
         pose.slideZ = slideTravelM * this.rack.slideShare;
       }
     } else if (gun !== null && checkProgress !== null) {
-      checkPose(checkProgress, magazineReachM[gun], config.checkMagPullM, this.reload);
-      pose.handX = this.reload.handX;
-      pose.handY = this.reload.handY;
-      pose.handZ = this.reload.handZ;
-      pose.magY = this.reload.magY;
-      pose.pitchRad += this.reload.tilt * config.reloadTiltRad;
-      pose.rollRad += this.reload.tilt * config.checkRollRad;
+      const shape = this.checkShape;
+      shape.handReachM = magazineReachM[gun];
+      shape.magPullM = config.checkMagPullM;
+      shape.liftUpM = config.checkLiftUpM;
+      shape.liftSideM = config.checkLiftSideM;
+      shape.liftTowardM = config.checkLiftTowardM;
+      shape.magTiltRad = config.checkMagTiltRad;
+      shape.magRollRad = config.checkMagRollRad;
+      checkPose(checkProgress, shape, this.check);
+      pose.handX = this.check.handX;
+      pose.handY = this.check.handY;
+      pose.handZ = this.check.handZ;
+      pose.magY = this.check.magY;
+      pose.magX = this.check.magX;
+      pose.magZ = this.check.magZ;
+      pose.magPitchRad = this.check.magPitchRad;
+      pose.magRollRad = this.check.magRollRad;
+      pose.rollRad += this.check.tilt * config.checkRollRad;
     } else if (this.inspectSec !== null) {
       this.addInspect(pose, gun, slideTravelM);
     }

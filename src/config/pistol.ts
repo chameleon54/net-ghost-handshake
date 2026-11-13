@@ -5,7 +5,7 @@ export const pistolConfigDefaults = {
   fireRateRpm: 600,
   reloadTimeSec: 1.2,
   emptyReloadRackSec: 0.3,
-  checkMagazineSec: 0.9,
+  checkMagazineSec: 1.3,
   drawTimeSec: 0.25,
   /** Read once at start, so it is not on the tuning panel. */
   magazineRounds: 17,

@@ -48,9 +48,19 @@ export const viewmodelConfigDefaults = {
   smokeGrowth: 3,
   smokeOpacity: 0.35,
 
-  // Checking the magazine (hold R): it slides part way out and the gun rolls toward the eyes.
+  // Checking the magazine (hold R): Rook takes it out, lifts it up and to the left and tips it toward the camera to look at it.
+  // Offsets are in the gun's own space (x right, y up, z toward the player).
   checkMagPullM: 0.07,
-  checkRollRad: 0.35,
+  checkLiftUpM: 0.22,
+  checkLiftSideM: 0.12,
+  checkLiftTowardM: 0.1,
+  checkMagTiltRad: 1.1,
+  checkMagRollRad: 0.3,
+  /** The gun itself only leans this much while the magazine is checked. */
+  checkRollRad: 0.08,
+  /** The HUD's floating picture sits this far from the magazine on screen (x right, y up, in metres at the weapon's distance). */
+  magPictureOffsetXM: -0.07,
+  magPictureOffsetYM: 0.02,
 
   // Inspecting (hold F).
   inspectGunSec: 2.6,

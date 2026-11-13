@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { viewConfig } from '../../config/view';
+import { viewmodelConfig as config } from '../../config/viewmodel';
 import type { EventBus } from '../../core/events';
 import type { GunId, WeaponEvents } from '../events';
 import { ViewmodelAnimator, type AnimatorInput, type PreviewKind } from './animator';
@@ -47,15 +48,18 @@ export class Viewmodel {
   }
 
   /**
-   * Where the magazine in the weapon in hand is on screen, as a point from -1 to 1 on each axis (y up), for the HUD's
-   * floating magazine picture. False when there is no magazine in view (the knife, a grenade, or while it is out).
+   * Where the HUD's floating magazine picture goes while checking, as a point from -1 to 1 on each axis (y up): beside the
+   * magazine as it is lifted and tipped toward the camera. False for the knife and the grenade, which have no magazine.
    */
   magazineScreen(out: { x: number; y: number }): boolean {
     const mag = this.models[this.currentWeapon].mag;
-    if (!mag || !mag.visible) return false;
+    if (!mag) return false;
     this.scene.updateMatrixWorld();
     this.camera.updateMatrixWorld();
-    mag.getWorldPosition(this.magazinePoint).project(this.camera);
+    mag.getWorldPosition(this.magazinePoint);
+    this.magazinePoint.x += config.magPictureOffsetXM;
+    this.magazinePoint.y += config.magPictureOffsetYM;
+    this.magazinePoint.project(this.camera);
     out.x = this.magazinePoint.x;
     out.y = this.magazinePoint.y;
     return true;
@@ -92,7 +96,8 @@ export class Viewmodel {
     model.root.rotation.set(rest.pitchRad + pose.pitchRad, rest.yawRad + pose.yawRad, rest.rollRad + pose.rollRad, 'YXZ');
 
     if (model.mag) {
-      model.mag.position.y = base.magY + pose.magY;
+      model.mag.position.set(base.magX + pose.magX, base.magY + pose.magY, base.magZ + pose.magZ);
+      model.mag.rotation.set(pose.magPitchRad, 0, pose.magRollRad);
       model.mag.visible = pose.magVisible;
     }
     if (model.slide) model.slide.position.z = base.slideZ + pose.slideZ;

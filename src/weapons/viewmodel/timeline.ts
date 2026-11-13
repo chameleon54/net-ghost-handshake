@@ -1,3 +1,5 @@
+import { checkHoldProgress } from '../checkTiming';
+
 // Pure motion curves for the weapon animations. Each takes a progress number and gives positions; no drawing code,
 // so they can be tested. Progress goes from 0 (start) to 1 (end); the curves start and end at rest so nothing pops.
 
@@ -155,16 +157,66 @@ export function grenadeThrowKeys(releaseShare: number): readonly Key[] {
 
 // ---- Checking the magazine ----
 
-/** Pull the magazine part way out, look at it, push it back. Uses the reload's fields; `magVisible` stays true. */
-export function checkPose(progress: number, handReachM: number, magPullM: number, out: ReloadPose): void {
-  const reach = smooth(segment(progress, 0, 0.2)) * (1 - smooth(segment(progress, 0.85, 1)));
-  const pull = smooth(segment(progress, 0.15, 0.4)) * (1 - smooth(segment(progress, 0.65, 0.85)));
-  out.handX = 0;
-  out.handY = -handLiftM * reach;
-  out.handZ = handReachM * reach;
-  out.magY = -magPullM * pull;
+/** The distances and angles of a check. Offsets are in the gun's own space: x right, y up, z toward the player. */
+export interface CheckShape {
+  /** How far back the off hand reaches along the gun to the magazine. */
+  handReachM: number;
+  /** How far the magazine slides down out of the well before it is lifted. */
+  magPullM: number;
+  /** Where the lifted magazine is held, from where it sits in the gun: up, to the left (toward the middle of the screen), toward the camera. */
+  liftUpM: number;
+  liftSideM: number;
+  liftTowardM: number;
+  /** How far the held magazine is tipped so its top faces the camera, and how far it leans toward the middle of the screen. */
+  magTiltRad: number;
+  magRollRad: number;
+}
+
+/** The parts of a check: a reload's fields, plus the magazine's sideways, forward and tilt offsets. */
+export interface CheckPose extends ReloadPose {
+  magX: number;
+  magZ: number;
+  magPitchRad: number;
+  magRollRad: number;
+}
+
+// The check's stages overlap, so the magazine never stops between them: it only stands still at the start, while held
+// up (at `checkHoldProgress`, where the gun rules freeze the check while R is down), and when seated. Each stage uses
+// smootherstep, which is gentler at both ends than smoothstep.
+const smoother = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
+const checkHandReachEnd = 0.2;
+const checkHandReleaseFrom = 0.9;
+const checkSlideOutFrom = 0.1;
+const checkSlideOutTo = 0.4;
+const checkLiftFrom = 0.25;
+const checkLowerTo = 0.85;
+const checkSeatFrom = 0.7;
+const checkSeatTo = 0.95;
+
+/**
+ * Checking the magazine: the off hand reaches back and grabs it, it slides out of the well and, before it has stopped, is
+ * lifted up and to the left and tipped toward the camera. It stays there (the gun rules hold the progress at
+ * `checkHoldProgress` while R is down), then it is lowered, tipped back, put into the well and pushed home in one flowing
+ * move. The hand carries it. Starts and ends at rest.
+ */
+export function checkPose(progress: number, shape: CheckShape, out: CheckPose): void {
+  const hold = checkHoldProgress;
+  const reach = smoother(segment(progress, 0, checkHandReachEnd)) * (1 - smoother(segment(progress, checkHandReleaseFrom, 1)));
+  const slidOut = smoother(segment(progress, checkSlideOutFrom, checkSlideOutTo)) * (1 - smoother(segment(progress, checkSeatFrom, checkSeatTo)));
+  const lift = smoother(segment(progress, checkLiftFrom, hold)) * (1 - smoother(segment(progress, hold, checkLowerTo)));
+
+  out.magY = -shape.magPullM * slidOut * (1 - lift) + shape.liftUpM * lift;
+  out.magX = -shape.liftSideM * lift;
+  out.magZ = shape.liftTowardM * lift;
+  out.magPitchRad = shape.magTiltRad * lift;
+  out.magRollRad = shape.magRollRad * lift;
   out.magVisible = true;
-  out.tilt = smooth(segment(progress, 0, 0.3)) * (1 - smooth(segment(progress, 0.7, 1)));
+  // The hand holds the magazine, wherever it is.
+  out.handX = out.magX;
+  out.handY = -handLiftM * reach + out.magY;
+  out.handZ = shape.handReachM * reach + out.magZ;
+  // The gun itself only leans a little, so the magazine is the thing that moves.
+  out.tilt = smoother(segment(progress, 0, 0.4)) * (1 - smoother(segment(progress, hold, 1)));
 }
 
 // ---- Racking the slide or bolt (the end of an empty reload) ----

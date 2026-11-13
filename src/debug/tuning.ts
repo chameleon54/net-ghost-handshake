@@ -306,8 +306,15 @@ export const viewmodelFolders: Folder<ViewmodelKey>[] = [
   {
     title: 'Check, inspect and walking',
     sliders: [
-      { key: 'checkMagPullM', label: 'Check: magazine pulled out (m)', min: 0, max: 0.15, step: 0.005 },
+      { key: 'checkMagPullM', label: 'Check: magazine slides out (m)', min: 0, max: 0.15, step: 0.005 },
+      { key: 'checkLiftUpM', label: 'Check: magazine lifted up (m)', min: 0, max: 0.4, step: 0.01 },
+      { key: 'checkLiftSideM', label: 'Check: magazine moved left (m)', min: -0.1, max: 0.3, step: 0.01 },
+      { key: 'checkLiftTowardM', label: 'Check: magazine toward the camera (m)', min: -0.1, max: 0.3, step: 0.01 },
+      { key: 'checkMagTiltRad', label: 'Check: magazine tipped toward the camera (rad)', min: 0, max: 2, step: 0.05 },
+      { key: 'checkMagRollRad', label: 'Check: magazine leaned to the left (rad)', min: -1, max: 1, step: 0.05 },
       { key: 'checkRollRad', label: 'Check: gun roll (rad)', min: 0, max: 1, step: 0.01 },
+      { key: 'magPictureOffsetXM', label: 'Check picture: right of the magazine (m)', min: -0.3, max: 0.3, step: 0.01 },
+      { key: 'magPictureOffsetYM', label: 'Check picture: above the magazine (m)', min: -0.3, max: 0.3, step: 0.01 },
       { key: 'inspectGunSec', label: 'Inspect a gun (s)', min: 0.5, max: 6, step: 0.1 },
       { key: 'inspectKnifeSec', label: 'Inspect the knife (s)', min: 0.5, max: 6, step: 0.1 },
       { key: 'bobStrideM', label: 'Bob: one cycle every (m)', min: 0.5, max: 8, step: 0.1 },
@@ -484,7 +491,6 @@ export const healthFxFolders: Folder<HealthFxKey>[] = [
       { key: 'hudShowSec', label: 'A pop-up stays (s)', min: 0.5, max: 10, step: 0.5 },
       { key: 'hudFadeSec', label: 'Then fades over (s)', min: 0.1, max: 2, step: 0.1 },
       { key: 'magazinePictureShowSec', label: 'Magazine pictures stay (s)', min: 1, max: 10, step: 0.5 },
-      { key: 'gunMagazineOffsetPx', label: 'Gun magazine picture offset (px)', min: -200, max: 200, step: 4 },
     ],
   },
 ];

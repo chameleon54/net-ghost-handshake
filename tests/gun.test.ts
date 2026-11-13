@@ -147,7 +147,7 @@ describe('reloads and checks', () => {
     const gun = new Gun(events, 'rifle', { ...rifleConfigDefaults }, true, neverJam);
     gun.update(dtSec, { ...idle, checkRequested: true });
     expect(gun.checking).toBe(true);
-    run(gun, held, rifleConfigDefaults.checkMagazineSec * 0.6); // trying to fire during the check
+    run(gun, held, rifleConfigDefaults.checkMagazineSec * 0.7); // trying to fire during the check (the magazine is read at 60%)
     expect(fired).toBe(0);
     expect(words).toEqual(['full']);
     run(gun, idle, rifleConfigDefaults.checkMagazineSec);

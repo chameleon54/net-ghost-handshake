@@ -1,5 +1,6 @@
 import { audioConfig } from '../config/audio';
 import type { EventBus } from '../core/events';
+import { checkHoldProgress } from '../weapons/checkTiming';
 import type { WeaponEvents, WeaponId } from '../weapons/events';
 import type { SoundName } from './recipes';
 import type { SoundPlayer } from './soundPlayer';
@@ -11,8 +12,8 @@ const reloadMagOutAt = 0.2;
 const reloadMagInAt = 0.82;
 const rackPullAt = 0.15;
 const rackReleaseAt = 0.5;
-const checkMagOutAt = 0.2;
-const checkMagInAt = 0.8;
+const checkMagOutAt = 0.22; // the magazine leaves the well (timeline.ts: slides out from 0.15 to 0.3)
+const checkMagInAt = 0.9; // and is pushed home (back in from 0.7 to 0.95)
 const inspectChamberPullAt = 0.66;
 const inspectChamberReleaseAt = 0.8;
 const knifeInspectWhooshAt = 0.3;
@@ -84,7 +85,10 @@ export class WeaponSounds {
     events.on('weapon:check-started', ({ durationSec }) => {
       this.cancelAll();
       this.later(durationSec * checkMagOutAt, 'check', () => this.play('check-out'));
-      this.later(durationSec * checkMagInAt, 'check', () => this.play('check-in'));
+    });
+    // The put-back begins when R is let go (or the check ran through): the magazine is pushed home near its end.
+    events.on('weapon:check-returning', ({ remainingSec }) => {
+      this.later(remainingSec * ((checkMagInAt - checkHoldProgress) / (1 - checkHoldProgress)), 'check', () => this.play('check-in'));
     });
     events.on('weapon:inspect-started', ({ weapon, durationSec }) => {
       this.cancel('inspect');

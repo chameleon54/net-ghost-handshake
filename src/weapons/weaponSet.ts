@@ -24,6 +24,8 @@ export interface WeaponSetInput {
   checkRequested: boolean;
   /** False while sprinting, climbing or vaulting. */
   canFire: boolean;
+  /** R is down (a check stays on the lifted magazine while it is). */
+  reloadHeld?: boolean;
 }
 
 // Which weapon is out, and the draw time after taking one out. The other weapons keep their own state while away.
@@ -114,6 +116,7 @@ export class WeaponSet {
         triggerPressed: input.triggerPressed,
         reloadPressed: input.reloadPressed && ready,
         checkRequested: input.checkRequested && ready,
+        reloadHeld: input.reloadHeld,
         canFire,
       });
     } else {

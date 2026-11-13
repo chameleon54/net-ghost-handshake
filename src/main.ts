@@ -267,6 +267,7 @@ const loop = new Loop(
       triggerPressed: input.consumeButtonPress(fireButton) && handsFree,
       reloadPressed: reloadKey.tapped && handsFree,
       checkRequested: reloadKey.holdStarted && handsFree,
+      reloadHeld: handsFree && input.isKeyDown('KeyR'),
       canFire: handsFree && !player.isSprinting && !player.mantle.active,
     });
     if (inspectKey.holdStarted && canInspect()) {

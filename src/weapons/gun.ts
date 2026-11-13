@@ -1,6 +1,7 @@
 import type { GunConfig } from '../config/gun';
 import type { EventBus } from '../core/events';
 import type { GunId, WeaponEvents } from './events';
+import { checkHoldProgress } from './checkTiming';
 import { addJamRisk, heatMax, jamChance } from './jam';
 import { checkMagazines } from './magazineFeel';
 import { Magazines } from './magazines';
@@ -15,11 +16,13 @@ export interface GunInput {
   checkRequested: boolean;
   /** False while sprinting, climbing, vaulting or drawing the gun. */
   canFire: boolean;
+  /** R is down. A check stays on the lifted magazine for as long as it is. */
+  reloadHeld?: boolean;
 }
 
 const secPerMinute = 60;
-/** The player has looked at the magazine this far into the check: that is when the rough words are known. */
-const checkLooksAtProgress = 0.35;
+/** The player reads the magazine once it is lifted and facing the camera (the hold point); a hair of slack for rounding. */
+const checkProgressSlack = 1e-6;
 
 // A gun's rules: fire rate, heat and jams, empty click, reload and checking the magazine. The rifle and the pistol are
 // the same class with different numbers and fire mode. It only decides what happens and says so through events.
@@ -39,6 +42,7 @@ export class Gun {
   private checkLeftSec = 0;
   private checkTotalSec = 1;
   private checkReported = false;
+  private checkReturnSent = false;
   private clickedThisPull = false;
   private roundsFiredFromMagazine = 0;
   private sinceClearSec = Infinity;
@@ -153,14 +157,25 @@ export class Gun {
     }
 
     if (this.checking) {
+      // Sprinting, climbing or vaulting puts the magazine away.
+      if (!input.canFire) {
+        this.interrupt();
+        return;
+      }
       this.checkLeftSec -= dtSec;
-      if (!this.checkReported && this.checkProgress >= checkLooksAtProgress) {
+      // Once the magazine is up, it stays there for as long as R is held; letting go puts it back.
+      const atTop = this.checkProgress >= checkHoldProgress - checkProgressSlack;
+      const holding = atTop && input.reloadHeld === true;
+      if (holding) this.checkLeftSec = this.checkTotalSec * (1 - checkHoldProgress);
+      if (atTop && !this.checkReported) {
         this.checkReported = true;
         this.events.emit('weapon:magazine-checked', { check: checkMagazines(this.magazines) });
       }
-      // Sprinting, climbing or vaulting puts the magazine away.
-      if (!input.canFire) this.interrupt();
-      else if (this.checkLeftSec <= 0) this.checkLeftSec = 0;
+      if (atTop && !holding && !this.checkReturnSent) {
+        this.checkReturnSent = true;
+        this.events.emit('weapon:check-returning', { weapon: this.id, remainingSec: this.checkLeftSec });
+      }
+      if (this.checkLeftSec <= 0) this.checkLeftSec = 0;
       return; // no firing or reloading while looking at the magazine
     }
 
@@ -177,6 +192,7 @@ export class Gun {
       this.checkTotalSec = this.config.checkMagazineSec;
       this.checkLeftSec = this.checkTotalSec;
       this.checkReported = false;
+      this.checkReturnSent = false;
       this.events.emit('weapon:check-started', { weapon: this.id, durationSec: this.checkTotalSec });
       return;
     }
