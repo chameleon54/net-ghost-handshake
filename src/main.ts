@@ -1,16 +1,14 @@
 import * as THREE from 'three';
-import { inputConfig } from './config/input';
 import { Game } from './core/game';
 import { Input } from './core/input';
 import { Loop } from './core/loop';
 import { uiText } from './data/uiText';
+import { buildGreybox } from './level/greybox';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
+import { Player } from './player/player';
 import { createOverlay } from './ui/overlay';
-
-// The cube and the mouse look below are stand-ins; milestone 1.2 replaces them with the real player.
-const cubeSpinRadPerSec = 0.6;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -18,16 +16,17 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 3;
+scene.background = new THREE.Color(0x101418);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 100);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-const sun = new THREE.DirectionalLight(0xffffff, 2);
-sun.position.set(3, 4, 5);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333a40, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(4, 8, 3);
 scene.add(sun);
 
-const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x66aaff }));
-scene.add(cube);
+const level = buildGreybox();
+scene.add(level.group);
+const player = new Player(level.collision);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -54,22 +53,13 @@ game.events.on('game:playing', () => overlay.hide());
 game.events.on('game:paused', () => overlay.show(uiText.paused));
 game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused));
 
-const mouseMove = { x: 0, y: 0 };
-let yawRad = 0;
-let pitchRad = 0;
-
 const loop = new Loop(
-  (stepSec) => {
-    cube.rotation.x += cubeSpinRadPerSec * stepSec;
-    cube.rotation.y += cubeSpinRadPerSec * stepSec;
-
-    input.consumeMouseMove(mouseMove);
-    yawRad -= mouseMove.x * inputConfig.mouseSensitivityRadPerPx;
-    pitchRad -= mouseMove.y * inputConfig.mouseSensitivityRadPerPx;
-    pitchRad = Math.max(-inputConfig.pitchLimitRad, Math.min(inputConfig.pitchLimitRad, pitchRad));
-    camera.rotation.set(pitchRad, yawRad, 0, 'YXZ');
+  (stepSec) => player.fixedUpdate(stepSec, input),
+  (alpha) => {
+    player.look(input);
+    player.applyToCamera(camera, alpha);
+    renderer.render(scene, camera);
   },
-  () => renderer.render(scene, camera),
   () => game.isPlaying,
 );
 loop.start();
