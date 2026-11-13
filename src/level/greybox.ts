@@ -10,7 +10,7 @@ export interface GreyboxLevel {
   collision: LevelCollision;
 }
 
-const shades = { wall: 0x4a4f55, prop: 0x8a9097, floor: 0x2b2f33 } as const;
+const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33 } as const;
 
 function boxGeometry(box: RoomBox): THREE.BufferGeometry {
   const geometry = new THREE.BoxGeometry(box.widthM, box.heightM, box.depthM);

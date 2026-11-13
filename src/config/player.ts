@@ -42,6 +42,16 @@ export const playerConfig = {
   /** How fast speed drops when no key is held. */
   brakingMps2: 60,
 
+  // Leaning
+  /** How far the camera shifts sideways at full lean. The body stays put; only the head moves. */
+  leanDistanceM: 0.45,
+  /** Camera tilt at full lean (10 degrees). */
+  leanRollRad: 0.175,
+  /** Lean eases toward its target with this time constant. It settles in about three times this. */
+  leanSmoothingTimeSec: 0.05,
+  /** Gap kept between the camera and a wall, so a lean never puts the camera inside it. */
+  leanHeadClearanceM: 0.12,
+
   // Collision and spawn
   /** How many times per update the player is pushed out of walls. More resolves tight corners. */
   collisionIterations: 5,

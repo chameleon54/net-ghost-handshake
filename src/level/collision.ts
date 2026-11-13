@@ -1,4 +1,4 @@
-import { Box3, BufferGeometry, Line3, Vector3 } from 'three';
+import { Box3, BufferGeometry, DoubleSide, Line3, Ray, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 
 // Static level collision: a BVH (a fast spatial index) over every wall and prop triangle.
@@ -15,9 +15,18 @@ export class LevelCollision {
   private readonly onSegment = new Vector3();
   private readonly push = new Vector3();
   private readonly triNormal = new Vector3();
+  private readonly ray = new Ray();
 
   constructor(geometry: BufferGeometry) {
     this.bvh = new MeshBVH(geometry);
+  }
+
+  /** Distance from `origin` along the unit `direction` to the first wall or prop, or Infinity if none within `maxDistanceM`. */
+  rayDistance(origin: Vector3, direction: Vector3, maxDistanceM: number): number {
+    this.ray.origin.copy(origin);
+    this.ray.direction.copy(direction);
+    const hit = this.bvh.raycastFirst(this.ray, DoubleSide, 0, maxDistanceM);
+    return hit ? hit.distance : Infinity;
   }
 
   /**

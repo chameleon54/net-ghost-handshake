@@ -3,7 +3,7 @@
 // low cover about 1.0 m, climbable 1.1-2.0 m, wall above 2.0 m.
 
 export interface RoomBox {
-  kind: 'wall' | 'prop';
+  kind: 'wall' | 'prop' | 'marker';
   /** Centre of the box on the floor. */
   xM: number;
   zM: number;
@@ -30,4 +30,9 @@ export const greyboxRoom: readonly RoomBox[] = [
   // L-shaped wall for testing corners. Its inside corner is near x 6.3, z 2.1.
   { kind: 'prop', xM: 5, zM: 2, widthM: 3, depthM: 0.2, heightM: 2.5 },
   { kind: 'prop', xM: 6.4, zM: 3.5, widthM: 0.2, depthM: 3, heightM: 2.5 },
+
+  // Peek corner for testing the lean: stand south of the partition near x -6.2, z 3.0, facing north. The orange
+  // marker just past the partition's end is hidden until you lean right. tests/lean.test.ts checks this.
+  { kind: 'prop', xM: -6.75, zM: 1.5, widthM: 2.5, depthM: 0.3, heightM: 2.4 },
+  { kind: 'marker', xM: -4.9, zM: -0.5, widthM: 0.5, depthM: 0.5, heightM: 1.0 },
 ];

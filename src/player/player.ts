@@ -3,6 +3,7 @@ import { inputConfig } from '../config/input';
 import { playerConfig } from '../config/player';
 import type { Input } from '../core/input';
 import type { LevelCollision } from '../level/collision';
+import { easeToward, limitLean, rollForLean, wantedLean } from './lean';
 import { accelerate, steerToward, wishDirection, type Vec2 } from './movement';
 import { StanceMachine, type Stance } from './stance';
 
@@ -28,6 +29,11 @@ export class Player {
   private pitchRad = 0;
   private eyeHeightM: number = playerConfig.eyeHeightM;
   private previousEyeHeightM: number = playerConfig.eyeHeightM;
+  /** Sideways camera shift from leaning: positive is right. Only the head moves; the body stays put. */
+  private leanOffsetM = 0;
+  private previousLeanOffsetM = 0;
+  private readonly leanOrigin = new THREE.Vector3();
+  private readonly leanDirection = new THREE.Vector3();
 
   constructor(private readonly collision: LevelCollision) {}
 
@@ -39,6 +45,7 @@ export class Player {
   fixedUpdate(dtSec: number, input: Input): void {
     this.previousPosition.copy(this.position);
     this.previousEyeHeightM = this.eyeHeightM;
+    this.previousLeanOffsetM = this.leanOffsetM;
 
     const forward = (input.isKeyDown('KeyW') ? 1 : 0) - (input.isKeyDown('KeyS') ? 1 : 0);
     const right = (input.isKeyDown('KeyD') ? 1 : 0) - (input.isKeyDown('KeyA') ? 1 : 0);
@@ -89,6 +96,30 @@ export class Player {
     // The camera eases toward the new eye height instead of snapping, so crouching looks smooth.
     const ease = 1 - Math.exp(-dtSec / playerConfig.eyeSmoothingTimeSec);
     this.eyeHeightM += (size.eyeHeightM - this.eyeHeightM) * ease;
+
+    this.updateLean(dtSec, input);
+  }
+
+  /** Q and E lean the head sideways, never into a wall. No leaning while sprinting or sliding. */
+  private updateLean(dtSec: number, input: Input): void {
+    const allowed = !this.stance.sprinting && this.stance.stance !== 'sliding';
+    const wanted = wantedLean(input.isKeyDown('KeyQ'), input.isKeyDown('KeyE'), allowed);
+    // Check the side being leaned toward, or the side still leaned out to while returning to centre.
+    const side = wanted !== 0 ? wanted : Math.sign(this.leanOffsetM);
+
+    let wallDistanceM = Infinity;
+    if (side !== 0) {
+      this.leanOrigin.set(this.position.x, this.eyeHeightM, this.position.z);
+      this.leanDirection.set(Math.cos(this.yawRad) * side, 0, -Math.sin(this.yawRad) * side);
+      const reachM = playerConfig.leanDistanceM + playerConfig.leanHeadClearanceM;
+      wallDistanceM = this.collision.rayDistance(this.leanOrigin, this.leanDirection, reachM);
+    }
+
+    const clearanceM = playerConfig.leanHeadClearanceM;
+    const targetM = limitLean(wanted * playerConfig.leanDistanceM, side, wallDistanceM, clearanceM);
+    const easedM = easeToward(this.leanOffsetM, targetM, dtSec, playerConfig.leanSmoothingTimeSec);
+    // Walking toward a wall while leaned cuts the lean back at once; it is never allowed through.
+    this.leanOffsetM = limitLean(easedM, side, wallDistanceM, clearanceM);
   }
 
   /** Turn with the mouse. Called once per screen frame. */
@@ -101,11 +132,17 @@ export class Player {
 
   /** Place the camera. `alpha` blends between the last two updates so motion is smooth on fast screens. */
   applyToCamera(camera: THREE.PerspectiveCamera, alpha: number): void {
+    const leanM = this.previousLeanOffsetM + (this.leanOffsetM - this.previousLeanOffsetM) * alpha;
     camera.position.set(
-      this.previousPosition.x + (this.position.x - this.previousPosition.x) * alpha,
+      this.previousPosition.x + (this.position.x - this.previousPosition.x) * alpha + Math.cos(this.yawRad) * leanM,
       this.previousEyeHeightM + (this.eyeHeightM - this.previousEyeHeightM) * alpha,
-      this.previousPosition.z + (this.position.z - this.previousPosition.z) * alpha,
+      this.previousPosition.z + (this.position.z - this.previousPosition.z) * alpha - Math.sin(this.yawRad) * leanM,
     );
-    camera.rotation.set(this.pitchRad, this.yawRad, 0, 'YXZ');
+    camera.rotation.set(
+      this.pitchRad,
+      this.yawRad,
+      rollForLean(leanM, playerConfig.leanDistanceM, playerConfig.leanRollRad),
+      'YXZ',
+    );
   }
 }
