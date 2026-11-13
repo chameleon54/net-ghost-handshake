@@ -3,6 +3,7 @@ import { Game } from './core/game';
 import { Input } from './core/input';
 import { Loop } from './core/loop';
 import { uiText } from './data/uiText';
+import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
@@ -53,11 +54,26 @@ game.events.on('game:playing', () => overlay.hide());
 game.events.on('game:paused', () => overlay.show(uiText.paused));
 game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused));
 
+// Debug tools (tuning panel, free camera) exist only on the dev server. Vite removes this block from the production
+// build, so neither the tools nor lil-gui are shipped to players.
+let debug: DebugTools | null = null;
+if (import.meta.env.DEV) {
+  void import('./debug').then((tools) => {
+    debug = tools.installDebugTools({ scene, input, player });
+  });
+}
+
 const loop = new Loop(
-  (stepSec) => player.fixedUpdate(stepSec, input),
+  (stepSec) => {
+    if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
+    player.fixedUpdate(stepSec, input);
+  },
   (alpha) => {
-    player.look(input);
-    player.applyToCamera(camera, alpha);
+    // The free camera, when on, places the camera itself; otherwise the player does.
+    if (!debug?.beforeRender(camera)) {
+      player.look(input);
+      player.applyToCamera(camera, alpha);
+    }
     renderer.render(scene, camera);
   },
   () => game.isPlaying,

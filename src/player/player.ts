@@ -9,11 +9,14 @@ import { LedgeProbe, Mantle, type Spot } from './mantle';
 import { accelerate, steerToward, wishDirection, type Vec2 } from './movement';
 import { StanceMachine, type Stance } from './stance';
 
-const stanceSizes: Record<Stance, { heightM: number; eyeHeightM: number }> = {
-  standing: { heightM: playerConfig.heightM, eyeHeightM: playerConfig.eyeHeightM },
-  crouching: { heightM: playerConfig.crouchHeightM, eyeHeightM: playerConfig.crouchEyeHeightM },
-  sliding: { heightM: playerConfig.slideHeightM, eyeHeightM: playerConfig.slideEyeHeightM },
-};
+// Read from the config each time, so the debug panel can change them while the game runs.
+function capsuleHeightFor(stance: Stance): number {
+  return stance === 'standing' ? playerConfig.heightM : stance === 'crouching' ? playerConfig.crouchHeightM : playerConfig.slideHeightM;
+}
+
+function eyeHeightFor(stance: Stance): number {
+  return stance === 'standing' ? playerConfig.eyeHeightM : stance === 'crouching' ? playerConfig.crouchEyeHeightM : playerConfig.slideEyeHeightM;
+}
 
 // The player: position, walking, stance, climbing, looking and the camera. Movement runs on the fixed update;
 // looking runs every screen frame so turning feels immediate.
@@ -55,6 +58,21 @@ export class Player {
     return this.stance.sprinting && !this.mantle.active;
   }
 
+  /** Real horizontal speed after walls, for the debug readouts. */
+  get speedMps(): number {
+    return Math.hypot(this.velocity.x, this.velocity.z);
+  }
+
+  /** Height of the capsule in the current stance, for the debug capsule. */
+  get capsuleHeightM(): number {
+    return capsuleHeightFor(this.stance.stance);
+  }
+
+  /** Height of the eyes above the feet right now (it eases when the stance changes), for the debug capsule. */
+  get eyeHeightNowM(): number {
+    return this.eyeHeightM;
+  }
+
   /** One fixed-rate update: read the keys, pick a stance, move, fall, climb, get pushed out of walls. */
   fixedUpdate(dtSec: number, input: Input): void {
     this.previousPosition.copy(this.position);
@@ -75,7 +93,7 @@ export class Player {
 
     // The camera eases toward the stance's eye height instead of snapping, so crouching looks smooth.
     const ease = 1 - Math.exp(-dtSec / playerConfig.eyeSmoothingTimeSec);
-    this.eyeHeightM += (stanceSizes[this.stance.stance].eyeHeightM - this.eyeHeightM) * ease;
+    this.eyeHeightM += (eyeHeightFor(this.stance.stance) - this.eyeHeightM) * ease;
 
     this.updateLean(dtSec, input);
   }
@@ -128,8 +146,13 @@ export class Player {
     // Gravity. The floor is height 0; props push the capsule up (standing on them) or down (a ceiling).
     this.velocityYMps = Math.max(this.velocityYMps - playerConfig.gravityMps2 * dtSec, -playerConfig.maxFallSpeedMps);
     this.position.y += this.velocityYMps * dtSec;
-    const size = stanceSizes[this.stance.stance];
-    const contact = this.collision.pushOut(this.position, playerConfig.capsuleRadiusM, size.heightM, playerConfig.collisionIterations, true);
+    const contact = this.collision.pushOut(
+      this.position,
+      playerConfig.capsuleRadiusM,
+      capsuleHeightFor(this.stance.stance),
+      playerConfig.collisionIterations,
+      true,
+    );
     if (this.position.y < 0) {
       this.position.y = 0;
       this.grounded = true;
@@ -149,7 +172,7 @@ export class Player {
 
   /** Space: look for a ledge in front and start climbing or vaulting if there is one. */
   private tryStartMantle(): void {
-    const plan = this.ledges.probe(this.position, this.yawRad, stanceSizes[this.stance.stance].heightM);
+    const plan = this.ledges.probe(this.position, this.yawRad, capsuleHeightFor(this.stance.stance));
     if (!plan) return;
     this.mantle.start(this.position, plan, this.velocity);
     this.velocity.x = 0;

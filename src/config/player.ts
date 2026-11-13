@@ -1,5 +1,5 @@
 // Player tuning. All starting values, to be readjusted by feel. Units are in the names.
-export const playerConfig = {
+export const playerConfigDefaults = {
   /** Half the width of the player's capsule. */
   capsuleRadiusM: 0.3,
 
@@ -99,3 +99,7 @@ export const playerConfig = {
   startZM: 4.5,
   startYawRad: 0,
 } as const;
+
+/** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */
+export type PlayerConfig = { -readonly [K in keyof typeof playerConfigDefaults]: number };
+export const playerConfig: PlayerConfig = { ...playerConfigDefaults };
