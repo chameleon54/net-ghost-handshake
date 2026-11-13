@@ -69,7 +69,7 @@ export class Shooter {
     let onSurface = false;
     if (target) {
       const killed = target.hit(this.zone, config.bodyDamagePerHit);
-      events.emit('target:hit', { zone: this.zone, killed });
+      events.emit('target:hit', { zone: this.zone, killed, weapon });
     } else if (hit) {
       onSurface = true;
       this.end.copy(this.hit.point);

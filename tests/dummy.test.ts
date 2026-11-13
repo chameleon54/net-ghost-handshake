@@ -116,21 +116,21 @@ describe('Shooter with dummies', () => {
     const dummy = new Dummy(0, -5);
     const muzzle = new Vector3();
     new Shooter(events, collision, camera, { rifle: muzzle, pistol: muzzle }, [dummy], { rifle: { ...rifleConfigDefaults, ...noSpread }, pistol: { ...pistolConfigDefaults, ...noSpread } });
-    const hits: { zone: string; killed: boolean }[] = [];
+    const hits: { zone: string; killed: boolean; weapon: string }[] = [];
     events.on('target:hit', (hit) => hits.push(hit));
     return { events, dummy, hits };
   }
 
   it('a bullet that hits the dummy damages it', () => {
     const { events, dummy, hits } = setup(false);
-    events.emit('weapon:fired', { weapon: 'rifle' });
-    expect(hits).toEqual([{ zone: 'body', killed: false }]);
+    events.emit('weapon:fired', { weapon: 'rifle', heat: 0 });
+    expect(hits).toEqual([{ zone: 'body', killed: false, weapon: 'rifle' }]);
     expect(dummy.health.current).toBe(d.healthPoints - rifleConfigDefaults.bodyDamagePerHit);
   });
 
   it('a wall in front of the dummy takes the bullet instead', () => {
     const { events, dummy, hits } = setup(true);
-    events.emit('weapon:fired', { weapon: 'rifle' });
+    events.emit('weapon:fired', { weapon: 'rifle', heat: 0 });
     expect(hits).toEqual([]);
     expect(dummy.health.current).toBe(d.healthPoints);
   });

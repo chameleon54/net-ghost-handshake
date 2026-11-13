@@ -21,6 +21,9 @@ import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
 import { inputConfig } from './config/input';
 import { BarrelSmoke } from './fx/barrelSmoke';
+import { AudioSystem } from './audio/audioSystem';
+import { WeaponSounds } from './audio/weaponSounds';
+import { viewmodelConfig } from './config/viewmodel';
 import { Casings } from './fx/casings';
 import { Aim } from './weapons/aim';
 import { HoldTap } from './weapons/holdTap';
@@ -76,6 +79,9 @@ const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muz
 new KnifeStrike(weaponEvents, level.collision, camera, dummies);
 const tracers = new Tracers(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
+// Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
+const audio = new AudioSystem(scene, camera);
+const weaponSounds = new WeaponSounds(weaponEvents, audio);
 const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmodel.ejectionPorts);
 // R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
 const reloadKey = new HoldTap();
@@ -103,14 +109,21 @@ const pointerLock = createPointerLock(
 );
 onFocusLost(() => game.handleFocusLost());
 
-const overlay = createOverlay(() => void pointerLock.request());
+// The click that starts or resumes the game is the one the browser lets sound start from.
+const overlay = createOverlay(() => {
+  audio.unlock();
+  void pointerLock.request();
+});
 overlay.show(uiText.clickToPlay);
 game.events.on('game:playing', () => {
   overlay.hide();
   reloadKey.reset(); // a key that was down when the game paused must not count as a tap on resume
   inspectKey.reset();
 });
-game.events.on('game:paused', () => overlay.show(uiText.paused));
+game.events.on('game:paused', () => {
+  overlay.show(uiText.paused);
+  audio.suspend(); // sound freezes under the pause menu
+});
 game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused));
 
 // Debug tools (tuning panel, free camera) exist only on the dev server. Vite removes this block from the production
@@ -118,8 +131,15 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio });
   });
+}
+
+// An inspect only starts when nothing else is going on (the animator drops it otherwise), so its sounds match.
+function canInspect(): boolean {
+  const gun = weapons.gun;
+  const busy = weapons.drawing || player.isSprinting || aim.eased > 0.05 || (gun !== null && (gun.reloading || gun.checking || gun.jammed));
+  return !busy;
 }
 
 const animatorInput: AnimatorInput = { weapon: 'rifle', drawProgress: 1, reloadProgress: null, sprinting: false };
@@ -155,10 +175,15 @@ const loop = new Loop(
       checkRequested: reloadKey.holdStarted,
       canFire: !player.isSprinting && !player.mantle.active,
     });
-    if (inspectKey.holdStarted) viewmodel.inspect();
+    if (inspectKey.holdStarted && canInspect()) {
+      viewmodel.inspect();
+      const length = weapons.current === 'knife' ? viewmodelConfig.inspectKnifeSec : viewmodelConfig.inspectGunSec;
+      weaponEvents.emit('weapon:inspect-started', { weapon: weapons.current, durationSec: length });
+    }
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
     casings.update(stepSec);
+    weaponSounds.update(stepSec);
     barrelSmoke.update(stepSec, weapons.rifleHeat, weapons.current === 'rifle');
     dummies.forEach((dummy, i) => {
       dummy.update(stepSec);

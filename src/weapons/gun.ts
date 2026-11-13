@@ -97,6 +97,7 @@ export class Gun {
 
   /** Switching away (or any other interruption) stops a reload or a check, and forgets taps already made on a jam. */
   interrupt(): void {
+    if (this.reloading || this.checking) this.events.emit('weapon:interrupted', { weapon: this.id });
     this.reloadLeftSec = 0;
     this.checkLeftSec = 0;
     this.clearTapsDone = 0; // the jam itself stays: it must be cleared, from the first tap again
@@ -151,7 +152,7 @@ export class Gun {
       this.reloadRackSec = this.magazines.chambered ? 0 : this.config.emptyReloadRackSec;
       this.reloadTotalSec = this.config.reloadTimeSec + this.reloadRackSec;
       this.reloadLeftSec = this.reloadTotalSec;
-      this.events.emit('weapon:reload-started', undefined);
+      this.events.emit('weapon:reload-started', { weapon: this.id, durationSec: this.reloadTotalSec, rackShare: this.reloadRackShare });
       return;
     }
 
@@ -159,6 +160,7 @@ export class Gun {
       this.checkTotalSec = this.config.checkMagazineSec;
       this.checkLeftSec = this.checkTotalSec;
       this.checkReported = false;
+      this.events.emit('weapon:check-started', { weapon: this.id, durationSec: this.checkTotalSec });
       return;
     }
 
@@ -188,7 +190,7 @@ export class Gun {
     this.jamRisk = addJamRisk(this.config, this.jamRisk, this.heat);
     this.sinceShotSec = 0;
     this.cooldownSec += secPerMinute / this.config.fireRateRpm;
-    this.events.emit('weapon:fired', { weapon: this.id });
+    this.events.emit('weapon:fired', { weapon: this.id, heat: this.heat });
   }
 
   /** While jammed: the trigger only clicks; each separate tap of R is one rack, and the last one clears the jam. */

@@ -11,9 +11,12 @@ import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
 import type { WeaponSet } from '../weapons/weaponSet';
+import type { AudioSystem } from '../audio/audioSystem';
+import { soundNames } from '../audio/recipes';
+import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { casingFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { audioFolder, casingFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -31,6 +34,7 @@ interface Parts {
   player: Player;
   viewmodel: Viewmodel;
   weapons: WeaponSet;
+  audio: AudioSystem;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -41,7 +45,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -95,6 +99,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons }: 
       resetToDefaults(knifeConfig, knifeConfigDefaults);
       resetToDefaults(viewmodelConfig, viewmodelConfigDefaults);
       resetToDefaults(casingConfig, casingConfigDefaults);
+      resetToDefaults(audioConfig, audioConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -109,6 +114,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons }: 
           'src/config/knife.ts': changedValues(knifeConfig, knifeConfigDefaults),
           'src/config/viewmodel.ts': changedValues(viewmodelConfig, viewmodelConfigDefaults),
           'src/config/casing.ts': changedValues(casingConfig, casingConfigDefaults),
+          'src/config/audio.ts': changedValues(audioConfig, audioConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -173,6 +179,14 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons }: 
   const dummyPanel = gui.addFolder(dummyFolder.title);
   dummyPanel.close();
   for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
+
+  // Sound: volumes, and a button for every sound so each can be heard on its own (works while paused).
+  const audioPanel = gui.addFolder('Audio');
+  audioPanel.close();
+  for (const s of audioFolder.sliders) audioPanel.add(audioConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const soundButtons = audioPanel.addFolder('Play a sound');
+  soundButtons.close();
+  for (const name of soundNames) soundButtons.add({ play: () => audio.preview(name) }, 'play').name(name);
 
   // Testing aids that change the rules on purpose. Dev server only.
   const cheats = { infiniteAmmo: false };

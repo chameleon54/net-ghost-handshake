@@ -121,8 +121,8 @@ describe('Casings', () => {
 
   it('every shot throws one out', () => {
     const { casings, events } = setup();
-    events.emit('weapon:fired', { weapon: 'rifle' });
-    events.emit('weapon:fired', { weapon: 'pistol' });
+    events.emit('weapon:fired', { weapon: 'rifle', heat: 0 });
+    events.emit('weapon:fired', { weapon: 'pistol', heat: 0 });
     expect(casings.pool.filter((c) => c.active)).toHaveLength(2);
   });
 

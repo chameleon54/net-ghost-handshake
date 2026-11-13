@@ -31,6 +31,7 @@ export class Casings {
   private readonly hit = createRayHit();
   private readonly start = new THREE.Vector3();
   private readonly launch = new THREE.Vector3();
+  private readonly events: EventBus<WeaponEvents>;
 
   constructor(
     scene: THREE.Scene,
@@ -40,6 +41,7 @@ export class Casings {
     /** Each gun's ejection port in camera space, kept up to date by the viewmodel. */
     private readonly ports: Record<GunId, THREE.Vector3>,
   ) {
+    this.events = events;
     const geometry = new THREE.CylinderGeometry(casingRadiusM, casingRadiusM, casingLengthM, 8).rotateZ(Math.PI / 2);
     const material = new THREE.MeshStandardMaterial({ color: brassColour, metalness: 0.6, roughness: 0.4 });
     for (let i = 0; i < poolSize; i++) {
@@ -119,6 +121,7 @@ export class Casings {
     mesh.position.copy(point).addScaledVector(normal, skinM);
     const intoSurface = velocity.dot(normal);
     if (intoSurface < 0) {
+      this.events.emit('casing:bounced', { position: mesh.position, speedMps: -intoSurface });
       velocity.addScaledVector(normal, -(1 + casingConfig.restitution) * intoSurface);
       const along = velocity.dot(normal);
       this.step.copy(velocity).addScaledVector(normal, -along); // the sideways part

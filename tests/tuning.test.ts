@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
+import { audioConfigDefaults } from '../src/config/audio';
 import { casingConfigDefaults } from '../src/config/casing';
 import { dummyConfigDefaults } from '../src/config/dummy';
 import { knifeConfigDefaults } from '../src/config/knife';
@@ -11,6 +12,7 @@ import {
   changedValues,
   inputFolder,
   playerFolders,
+  audioFolder,
   casingFolder,
   dummyFolder,
   dummyKeysNotOnPanel,
@@ -77,6 +79,18 @@ describe('the weapon animation tuning panel', () => {
     }
     const onPanel = new Set<string>([...sliders.map((s) => s.key), ...viewmodelKeysNotOnPanel]);
     for (const key of Object.keys(viewmodelConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the audio tuning panel', () => {
+  it('lists every audio value with a sensible range around its default', () => {
+    for (const s of audioFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(audioConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(audioConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(audioFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(audioConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

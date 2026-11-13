@@ -1,5 +1,6 @@
 import type { InputConfig } from '../config/input';
 import type { PlayerConfig } from '../config/player';
+import type { AudioConfig } from '../config/audio';
 import type { CasingConfig } from '../config/casing';
 import type { DummyConfig } from '../config/dummy';
 import type { KnifeConfig } from '../config/knife';
@@ -31,6 +32,7 @@ type PistolKey = keyof PistolConfig;
 type KnifeKey = keyof KnifeConfig;
 type ViewmodelKey = keyof ViewmodelConfig;
 type CasingKey = keyof CasingConfig;
+type AudioKey = keyof AudioConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -317,6 +319,20 @@ export const viewmodelFolders: Folder<ViewmodelKey>[] = [
 
 /** Viewmodel config values that are deliberately not in those folders. */
 export const viewmodelKeysNotOnPanel: readonly ViewmodelKey[] = ['slowMotionScale']; // next to the preview buttons
+
+export const audioFolder: Folder<AudioKey> = {
+  title: 'Audio',
+  sliders: [
+    { key: 'masterVolume', label: 'Master volume', min: 0, max: 1.5, step: 0.05 },
+    { key: 'weaponVolume', label: 'Gunshots and stabs', min: 0, max: 1.5, step: 0.05 },
+    { key: 'handlingVolume', label: 'Handling (clicks, racks, magazines)', min: 0, max: 1.5, step: 0.05 },
+    { key: 'impactVolume', label: 'Impacts, hit ticks, casings', min: 0, max: 1.5, step: 0.05 },
+    { key: 'pistolLoudness', label: 'Pistol loudness (share of rifle)', min: 0, max: 1, step: 0.05 },
+    { key: 'rattleStartHeat', label: 'Hot-barrel rattle from heat', min: 0, max: 100, step: 1 },
+    { key: 'pitchVariation', label: 'Pitch variation (share)', min: 0, max: 0.2, step: 0.005 },
+    { key: 'casingClinkMinGapSec', label: 'Casing clinks at most every (s)', min: 0, max: 0.5, step: 0.01 },
+  ],
+};
 
 export const casingFolder: Folder<CasingKey> = {
   title: 'Casings',

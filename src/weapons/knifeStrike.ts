@@ -48,6 +48,6 @@ export class KnifeStrike {
     const killed = target.isBehind(this.origin.x, this.origin.z)
       ? target.kill()
       : target.hit('body', knifeConfig.frontDamagePerHit); // the knife has no headshot
-    events.emit('target:hit', { zone: 'body', killed });
+    events.emit('target:hit', { zone: 'body', killed, weapon: 'knife' });
   }
 }

@@ -160,7 +160,7 @@ describe('Shooter spread', () => {
       const direction = shot.end.clone().sub(new Vector3(0, 1, 0)).normalize();
       widest = Math.max(widest, Math.acos(Math.min(direction.dot(new Vector3(0, 0, -1)), 1)));
     });
-    for (let i = 0; i < 500; i++) events.emit('weapon:fired', { weapon: 'rifle' });
+    for (let i = 0; i < 500; i++) events.emit('weapon:fired', { weapon: 'rifle', heat: 0 });
     return widest;
   };
 

@@ -17,7 +17,7 @@ function setup(dummy: Dummy, extraBoxes: RoomBox[] = []) {
   camera.position.set(0, 1.0, 0);
   const events = new EventBus<WeaponEvents>();
   new KnifeStrike(events, collision, camera, [dummy]);
-  const hits: { zone: string; killed: boolean }[] = [];
+  const hits: { zone: string; killed: boolean; weapon: string }[] = [];
   events.on('target:hit', (hit) => hits.push(hit));
   return { swing: () => events.emit('weapon:swing', undefined), hits };
 }
@@ -27,7 +27,7 @@ describe('KnifeStrike', () => {
     const dummy = new Dummy(0, -1, Math.PI); // 1 m ahead, facing the player
     const { swing, hits } = setup(dummy);
     swing();
-    expect(hits).toEqual([{ zone: 'body', killed: false }]);
+    expect(hits).toEqual([{ zone: 'body', killed: false, weapon: 'knife' }]);
     expect(dummy.health.current).toBe(100 - knifeConfigDefaults.frontDamagePerHit);
   });
 
@@ -35,7 +35,7 @@ describe('KnifeStrike', () => {
     const dummy = new Dummy(0, -1, 0); // facing away from the player
     const { swing, hits } = setup(dummy);
     swing();
-    expect(hits).toEqual([{ zone: 'body', killed: true }]);
+    expect(hits).toEqual([{ zone: 'body', killed: true, weapon: 'knife' }]);
     expect(dummy.state).toBe('falling');
   });
 
