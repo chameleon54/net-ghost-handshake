@@ -7,9 +7,17 @@ export interface RoomBox {
   /** Centre of the box on the floor. */
   xM: number;
   zM: number;
+  /** Whether Space can climb or vault it. Leave out for the default: props yes, walls no (so nobody climbs out of the room). */
+  climbable?: boolean;
+  /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
+  yM?: number;
   widthM: number; // size along x
   depthM: number; // size along z
   heightM: number;
+}
+
+export function isClimbable(box: RoomBox): boolean {
+  return box.climbable ?? box.kind !== 'wall';
 }
 
 export const greyboxRoomSize = { widthM: 16, depthM: 12 } as const;
@@ -35,4 +43,9 @@ export const greyboxRoom: readonly RoomBox[] = [
   // marker just past the partition's end is hidden until you lean right. tests/lean.test.ts checks this.
   { kind: 'prop', xM: -6.75, zM: 1.5, widthM: 2.5, depthM: 0.3, heightM: 2.4 },
   { kind: 'marker', xM: -4.9, zM: -0.5, widthM: 0.5, depthM: 0.5, heightM: 1.0 },
+
+  // For climbing: a 1.9 m platform (the highest ledge that can be climbed, limit 2.0 m)
+  // and a low beam over a corridor, 1.3 m up: you fit under it crouched (1.2 m) but not standing (1.8 m).
+  { kind: 'prop', xM: -2, zM: -4, widthM: 2, depthM: 2, heightM: 1.9 }, // leaves a 1 m walkway behind it; a gap narrower than the player would trap them
+  { kind: 'prop', xM: 6.2, zM: -3.5, yM: 1.3, widthM: 3, depthM: 2, heightM: 0.8 },
 ];

@@ -1,7 +1,7 @@
 import { playerConfig } from '../config/player';
 
 // Standing, crouching and sliding, as a small state machine with no browser or three.js code.
-// shortcut: standing up is never blocked by a low ceiling because the room has none; add the check with vertical collision (1.5).
+// Standing up is refused while a ceiling is in the way (canStand false), so crouching under a low beam keeps you crouched.
 
 export type Stance = 'standing' | 'crouching' | 'sliding';
 
@@ -23,6 +23,8 @@ export interface StanceInput {
   sprintHeld: boolean;
   /** W minus S: above 0 means moving forward. */
   forwardInput: number;
+  /** There is room to stand at full height here. */
+  canStand: boolean;
 }
 
 export class StanceMachine {
@@ -53,7 +55,7 @@ export class StanceMachine {
       const blocked = measuredSpeedMps < this.settings.slideBlockedSpeedMps;
       if (finished || blocked) {
         // Releasing C does not cancel a slide, but C still decides crouch or stand once it ends.
-        this.stance = input.crouchHeld ? 'crouching' : 'standing';
+        this.stance = input.crouchHeld || !input.canStand ? 'crouching' : 'standing';
         this.cooldownLeftSec = this.settings.slideCooldownSec;
       }
     } else {
@@ -71,7 +73,7 @@ export class StanceMachine {
         this.slideElapsedSec = 0;
         this.slideStarted = true;
       } else {
-        this.stance = input.crouchHeld ? 'crouching' : 'standing';
+        this.stance = input.crouchHeld || !input.canStand ? 'crouching' : 'standing';
       }
     }
 

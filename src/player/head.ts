@@ -17,26 +17,26 @@ export class HeadPlacer {
   constructor(private readonly collision: LevelCollision) {}
 
   /**
-   * Writes the camera position into `out` and returns the lean actually used (after the wall limit),
+   * `eyeYM` is the camera's height in the world. Writes the camera position into `out` and returns the lean actually used (after the wall limit),
    * which the caller uses for the tilt.
    */
-  place(bodyXM: number, bodyZM: number, eyeHeightM: number, yawRad: number, leanOffsetM: number, out: Vector3): number {
+  place(bodyXM: number, bodyZM: number, eyeYM: number, yawRad: number, leanOffsetM: number, out: Vector3): number {
     const { origin, direction, sphereFeet } = this;
     const clearanceM = playerConfig.cameraClearanceM;
 
     const side = Math.sign(leanOffsetM);
     let leanM = leanOffsetM;
     if (side !== 0) {
-      origin.set(bodyXM, eyeHeightM, bodyZM);
+      origin.set(bodyXM, eyeYM, bodyZM);
       direction.set(Math.cos(yawRad) * side, 0, -Math.sin(yawRad) * side);
       const wallDistanceM = this.collision.rayDistance(origin, direction, Math.abs(leanOffsetM) + clearanceM);
       leanM = limitLean(leanOffsetM, side, wallDistanceM, clearanceM);
     }
 
-    out.set(bodyXM + Math.cos(yawRad) * leanM, eyeHeightM, bodyZM - Math.sin(yawRad) * leanM);
+    out.set(bodyXM + Math.cos(yawRad) * leanM, eyeYM, bodyZM - Math.sin(yawRad) * leanM);
 
     // Final safety: treat the camera as a sphere. pushOut works on a capsule standing on `feet`, so make one as tall as it is wide.
-    sphereFeet.set(out.x, eyeHeightM - clearanceM, out.z);
+    sphereFeet.set(out.x, eyeYM - clearanceM, out.z);
     this.collision.pushOut(sphereFeet, clearanceM, clearanceM * 2, playerConfig.collisionIterations);
     out.x = sphereFeet.x;
     out.z = sphereFeet.z;

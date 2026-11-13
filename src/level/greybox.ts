@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { greyboxRoom, greyboxRoomSize, type RoomBox } from '../data/greyboxRoom';
+import { greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
 import { LevelCollision } from './collision';
 
 export interface GreyboxLevel {
@@ -14,7 +14,7 @@ const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f
 
 function boxGeometry(box: RoomBox): THREE.BufferGeometry {
   const geometry = new THREE.BoxGeometry(box.widthM, box.heightM, box.depthM);
-  geometry.translate(box.xM, box.heightM / 2, box.zM);
+  geometry.translate(box.xM, (box.yM ?? 0) + box.heightM / 2, box.zM);
   return geometry;
 }
 
@@ -37,7 +37,10 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   grid.position.y = 0.01;
   group.add(grid);
 
+  // Collision gets everything; a second copy of just the climbable boxes tells the ledge check what Space may climb.
   const merged = mergeGeometries(geometries, false);
   if (!merged) throw new Error('Could not merge the room geometry for collision');
-  return { group, collision: new LevelCollision(merged) };
+  const climbableBoxes = boxes.filter(isClimbable);
+  const climbable = climbableBoxes.length > 0 ? mergeGeometries(climbableBoxes.map(boxGeometry), false) : null;
+  return { group, collision: new LevelCollision(merged, climbable) };
 }

@@ -55,6 +55,42 @@ export const playerConfig = {
    */
   cameraClearanceM: 0.15,
 
+  // Falling
+  /** Gravity. A bit stronger than real life (9.8) so drops feel snappy. */
+  gravityMps2: 20,
+  /** Fastest the player can fall. */
+  maxFallSpeedMps: 30,
+  /** How much a capsule may overlap a surface and still count as clear (for standing up under things). */
+  clearanceToleranceM: 0.02,
+
+  // Climbing and vaulting (Space). Obstacle heights are measured from the player's feet.
+  /** How far past the capsule's surface an obstacle can be and still be reachable. */
+  mantleReachM: 0.45,
+  /** Anything lower than this cannot be climbed (the capsule rolls over such small steps by itself). */
+  mantleMinHeightM: 0.3,
+  /** Up to this height an obstacle can be vaulted over. */
+  vaultMaxHeightM: 1.1,
+  /** Above this height nothing can be climbed. */
+  climbMaxHeightM: 2.0,
+  /** A vault is only possible over obstacles at most this deep. */
+  vaultMaxDepthM: 1.0,
+  /** Standing on top needs at least this much flat top, front to back. */
+  climbMinTopDepthM: 0.6,
+  /** How far apart the downward rays are when measuring an obstacle's depth. */
+  mantleProbeStepM: 0.1,
+  /** How far past the far edge the capsule's surface lands after a vault. */
+  vaultLandingMarginM: 0.15,
+  /** How far above the top the body rises while vaulting. */
+  vaultApexClearanceM: 0.15,
+  /** Vault: rise to the top, then over. About 0.4 s in total. */
+  vaultRiseSec: 0.18,
+  vaultOverSec: 0.22,
+  /** Climbing onto a low obstacle (Space held): rise, then onto the top. About 0.4 s. */
+  climbLowTopSec: 0.2,
+  /** Climbing a tall ledge: a slow rise, then onto the top. About 0.7 s. */
+  climbRiseSec: 0.45,
+  climbTopSec: 0.25,
+
   // Collision and spawn
   /** How many times per update the player is pushed out of walls. More resolves tight corners. */
   collisionIterations: 5,

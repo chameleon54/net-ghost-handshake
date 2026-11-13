@@ -11,7 +11,7 @@ const settings: StanceSettings = {
 };
 const dt = 0.25; // exact in binary, so the timing below has no rounding noise
 
-const idle: StanceInput = { crouchHeld: false, crouchPressed: false, sprintHeld: false, forwardInput: 0 };
+const idle: StanceInput = { crouchHeld: false, crouchPressed: false, sprintHeld: false, forwardInput: 0, canStand: true };
 const sprinting: StanceInput = { ...idle, sprintHeld: true, forwardInput: 1 };
 const slidePress: StanceInput = { ...sprinting, crouchHeld: true, crouchPressed: true };
 
@@ -111,5 +111,22 @@ describe('StanceMachine', () => {
     m.update(idle, dt, 6); // 0
     m.update(slidePress, dt, 6);
     expect(m.slideStarted).toBe(true);
+  });
+
+  it('stays crouched while there is no room to stand, and stands once there is', () => {
+    const m = new StanceMachine(settings);
+    m.update({ ...idle, crouchHeld: true, crouchPressed: true }, dt, 0);
+    m.update({ ...idle, canStand: false }, dt, 0); // C released under a low beam
+    expect(m.stance).toBe('crouching');
+    m.update({ ...idle, canStand: true }, dt, 0);
+    expect(m.stance).toBe('standing');
+  });
+
+  it('ends a slide crouched when there is no room to stand', () => {
+    const m = new StanceMachine(settings);
+    m.update(slidePress, dt, 6);
+    m.update({ ...idle, canStand: false }, dt, 6);
+    m.update({ ...idle, canStand: false }, dt, 6); // slide over
+    expect(m.stance).toBe('crouching');
   });
 });
