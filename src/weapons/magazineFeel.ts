@@ -19,6 +19,13 @@ export interface MagazineCheck {
 const mostlyFullAbove = 0.6;
 const aboutHalfAbove = 0.3;
 
+/** How full a picture of a magazine is drawn for each rough word: a few steps, so it stays a rough look, never a count. */
+const fillShares: Record<MagazineFeel, number> = { empty: 0, nearlyEmpty: 0.25, aboutHalf: 0.5, mostlyFull: 0.75, full: 1 };
+
+export function fillShare(feel: MagazineFeel): number {
+  return fillShares[feel];
+}
+
 /** What the player judges from looking at a magazine holding `rounds` of `capacity`: a rough word, never a count. */
 export function readMagazine(rounds: number, capacity: number): MagazineReading {
   const share = Math.min(Math.max(rounds / capacity, 0), 1);

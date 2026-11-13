@@ -36,6 +36,8 @@ export const soundNames = [
   'ear-ringing',
   'heal-use',
   'heal-done',
+  'heartbeat',
+  'breath-heavy',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -402,6 +404,29 @@ export const recipes: Record<SoundName, Recipe> = {
       addTone(s, sr, { duration: 0.25, freq: 660, decay: 0.08, gain: 0.5, attack: 0.005 });
       addTone(s, sr, { start: 0.12, duration: 0.35, freq: 880, decay: 0.12, gain: 0.5, attack: 0.005 });
       return finish(s, sr, { peak: 0.45 });
+    },
+  },
+  // A heartbeat: a low "lub", then a softer "dub" a moment later. Mostly felt, not heard.
+  'heartbeat': {
+    group: 'handling',
+    variants: 1,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.55);
+      addTone(s, sr, { duration: 0.2, freq: 62, freqEnd: 40, decay: 0.07, gain: 1.0, attack: 0.008 });
+      addNoise(s, sr, { duration: 0.12, decay: 0.04, gain: 0.25, lowpass: 220, attack: 0.008, rng });
+      addTone(s, sr, { start: 0.2, duration: 0.2, freq: 55, freqEnd: 38, decay: 0.07, gain: 0.7, attack: 0.008 });
+      return finish(s, sr, { peak: 0.7 });
+    },
+  },
+  // One tired breath: air in, then out, as soft filtered noise.
+  'breath-heavy': {
+    group: 'handling',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 1.4);
+      addNoise(s, sr, { duration: 0.6, decay: 0.5, gain: 0.7, highpass: 250, lowpass: between(rng, 1800, 2400), attack: 0.22, rng });
+      addNoise(s, sr, { start: 0.55, duration: 0.8, decay: 0.25, gain: 0.55, highpass: 200, lowpass: between(rng, 1300, 1800), attack: 0.12, rng });
+      return finish(s, sr, { peak: 0.5 });
     },
   },
 };

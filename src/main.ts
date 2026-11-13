@@ -16,7 +16,10 @@ import { healthConfig } from './config/health';
 import { greyboxHazards } from './data/greyboxRoom';
 import { standsOnHazard } from './level/hazards';
 import { createOverlay } from './ui/overlay';
-import { createWeaponReadout } from './ui/weaponReadout';
+import { createHud } from './ui/hud';
+import { HealthScreen } from './ui/healthScreen';
+import { HealthFeelState } from './player/healthFeel';
+import { HealthSounds } from './audio/healthSounds';
 import { EventBus } from './core/events';
 import { greyboxDummies } from './data/greyboxDummies';
 import { Dummy } from './enemies/dummy';
@@ -114,7 +117,12 @@ const playerBlastTarget = {
 const grenades = new GrenadeSystem(scene, weaponEvents, level.collision, camera, blastTargets, playerBlastTarget);
 const explosions = new Explosions(scene, weaponEvents, level.collision);
 const cameraShake = new CameraShake(weaponEvents, () => camera.position);
-const weaponReadout = createWeaponReadout(weaponEvents); // made before the overlay so the overlay covers it
+// The HUD, and health shown through the screen. Made before the overlays so they cover them.
+const hud = createHud(weaponEvents, viewmodel);
+const healthFeel = new HealthFeelState();
+const healthScreen = new HealthScreen(renderer.domElement);
+const healthSounds = new HealthSounds(audio);
+weaponEvents.on('player:damaged', ({ amount }) => healthFeel.hit(amount));
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -170,6 +178,8 @@ function restart(): void {
   explosions.clear();
   barrelSmoke.clear();
   cameraShake.reset();
+  healthFeel.reset();
+  healthScreen.update(healthFeel);
   shooter.recoil.reset();
   reloadKey.reset();
   inspectKey.reset();
@@ -216,6 +226,9 @@ const loop = new Loop(
       playerHealth.damage(healthConfig.hazardDamagePerSec * stepSec, 'hazard');
     }
     playerHealth.update(stepSec);
+    healthFeel.update(stepSec, playerHealth.current);
+    healthSounds.update(healthFeel);
+    healthScreen.update(healthFeel);
     // Aiming is allowed with a gun out that is not being drawn, and not while sprinting, climbing or vaulting.
     // Reloading does not stop it (owner's choice).
     const gunInHand = weapons.gun;
@@ -274,7 +287,6 @@ const loop = new Loop(
       dummy.update(stepSec);
       dummyViews[i].update();
     });
-    weaponReadout.update(weapons, aim.eased, thrower.count, heals.count, heals.busy);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
@@ -315,6 +327,7 @@ const loop = new Loop(
     animatorInput.lookYawRad = lookYawRad;
     animatorInput.lookPitchRad = lookPitchRad;
     viewmodel.update(frameSec, animatorInput);
+    hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy });
     renderer.clear();
     renderer.render(scene, camera);
     renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls

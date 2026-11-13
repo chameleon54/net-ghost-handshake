@@ -23,6 +23,8 @@ export class Viewmodel {
   readonly ejectionPorts: Record<GunId, THREE.Vector3> = { rifle: new THREE.Vector3(), pistol: new THREE.Vector3() };
 
   private readonly models = buildModels();
+  private currentWeapon: ViewWeapon = 'rifle';
+  private readonly magazinePoint = new THREE.Vector3();
   private readonly animator = new ViewmodelAnimator();
 
   constructor(events: EventBus<WeaponEvents>) {
@@ -44,6 +46,21 @@ export class Viewmodel {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Where the magazine in the weapon in hand is on screen, as a point from -1 to 1 on each axis (y up), for the HUD's
+   * floating magazine picture. False when there is no magazine in view (the knife, a grenade, or while it is out).
+   */
+  magazineScreen(out: { x: number; y: number }): boolean {
+    const mag = this.models[this.currentWeapon].mag;
+    if (!mag || !mag.visible) return false;
+    this.scene.updateMatrixWorld();
+    this.camera.updateMatrixWorld();
+    mag.getWorldPosition(this.magazinePoint).project(this.camera);
+    out.x = this.magazinePoint.x;
+    out.y = this.magazinePoint.y;
+    return true;
+  }
+
   /** Hold F: inspect the weapon. Ignored if something else is going on. */
   inspect(): void {
     this.animator.inspect();
@@ -63,6 +80,7 @@ export class Viewmodel {
     for (const [id, model] of Object.entries(this.models) as [ViewWeapon, (typeof this.models)[ViewWeapon]][]) {
       model.root.visible = id === input.weapon;
     }
+    this.currentWeapon = input.weapon;
     const model = this.models[input.weapon];
     const { rest, aimed, base } = model;
 

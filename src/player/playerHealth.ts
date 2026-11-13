@@ -16,6 +16,8 @@ export class PlayerHealth {
   invulnerable = false;
   private health = new Health(healthConfig.maxHealth);
   private sinceDamageSec = Infinity;
+  /** Set by the dev panel's health slider so the value stays put until real damage, a heal or a restart. */
+  private regenHeld = false;
 
   constructor(private readonly events: EventBus<WeaponEvents>) {}
 
@@ -34,12 +36,13 @@ export class PlayerHealth {
 
   /** True while health is climbing back by itself. For the dev readout. */
   get regenerating(): boolean {
-    return !this.dead && this.sinceDamageSec >= healthConfig.regenDelaySec && this.current < healthConfig.regenCeiling;
+    return !this.dead && !this.regenHeld && this.sinceDamageSec >= healthConfig.regenDelaySec && this.current < healthConfig.regenCeiling;
   }
 
   damage(amount: number, source: DamageSource): void {
     if (this.dead || this.invulnerable || amount <= 0) return;
     this.sinceDamageSec = 0;
+    this.regenHeld = false;
     const killed = this.health.damage(amount);
     this.events.emit('player:damaged', { amount, health: this.health.current, source });
     if (killed) this.events.emit('player:died', { source });
@@ -49,6 +52,7 @@ export class PlayerHealth {
   heal(amount: number): void {
     if (this.dead) return;
     const before = this.health.current;
+    this.regenHeld = false;
     this.health.heal(amount);
     this.events.emit('player:healed', { amount: this.health.current - before, health: this.health.current });
   }
@@ -60,9 +64,17 @@ export class PlayerHealth {
     this.health.heal(healthConfig[regenRateKeys[difficultySetting.current]] * dtSec, healthConfig.regenCeiling);
   }
 
+  /** Dev panel testing aid: sets health to `value` directly, with no damage, events or death. */
+  debugSet(value: number): void {
+    if (this.dead) return;
+    this.health.current = Math.min(Math.max(value, 1), this.health.max);
+    this.regenHeld = true;
+  }
+
   /** Back to full health (restart, and the dev panel's Heal full). */
   reset(): void {
     this.health = new Health(healthConfig.maxHealth);
     this.sinceDamageSec = Infinity;
+    this.regenHeld = false;
   }
 }

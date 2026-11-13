@@ -13,6 +13,7 @@ import type { PlayerHealth } from '../player/playerHealth';
 import type { HealItems } from '../player/healItems';
 import { difficultySetting } from '../config/difficulty';
 import { healthConfig, healthConfigDefaults } from '../config/health';
+import { healthFx, healthFxDefaults } from '../config/healthFx';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
 import type { WeaponSet } from '../weapons/weaponSet';
 import type { AudioSystem } from '../audio/audioSystem';
@@ -23,7 +24,7 @@ import { soundNames } from '../audio/recipes';
 import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -113,6 +114,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(grenadeConfig, grenadeConfigDefaults);
       resetToDefaults(noiseConfig, noiseConfigDefaults);
       resetToDefaults(healthConfig, healthConfigDefaults);
+      resetToDefaults(healthFx, healthFxDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -131,6 +133,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/grenade.ts': changedValues(grenadeConfig, grenadeConfigDefaults),
           'src/config/noise.ts': changedValues(noiseConfig, noiseConfigDefaults),
           'src/config/health.ts': changedValues(healthConfig, healthConfigDefaults),
+          'src/config/healthFx.ts': changedValues(healthFx, healthFxDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -204,6 +207,14 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   healthPanel.close();
   for (const s of healthFolder.sliders) healthPanel.add(healthConfig, s.key, s.min, s.max, s.step).name(s.label);
 
+  const fxPanel = gui.addFolder('Health on screen and HUD');
+  fxPanel.close();
+  for (const folder of healthFxFolders) {
+    const f = fxPanel.addFolder(folder.title);
+    f.close();
+    for (const s of folder.sliders) f.add(healthFx, s.key, s.min, s.max, s.step).name(s.label);
+  }
+
   const noisePanel = gui.addFolder(noiseFolder.title);
   noisePanel.close();
   for (const s of noiseFolder.sliders) noisePanel.add(noiseConfig, s.key, s.min, s.max, s.step).name(s.label);
@@ -226,6 +237,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   cheatFolder.add({ heal: () => health.reset() }, 'heal').name('Heal full (not when dead)');
   cheatFolder.add({ give: () => heals.give(healthConfig.healCarryLimit) }, 'give').name('Give heals (to the limit)');
   cheatFolder.add(difficultySetting, 'current', ['easy', 'normal', 'hard']).name('Difficulty (regeneration speed)');
+  const healthSlider = { value: 100 };
+  cheatFolder.add(healthSlider, 'value', 1, 100, 1).name('Set health (to see the screen effects)').onChange((value: number) => health.debugSet(value));
   cheatFolder.add(health, 'invulnerable').name('Invulnerable');
   cheatFolder.add(cheats, 'infiniteAmmo').name('Infinite ammo').onChange((on: boolean) => weapons.setInfiniteAmmo(on));
 
@@ -255,7 +268,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
-    readouts.weapon = gun ? `heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
+    readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 
   return {

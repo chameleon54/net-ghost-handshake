@@ -5,6 +5,7 @@ import type { CasingConfig } from '../config/casing';
 import type { DummyConfig } from '../config/dummy';
 import type { GrenadeConfig } from '../config/grenade';
 import type { HealthConfig } from '../config/health';
+import type { HealthFxConfig } from '../config/healthFx';
 import type { KnifeConfig } from '../config/knife';
 import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
@@ -39,6 +40,7 @@ type AudioKey = keyof AudioConfig;
 type GrenadeKey = keyof GrenadeConfig;
 type NoiseKey = keyof NoiseConfig;
 type HealthKey = keyof HealthConfig;
+type HealthFxKey = keyof HealthFxConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -440,6 +442,52 @@ export const healthFolder: Folder<HealthKey> = {
     { key: 'fallSlowSpeedShare', label: 'Walking speed while slowed (share)', min: 0.1, max: 1, step: 0.05 },
   ],
 };
+
+export const healthFxFolders: Folder<HealthFxKey>[] = [
+  {
+    title: 'Vignette and colour drain',
+    sliders: [
+      { key: 'vignetteStartHealth', label: 'Vignette starts at health', min: 10, max: 100, step: 5 },
+      { key: 'vignetteFullHealth', label: 'Vignette strongest at health', min: 1, max: 50, step: 1 },
+      { key: 'vignetteStartStrength', label: 'Vignette at its start (0 to 1)', min: 0, max: 1, step: 0.05 },
+      { key: 'vignetteMaxStrength', label: 'Vignette strongest (0 to 1)', min: 0, max: 1, step: 0.05 },
+      { key: 'drainStartHealth', label: 'Colour drain starts at health', min: 5, max: 100, step: 5 },
+      { key: 'drainFullHealth', label: 'Colour drain strongest at health', min: 1, max: 50, step: 1 },
+      { key: 'drainMax', label: 'Most colour drained (0 to 1)', min: 0, max: 1, step: 0.05 },
+      { key: 'easeSec', label: 'Effects ease over (s)', min: 0.05, max: 3, step: 0.05 },
+      { key: 'pulseDepth', label: 'Swell on each heartbeat', min: 0, max: 1, step: 0.05 },
+      { key: 'pulseSec', label: 'Swell fades over (s)', min: 0.1, max: 1, step: 0.05 },
+      { key: 'flashPerDamage', label: 'Hit flash per damage point', min: 0, max: 0.05, step: 0.001 },
+      { key: 'flashMax', label: 'Hit flash at most', min: 0, max: 1, step: 0.05 },
+      { key: 'flashSec', label: 'Hit flash fades over (s)', min: 0.05, max: 2, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Heartbeat and breathing',
+    sliders: [
+      { key: 'heartbeatBelowHealth', label: 'Heartbeat below health', min: 5, max: 100, step: 5 },
+      { key: 'heartbeatFastHealth', label: 'Heartbeat fastest at health', min: 1, max: 50, step: 1 },
+      { key: 'heartbeatSlowPerMin', label: 'Slowest heartbeat (per min)', min: 30, max: 200, step: 5 },
+      { key: 'heartbeatFastPerMin', label: 'Fastest heartbeat (per min)', min: 30, max: 240, step: 5 },
+      { key: 'heartbeatVolume', label: 'Heartbeat volume', min: 0, max: 1.5, step: 0.05 },
+      { key: 'breathBelowHealth', label: 'Breathing below health', min: 5, max: 100, step: 5 },
+      { key: 'breathFastHealth', label: 'Breathing quickest at health', min: 1, max: 50, step: 1 },
+      { key: 'breathSlowEverySec', label: 'Slowest breath (s apart)', min: 1, max: 10, step: 0.5 },
+      { key: 'breathFastEverySec', label: 'Quickest breath (s apart)', min: 0.5, max: 5, step: 0.1 },
+      { key: 'breathQuietVolume', label: 'Quietest breath volume', min: 0, max: 1.5, step: 0.05 },
+      { key: 'breathLoudVolume', label: 'Loudest breath volume', min: 0, max: 1.5, step: 0.05 },
+    ],
+  },
+  {
+    title: 'HUD pop-ups',
+    sliders: [
+      { key: 'hudShowSec', label: 'A pop-up stays (s)', min: 0.5, max: 10, step: 0.5 },
+      { key: 'hudFadeSec', label: 'Then fades over (s)', min: 0.1, max: 2, step: 0.1 },
+      { key: 'magazinePictureShowSec', label: 'Magazine pictures stay (s)', min: 1, max: 10, step: 0.5 },
+      { key: 'gunMagazineOffsetPx', label: 'Gun magazine picture offset (px)', min: -200, max: 200, step: 4 },
+    ],
+  },
+];
 
 /** Health values read when the game starts or restarts, so not on the panel. */
 export const healthKeysNotOnPanel: readonly HealthKey[] = ['healCarryLimit', 'startingHeals'];
