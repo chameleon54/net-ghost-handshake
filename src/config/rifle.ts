@@ -15,6 +15,14 @@ export const rifleConfigDefaults = {
   /** Longest a bullet travels. Shared by every gun. */
   maxRangeM: 100,
 
+  // Aiming down sights. About 1.4 degrees of scatter from the hip, about 0.1 when aimed.
+  hipSpreadRad: 0.025,
+  aimedSpreadRad: 0.002,
+  aimTimeSec: 0.15,
+  aimFovDeg: 55,
+  aimMoveSpeedScale: 0.6,
+  aimSensitivityScale: 0.7,
+
   // Recoil: the camera kicks up and a little sideways per shot, and settles back when the shooting stops.
   recoilPitchPerShotRad: 0.012,
   /** The most the view can be kicked up during a long spray. */

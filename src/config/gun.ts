@@ -11,6 +11,16 @@ export interface GunConfig {
   startingMagazines: number;
   /** Damage of a body hit. A headshot always kills. */
   bodyDamagePerHit: number;
+  /** Bullet scatter (half-angle of a cone) when not aiming, and when fully aimed down sights. */
+  hipSpreadRad: number;
+  aimedSpreadRad: number;
+  /** Time to go from hip to fully aimed, and back. */
+  aimTimeSec: number;
+  /** Vertical field of view when fully aimed (zoomed in). */
+  aimFovDeg: number;
+  /** Walking speed and mouse turning, as a share of normal, when fully aimed. */
+  aimMoveSpeedScale: number;
+  aimSensitivityScale: number;
   recoilPitchPerShotRad: number;
   recoilMaxPitchRad: number;
   recoilYawPerShotRad: number;

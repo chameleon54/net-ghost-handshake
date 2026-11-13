@@ -24,5 +24,9 @@ export function attachInputListeners(input: Input): void {
   document.addEventListener('mousemove', (event) => input.addMouseMove(event.movementX, event.movementY));
   window.addEventListener('mousedown', (event) => input.buttonDown(event.button));
   window.addEventListener('mouseup', (event) => input.buttonUp(event.button));
+  // Right mouse aims, so its menu must not pop up while playing.
+  window.addEventListener('contextmenu', (event) => {
+    if (input.enabled) event.preventDefault();
+  });
   window.addEventListener('wheel', (event) => input.addWheel(wheelNotches(event)));
 }

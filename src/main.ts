@@ -18,6 +18,8 @@ import { DummyView } from './enemies/dummyView';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { pistolConfig } from './config/pistol';
+import { viewConfig } from './config/view';
+import { Aim } from './weapons/aim';
 import { rifleConfig } from './config/rifle';
 import type { WeaponEvents, WeaponId } from './weapons/events';
 import { Gun } from './weapons/gun';
@@ -28,6 +30,7 @@ import { Shooter } from './weapons/shooter';
 import { WeaponSet } from './weapons/weaponSet';
 
 const fireButton = 0; // left mouse
+const aimButton = 2; // right mouse
 const weaponKeys: Record<string, WeaponId> = { Digit1: 'rifle', Digit2: 'pistol', Digit3: 'knife' };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -37,7 +40,7 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x101418);
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 100);
+const camera = new THREE.PerspectiveCamera(viewConfig.baseFovDeg, window.innerWidth / window.innerHeight, 0.05, 100);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x333a40, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -58,12 +61,14 @@ const weapons = new WeaponSet(
   new Knife(weaponEvents),
 );
 const viewmodels = new PlaceholderViewmodels(camera);
+const aim = new Aim();
+const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
 weaponEvents.on('weapon:switched', ({ weapon }) => viewmodels.show(weapon));
 weaponEvents.on('weapon:swing', () => viewmodels.jab());
 const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
-const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodels.muzzles, dummies, { rifle: rifleConfig, pistol: pistolConfig });
+const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodels.muzzles, dummies, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, dummies);
 const tracers = new Tracers(scene, weaponEvents);
 new BulletMarks(scene, weaponEvents);
@@ -106,6 +111,15 @@ if (import.meta.env.DEV) {
 const loop = new Loop(
   (stepSec) => {
     if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
+    // Aiming is allowed with a gun out that is not being drawn, and not while sprinting, climbing or vaulting.
+    // Reloading does not stop it (owner's choice).
+    const gunInHand = weapons.gun;
+    const canAim = gunInHand !== null && !weapons.drawing && !player.isSprinting && !player.mantle.active;
+    aim.update(stepSec, canAim && input.isButtonDown(aimButton), gunInHand ? gunConfigs[gunInHand.id] : null);
+    player.speedScale = aim.moveSpeedScale;
+    shooter.aimBlend = aim.eased;
+    viewmodels.setAim(aim.eased);
+
     player.fixedUpdate(stepSec, input);
     // Every press is consumed each update, so a click that could not be used is not remembered for later.
     let select: WeaponId | null = null;
@@ -125,12 +139,17 @@ const loop = new Loop(
       dummy.update(stepSec);
       dummyViews[i].update();
     });
-    weaponReadout.update(weapons);
+    weaponReadout.update(weapons, aim.eased);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
     if (!debug?.beforeRender(camera)) {
-      player.look(input);
+      player.look(input, aim.sensitivityScale);
+      const fovDeg = aim.fovDeg(viewConfig.baseFovDeg);
+      if (camera.fov !== fovDeg) {
+        camera.fov = fovDeg;
+        camera.updateProjectionMatrix();
+      }
       player.applyToCamera(camera, alpha, shooter.recoil.pitchRad, shooter.recoil.yawRad);
     }
     renderer.render(scene, camera);

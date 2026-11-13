@@ -6,12 +6,15 @@ import type { Dummy, HitZone } from '../enemies/dummy';
 import { createDummyHit, rayHitDummy } from '../enemies/dummyHit';
 import { createRayHit, type LevelCollision } from '../level/collision';
 import type { GunId, WeaponEvents } from './events';
+import { applySpread } from './spread';
 import { Recoil } from './recoil';
 
 // Turns "a round left the gun" into "the bullet landed there". The bullet flies where the camera looks
 // (recoil included, since the camera already has it) and is instant-hit.
 export class Shooter {
   readonly recoil = new Recoil();
+  /** How far into aiming the player is (0 hip, 1 aimed); set every update. It tightens the spread. */
+  aimBlend = 0;
   private readonly hit = createRayHit();
   private readonly dummyHit = createDummyHit();
   private readonly ray = new THREE.Ray();
@@ -42,6 +45,9 @@ export class Shooter {
     this.camera.updateMatrixWorld();
     this.camera.getWorldPosition(this.origin);
     this.camera.getWorldDirection(this.direction);
+    const config = this.configs[weapon];
+    const spreadRad = config.hipSpreadRad + (config.aimedSpreadRad - config.hipSpreadRad) * this.aimBlend;
+    applySpread(this.direction, spreadRad, Math.random(), Math.random());
     this.muzzle.copy(this.muzzlesInCamera[weapon]);
     this.camera.localToWorld(this.muzzle);
 
@@ -62,7 +68,7 @@ export class Shooter {
 
     let onSurface = false;
     if (target) {
-      const killed = target.hit(this.zone, this.configs[weapon].bodyDamagePerHit);
+      const killed = target.hit(this.zone, config.bodyDamagePerHit);
       events.emit('target:hit', { zone: this.zone, killed });
     } else if (hit) {
       onSurface = true;

@@ -129,6 +129,17 @@ export const rifleFolders: Folder<RifleKey>[] = [
     ],
   },
   {
+    title: 'Rifle aiming',
+    sliders: [
+      { key: 'hipSpreadRad', label: 'Hip spread (rad)', min: 0, max: 0.1, step: 0.001 },
+      { key: 'aimedSpreadRad', label: 'Aimed spread (rad)', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'aimTimeSec', label: 'Time to aim (s)', min: 0.02, max: 0.6, step: 0.01 },
+      { key: 'aimFovDeg', label: 'Aimed field of view (deg)', min: 20, max: 90, step: 1 },
+      { key: 'aimMoveSpeedScale', label: 'Aimed walking speed (share)', min: 0.1, max: 1, step: 0.05 },
+      { key: 'aimSensitivityScale', label: 'Aimed turning (share)', min: 0.1, max: 1.5, step: 0.05 },
+    ],
+  },
+  {
     title: 'Rifle recoil',
     sliders: [
       { key: 'recoilPitchPerShotRad', label: 'Kick up per shot (rad)', min: 0, max: 0.05, step: 0.001 },
@@ -157,6 +168,17 @@ export const pistolFolders: Folder<PistolKey>[] = [
       { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
       { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
       { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
+    ],
+  },
+  {
+    title: 'Pistol aiming',
+    sliders: [
+      { key: 'hipSpreadRad', label: 'Hip spread (rad)', min: 0, max: 0.1, step: 0.001 },
+      { key: 'aimedSpreadRad', label: 'Aimed spread (rad)', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'aimTimeSec', label: 'Time to aim (s)', min: 0.02, max: 0.6, step: 0.01 },
+      { key: 'aimFovDeg', label: 'Aimed field of view (deg)', min: 20, max: 90, step: 1 },
+      { key: 'aimMoveSpeedScale', label: 'Aimed walking speed (share)', min: 0.1, max: 1, step: 0.05 },
+      { key: 'aimSensitivityScale', label: 'Aimed turning (share)', min: 0.1, max: 1.5, step: 0.05 },
     ],
   },
   {

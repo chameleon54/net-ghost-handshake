@@ -106,6 +106,7 @@ describe('rayHitDummy', () => {
 });
 
 describe('Shooter with dummies', () => {
+  const noSpread = { hipSpreadRad: 0, aimedSpreadRad: 0 }; // so a test shot flies exactly where the camera points
   // A camera at eye height looking down -z. A wall 3 m ahead (z -3.15 to -2.85), a dummy 5 m ahead.
   function setup(withWall: boolean) {
     const { collision } = buildGreybox(withWall ? [{ kind: 'wall', xM: 0, zM: -3, widthM: 4, depthM: 0.3, heightM: 3 }] : [{ kind: 'wall', xM: 50, zM: 50, widthM: 1, depthM: 1, heightM: 1 }]);
@@ -114,7 +115,7 @@ describe('Shooter with dummies', () => {
     const events = new EventBus<WeaponEvents>();
     const dummy = new Dummy(0, -5);
     const muzzle = new Vector3();
-    new Shooter(events, collision, camera, { rifle: muzzle, pistol: muzzle }, [dummy], { rifle: rifleConfigDefaults, pistol: pistolConfigDefaults });
+    new Shooter(events, collision, camera, { rifle: muzzle, pistol: muzzle }, [dummy], { rifle: { ...rifleConfigDefaults, ...noSpread }, pistol: { ...pistolConfigDefaults, ...noSpread } });
     const hits: { zone: string; killed: boolean }[] = [];
     events.on('target:hit', (hit) => hits.push(hit));
     return { events, dummy, hits };

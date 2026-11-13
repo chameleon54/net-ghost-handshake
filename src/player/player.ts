@@ -26,6 +26,9 @@ export class Player {
   readonly stance = new StanceMachine();
   readonly mantle = new Mantle();
 
+  /** Share of normal walking speed, set by aiming down sights. Does not affect slides, climbs or vaults. */
+  speedScale = 1;
+
   /** True when standing on the floor or on something. */
   grounded = true;
 
@@ -137,7 +140,7 @@ export class Player {
         : this.stance.stance === 'crouching'
           ? playerConfig.crouchSpeedMps
           : playerConfig.moveSpeedMps;
-      accelerate(this.velocity, this.wish, maxSpeedMps, playerConfig.accelerationMps2, playerConfig.brakingMps2, dtSec);
+      accelerate(this.velocity, this.wish, maxSpeedMps * this.speedScale, playerConfig.accelerationMps2, playerConfig.brakingMps2, dtSec);
     }
 
     this.position.x += this.velocity.x * dtSec;
@@ -214,11 +217,12 @@ export class Player {
     this.leanOffsetM = limitLean(easedM, side, wallDistanceM, clearanceM);
   }
 
-  /** Turn with the mouse. Called once per screen frame. */
-  look(input: Input): void {
+  /** Turn with the mouse. Called once per screen frame. `sensitivityScale` slows the turn while aiming. */
+  look(input: Input, sensitivityScale = 1): void {
     input.consumeMouseMove(this.mouseMove);
-    this.yawRad -= this.mouseMove.x * inputConfig.mouseSensitivityRadPerPx;
-    this.pitchRad -= this.mouseMove.y * inputConfig.mouseSensitivityRadPerPx;
+    const radPerPx = inputConfig.mouseSensitivityRadPerPx * sensitivityScale;
+    this.yawRad -= this.mouseMove.x * radPerPx;
+    this.pitchRad -= this.mouseMove.y * radPerPx;
     this.pitchRad = Math.max(-inputConfig.pitchLimitRad, Math.min(inputConfig.pitchLimitRad, this.pitchRad));
   }
 

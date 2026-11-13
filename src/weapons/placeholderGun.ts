@@ -14,6 +14,8 @@ const specs: Record<WeaponId, BlockSpec> = {
   pistol: { sizeM: { x: 0.06, y: 0.12, z: 0.25 }, positionM: { x: 0.18, y: -0.18, z: -0.45 }, colour: 0x3f4a55 },
   knife: { sizeM: { x: 0.02, y: 0.05, z: 0.3 }, positionM: { x: 0.2, y: -0.2, z: -0.5 }, colour: 0xb8c4cf },
 };
+/** Where the gun block sits when fully aimed: in the middle of the screen, a little lower than the eye line. */
+const aimedPositionM = { x: 0, y: -0.13 };
 const drawnLast = 999;
 /** How far the knife block jabs forward, and how long that takes. */
 const jabDistanceM = 0.25;
@@ -42,6 +44,18 @@ export class PlaceholderViewmodels {
       return new THREE.Vector3(positionM.x, positionM.y + sizeM.y / 4, positionM.z - sizeM.z / 2);
     };
     this.muzzles = { rifle: muzzleOf('rifle'), pistol: muzzleOf('pistol') };
+  }
+
+  /** Slides the gun blocks toward the middle of the screen as the aim blend goes from 0 to 1. The muzzle follows. */
+  setAim(blend: number): void {
+    for (const id of ['rifle', 'pistol'] as const) {
+      const { sizeM, positionM } = specs[id];
+      const x = positionM.x + (aimedPositionM.x - positionM.x) * blend;
+      const y = positionM.y + (aimedPositionM.y - positionM.y) * blend;
+      this.blocks[id].position.x = x;
+      this.blocks[id].position.y = y;
+      this.muzzles[id].set(x, y + sizeM.y / 4, positionM.z - sizeM.z / 2);
+    }
   }
 
   show(weapon: WeaponId): void {

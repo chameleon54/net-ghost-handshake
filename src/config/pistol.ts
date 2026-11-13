@@ -12,6 +12,14 @@ export const pistolConfigDefaults = {
   /** The least lethal gun in the game, the same class as the enemy pistol (enemies.md). A headshot always kills. */
   bodyDamagePerHit: 8,
 
+  // Aiming down sights. About 1.1 degrees of scatter from the hip, about 0.1 when aimed.
+  hipSpreadRad: 0.019,
+  aimedSpreadRad: 0.002,
+  aimTimeSec: 0.1,
+  aimFovDeg: 62,
+  aimMoveSpeedScale: 0.75,
+  aimSensitivityScale: 0.8,
+
   // Recoil: a sharp kick that settles within about 0.1 s.
   recoilPitchPerShotRad: 0.03,
   recoilMaxPitchRad: 0.06,

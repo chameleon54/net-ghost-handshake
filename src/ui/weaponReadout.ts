@@ -11,7 +11,8 @@ const hitColour = '#ffffff';
 const killColour = '#ff4444';
 
 export interface WeaponReadout {
-  update(weapons: WeaponSet): void;
+  /** `aimBlend`: 0 hip, 1 aimed. The crosshair dot hides while aiming. */
+  update(weapons: WeaponSet, aimBlend: number): void;
 }
 
 export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReadout {
@@ -41,7 +42,8 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
 
   let shown = '';
   return {
-    update(weapons) {
+    update(weapons, aimBlend) {
+      dot.style.opacity = String(1 - aimBlend);
       const gun = weapons.gun;
       let next = uiText.weaponNames[weapons.current];
       if (gun) {
