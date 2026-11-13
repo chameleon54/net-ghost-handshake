@@ -1,5 +1,6 @@
 import type { InputConfig } from '../config/input';
 import type { PlayerConfig } from '../config/player';
+import type { DummyConfig } from '../config/dummy';
 import type { RifleConfig } from '../config/rifle';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -21,6 +22,7 @@ export interface Folder<Key extends string> {
 type PlayerKey = keyof PlayerConfig;
 type InputKey = keyof InputConfig;
 type RifleKey = keyof RifleConfig;
+type DummyKey = keyof DummyConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -117,6 +119,7 @@ export const rifleFolders: Folder<RifleKey>[] = [
     sliders: [
       { key: 'fireRateRpm', label: 'Fire rate (rounds/min)', min: 100, max: 1500, step: 10 },
       { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
       { key: 'maxRangeM', label: 'Bullet range (m)', min: 10, max: 300, step: 5 },
     ],
   },
@@ -140,6 +143,18 @@ export const rifleFolders: Folder<RifleKey>[] = [
     ],
   },
 ];
+
+export const dummyFolder: Folder<DummyKey> = {
+  title: 'Target dummies',
+  sliders: [
+    { key: 'healthPoints', label: 'Health (from next stand-up)', min: 1, max: 500, step: 1 },
+    { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'respawnDelaySec', label: 'Time down before standing (s)', min: 0.5, max: 20, step: 0.5 },
+  ],
+};
+
+/** Dummy config values that are not on the panel: the shape is built once when the game starts. */
+export const dummyKeysNotOnPanel: readonly DummyKey[] = ['heightM', 'bodyWidthM', 'bodyDepthM', 'headRadiusM'];
 
 /** Rifle config values that are deliberately not on the panel: they are read once when the game starts. */
 export const rifleKeysNotOnPanel: readonly RifleKey[] = ['magazineRounds', 'startingMagazines'];
@@ -168,7 +183,9 @@ export function resetToDefaults(current: Record<string, number>, defaults: Recor
 }
 
 /** Text to paste into the config files: only the changed values, in the files' own format. */
-export function toCodeSnippet(player: Record<string, number>, input: Record<string, number>, rifle: Record<string, number> = {}): string {
+export function toCodeSnippet(player: Record<string, number>, input: Record<string, number>, rifle: Record<string, number> = {},
+  dummy: Record<string, number> = {},
+): string {
   const lines: string[] = [];
   const add = (file: string, values: Record<string, number>): void => {
     const keys = Object.keys(values);
@@ -179,5 +196,6 @@ export function toCodeSnippet(player: Record<string, number>, input: Record<stri
   add('src/config/player.ts', player);
   add('src/config/input.ts', input);
   add('src/config/rifle.ts', rifle);
+  add('src/config/dummy.ts', dummy);
   return lines.length > 0 ? lines.join('\n') : '// Nothing changed from the defaults.';
 }

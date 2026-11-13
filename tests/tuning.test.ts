@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
+import { dummyConfigDefaults } from '../src/config/dummy';
 import { rifleConfigDefaults } from '../src/config/rifle';
 import {
   changedValues,
   inputFolder,
   playerFolders,
+  dummyFolder,
+  dummyKeysNotOnPanel,
   playerKeysNotOnPanel,
   rifleFolders,
   rifleKeysNotOnPanel,
@@ -27,6 +30,18 @@ describe('the rifle tuning panel', () => {
     }
     const onPanel = new Set<string>([...sliders.map((s) => s.key), ...rifleKeysNotOnPanel]);
     for (const key of Object.keys(rifleConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the dummy tuning panel', () => {
+  it('has a sensible range around every default, and every dummy value is listed or excluded on purpose', () => {
+    for (const s of dummyFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(dummyConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(dummyConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...dummyFolder.sliders.map((s) => s.key), ...dummyKeysNotOnPanel]);
+    for (const key of Object.keys(dummyConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

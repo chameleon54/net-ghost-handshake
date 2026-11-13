@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import GUI from 'lil-gui';
 import { inputConfig, inputConfigDefaults } from '../config/input';
 import { playerConfig, playerConfigDefaults } from '../config/player';
+import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import { FreeCamera } from './freeCamera';
-import { changedValues, inputFolder, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { changedValues, dummyFolder, inputFolder, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -81,6 +82,7 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
       resetToDefaults(playerConfig, playerConfigDefaults);
       resetToDefaults(inputConfig, inputConfigDefaults);
       resetToDefaults(rifleConfig, rifleConfigDefaults);
+      resetToDefaults(dummyConfig, dummyConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -89,6 +91,7 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
         changedValues(playerConfig, playerConfigDefaults),
         changedValues(inputConfig, inputConfigDefaults),
         changedValues(rifleConfig, rifleConfigDefaults),
+        changedValues(dummyConfig, dummyConfigDefaults),
       );
       navigator.clipboard.writeText(snippet).then(
         () => (readouts.status = 'Copied to the clipboard'),
@@ -116,6 +119,10 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
     f.close();
     for (const s of folder.sliders) f.add(rifleConfig, s.key, s.min, s.max, s.step).name(s.label);
   }
+
+  const dummyPanel = gui.addFolder(dummyFolder.title);
+  dummyPanel.close();
+  for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const cameraFolder = gui.addFolder('Free camera');
   cameraFolder.close();

@@ -8,6 +8,8 @@ export const rifleConfigDefaults = {
   magazineRounds: 30,
   /** Magazines carried at the start, including the loaded one (the Squad Waves loadout). Read once at start. */
   startingMagazines: 4,
+  /** Damage of a body hit. A headshot has no number: it always kills. Starting value, the same class as the enemy rifle (enemies.md). */
+  bodyDamagePerHit: 15,
   /** Longest a bullet travels. */
   maxRangeM: 100,
 

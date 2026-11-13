@@ -12,6 +12,9 @@ import { Player } from './player/player';
 import { createOverlay } from './ui/overlay';
 import { createWeaponReadout } from './ui/weaponReadout';
 import { EventBus } from './core/events';
+import { greyboxDummies } from './data/greyboxDummies';
+import { Dummy } from './enemies/dummy';
+import { DummyView } from './enemies/dummyView';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { addPlaceholderGun } from './weapons/placeholderGun';
@@ -43,10 +46,13 @@ const player = new Player(level.collision);
 const weaponEvents = new EventBus<WeaponEvents>();
 scene.add(camera); // the placeholder gun is a child of the camera, so the camera must be in the scene
 const rifle = new Rifle(weaponEvents);
-const shooter = new Shooter(weaponEvents, level.collision, camera, addPlaceholderGun(camera));
+const dummies = greyboxDummies.map(({ xM, zM }) => new Dummy(xM, zM));
+const dummyViews = dummies.map((dummy) => new DummyView(dummy));
+for (const view of dummyViews) scene.add(view.group);
+const shooter = new Shooter(weaponEvents, level.collision, camera, addPlaceholderGun(camera), dummies);
 const tracers = new Tracers(scene, weaponEvents);
 new BulletMarks(scene, weaponEvents);
-const weaponReadout = createWeaponReadout(); // made before the overlay so the overlay covers it
+const weaponReadout = createWeaponReadout(weaponEvents); // made before the overlay so the overlay covers it
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -93,6 +99,10 @@ const loop = new Loop(
     });
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
+    dummies.forEach((dummy, i) => {
+      dummy.update(stepSec);
+      dummyViews[i].update();
+    });
     weaponReadout.update(rifle);
   },
   (alpha) => {
