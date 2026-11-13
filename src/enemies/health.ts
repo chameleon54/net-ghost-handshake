@@ -17,6 +17,12 @@ export class Health {
     return this.dead;
   }
 
+  /** Adds health, never past `ceiling` and never lowering what is already above it. Does nothing once dead. */
+  heal(amount: number, ceiling = this.max): void {
+    if (this.dead) return;
+    this.current = Math.max(this.current, Math.min(this.current + amount, ceiling));
+  }
+
   /** Kills at once (a headshot). Returns true if it killed, false if already dead. */
   kill(): boolean {
     if (this.dead) return false;

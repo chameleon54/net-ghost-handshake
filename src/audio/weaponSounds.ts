@@ -129,6 +129,8 @@ export class WeaponSounds {
       if (audioConfig.earRingingVolume > 0) this.play('ear-ringing', intensity * audioConfig.earRingingVolume);
       if (audioConfig.earRingingDuckShare > 0) this.player.duck?.(audioConfig.earRingingDuckShare * intensity, durationSec);
     });
+    events.on('heal:started', () => this.play('heal-use'));
+    events.on('player:healed', () => this.play('heal-done'));
     events.on('casing:bounced', ({ position, speedMps }) => {
       if (this.clockSec - this.lastClinkSec < audioConfig.casingClinkMinGapSec) return; // not a wall of clinks in a spray
       this.lastClinkSec = this.clockSec;

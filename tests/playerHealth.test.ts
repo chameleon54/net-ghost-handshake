@@ -14,7 +14,7 @@ import { PlayerHealth } from '../src/player/playerHealth';
 import type { WeaponEvents } from '../src/weapons/events';
 import { Gun } from '../src/weapons/gun';
 import { rifleConfig } from '../src/config/rifle';
-import { healthFolder } from '../src/debug/tuning';
+import { healthFolder, healthKeysNotOnPanel } from '../src/debug/tuning';
 
 const dt = 1 / 60;
 
@@ -166,7 +166,7 @@ describe('the health tuning panel', () => {
       expect(healthConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
       expect(healthConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
     }
-    const listed = new Set<string>(healthFolder.sliders.map((s) => s.key));
+    const listed = new Set<string>([...healthFolder.sliders.map((s) => s.key), ...healthKeysNotOnPanel]);
     for (const key of Object.keys(healthConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
   });
 });

@@ -13,7 +13,7 @@ const feelShownMs = 3000;
 
 export interface WeaponReadout {
   /** `aimBlend`: 0 hip, 1 aimed. The crosshair dot hides while aiming. */
-  update(weapons: WeaponSet, aimBlend: number, grenades: number): void;
+  update(weapons: WeaponSet, aimBlend: number, grenades: number, heals: number, healing: boolean): void;
 }
 
 export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReadout {
@@ -53,7 +53,7 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
 
   let shown = '';
   return {
-    update(weapons, aimBlend, grenades) {
+    update(weapons, aimBlend, grenades, heals, healing) {
       dot.style.opacity = String(1 - aimBlend);
       const gun = weapons.gun;
       let next = uiText.weaponNames[weapons.current];
@@ -64,6 +64,8 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
         if (gun.jammed) next += `   ${uiText.jammed}`;
       }
       if (grenades > 0) next += `   ${uiText.grenades}: ${grenades}`;
+      if (heals > 0) next += `   ${uiText.heals}: ${heals}`;
+      if (healing) next += `   ${uiText.healing}`;
       if (performance.now() < feelUntilMs) next += `   ${uiText.magazineCheck.gun}: ${feelWord}`;
       if (next === shown) return; // only touch the page when the text changes
       shown = next;

@@ -34,6 +34,8 @@ export const soundNames = [
   'grenade-bounce',
   'grenade-explosion',
   'ear-ringing',
+  'heal-use',
+  'heal-done',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -377,6 +379,29 @@ export const recipes: Record<SoundName, Recipe> = {
       addTone(s, sr, { duration: 3, freq: 4200, decay: 1.2, gain: 0.5, attack: 0.05 });
       addTone(s, sr, { duration: 3, freq: 6100, decay: 0.8, gain: 0.15, attack: 0.05 });
       return finish(s, sr, { peak: 0.3 });
+    },
+  },
+  // A heal item opened: a snap of the cap, then a soft hiss of the dose going in.
+  'heal-use': {
+    group: 'handling',
+    variants: 1,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.9);
+      metalClick(s, sr, rng, 0, 0.8, 2100);
+      addNoise(s, sr, { start: 0.05, duration: 0.7, decay: 0.3, gain: 0.45, highpass: 3500, lowpass: 9000, attack: 0.04, rng });
+      thunk(s, sr, 0.04, 0.25, 180, 110);
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // The dose done: two soft rising notes.
+  'heal-done': {
+    group: 'handling',
+    variants: 1,
+    make: (sr) => {
+      const s = createSamples(sr, 0.5);
+      addTone(s, sr, { duration: 0.25, freq: 660, decay: 0.08, gain: 0.5, attack: 0.005 });
+      addTone(s, sr, { start: 0.12, duration: 0.35, freq: 880, decay: 0.12, gain: 0.5, attack: 0.005 });
+      return finish(s, sr, { peak: 0.45 });
     },
   },
 };

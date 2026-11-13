@@ -11,6 +11,7 @@ import { createPointerLock } from './platform/pointerLock';
 import { Player } from './player/player';
 import { fallDamage } from './player/fall';
 import { PlayerHealth } from './player/playerHealth';
+import { HealItems } from './player/healItems';
 import { healthConfig } from './config/health';
 import { greyboxHazards } from './data/greyboxRoom';
 import { standsOnHazard } from './level/hazards';
@@ -103,6 +104,7 @@ const bulletMarks = new BulletMarks(scene, weaponEvents);
 const thrower = new GrenadeThrower(weaponEvents);
 const blastTargets = dummies.map((dummy) => dummyBlastTarget(dummy, weaponEvents));
 const playerHealth = new PlayerHealth(weaponEvents);
+const heals = new HealItems(weaponEvents, playerHealth);
 player.onLanded = (speedMps) => playerHealth.damage(fallDamage(speedMps), 'fall');
 const playerBlastTarget = {
   chest: (out: THREE.Vector3) => out.set(player.position.x, player.position.y + grenadeConfig.targetChestHeightM, player.position.z),
@@ -159,6 +161,7 @@ function restart(): void {
   player.respawn();
   weapons.reset();
   thrower.reset();
+  heals.reset();
   grenades.clear();
   dummies.forEach((dummy) => dummy.reset());
   bulletMarks.clear();
@@ -187,7 +190,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals });
   });
 }
 
@@ -212,14 +215,16 @@ const loop = new Loop(
     if (standsOnHazard(player.position.x, player.position.y, player.position.z, greyboxHazards)) {
       playerHealth.damage(healthConfig.hazardDamagePerSec * stepSec, 'hazard');
     }
+    playerHealth.update(stepSec);
     // Aiming is allowed with a gun out that is not being drawn, and not while sprinting, climbing or vaulting.
     // Reloading does not stop it (owner's choice).
     const gunInHand = weapons.gun;
-    const canAim = gunInHand !== null && !weapons.drawing && !thrower.busy && !player.isSprinting && !player.mantle.active;
+    const canAim = gunInHand !== null && !weapons.drawing && !thrower.busy && !heals.busy && !player.isSprinting && !player.mantle.active;
     aim.update(stepSec, canAim && input.isButtonDown(aimButton), gunInHand ? gunConfigs[gunInHand.id] : null);
     player.speedScale = aim.moveSpeedScale;
     shooter.aimBlend = aim.eased;
 
+    player.handsBusy = heals.busy;
     player.fixedUpdate(stepSec, input);
     // R and F: tap or hold. Their presses are consumed so nothing stale is remembered.
     input.consumePress('KeyR');
@@ -233,11 +238,13 @@ const loop = new Loop(
     const gunBusy = weapons.drawing || (gunInHand !== null && (gunInHand.reloading || gunInHand.checking));
     thrower.update(stepSec, {
       pressed: input.consumePress('KeyG'),
-      canThrow: !player.isSprinting && !player.mantle.active && !gunBusy,
+      canThrow: !player.isSprinting && !player.mantle.active && !gunBusy && !heals.busy,
     });
     if (thrower.justFinished) weapons.redraw(); // the weapon comes back up after the throw
     // While the hands are busy with the grenade nothing else can be done with the weapons.
-    const handsFree = !thrower.busy;
+    // H: use a heal item. Same hands rules as a throw; the health lands when the use ends.
+    heals.update(stepSec, { pressed: input.consumePress('KeyH'), canUse: !player.mantle.active && !thrower.busy && !gunBusy });
+    const handsFree = !thrower.busy && !heals.busy;
     if (!handsFree) select = null;
     const wheelSteps = input.consumeWheelSteps();
     weapons.update(stepSec, {
@@ -267,7 +274,7 @@ const loop = new Loop(
       dummy.update(stepSec);
       dummyViews[i].update();
     });
-    weaponReadout.update(weapons, aim.eased, thrower.count);
+    weaponReadout.update(weapons, aim.eased, thrower.count, heals.count, heals.busy);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.

@@ -424,6 +424,13 @@ export const healthFolder: Folder<HealthKey> = {
   title: 'Health and falls',
   sliders: [
     { key: 'maxHealth', label: 'Max health (from next restart)', min: 10, max: 500, step: 5 },
+    { key: 'regenDelaySec', label: 'Regeneration starts after (s)', min: 0.5, max: 15, step: 0.5 },
+    { key: 'regenCeiling', label: 'Regeneration stops at', min: 10, max: 100, step: 5 },
+    { key: 'regenPerSecEasy', label: 'Regeneration per s: Easy', min: 1, max: 50, step: 1 },
+    { key: 'regenPerSecNormal', label: 'Regeneration per s: Normal', min: 1, max: 50, step: 1 },
+    { key: 'regenPerSecHard', label: 'Regeneration per s: Hard', min: 1, max: 50, step: 1 },
+    { key: 'healAmount', label: 'A heal restores', min: 5, max: 100, step: 5 },
+    { key: 'healUseSec', label: 'A heal takes (s)', min: 0.1, max: 5, step: 0.1 },
     { key: 'hazardDamagePerSec', label: 'Hazard pad damage (per s)', min: 1, max: 200, step: 1 },
     { key: 'fallSafeSpeedMps', label: 'Safe landing speed (m/s)', min: 3, max: 30, step: 0.5 },
     { key: 'fallDamagePerMps', label: 'Fall damage per m/s over safe', min: 0, max: 100, step: 1 },
@@ -433,6 +440,9 @@ export const healthFolder: Folder<HealthKey> = {
     { key: 'fallSlowSpeedShare', label: 'Walking speed while slowed (share)', min: 0.1, max: 1, step: 0.05 },
   ],
 };
+
+/** Health values read when the game starts or restarts, so not on the panel. */
+export const healthKeysNotOnPanel: readonly HealthKey[] = ['healCarryLimit', 'startingHeals'];
 
 /** Dummy config values that are not on the panel: the shape is built once when the game starts. */
 export const dummyKeysNotOnPanel: readonly DummyKey[] = ['heightM', 'bodyWidthM', 'bodyDepthM', 'headRadiusM'];

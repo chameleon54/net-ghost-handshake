@@ -34,6 +34,9 @@ export class Player {
   /** True when standing on the floor or on something. */
   grounded = true;
 
+  /** Set by the game while the hands are busy (using a heal): no sprinting and no climbing or vaulting. */
+  handsBusy = false;
+
   /** Called when the player lands after being in the air, with the downward speed. The game uses it for fall damage. */
   onLanded: (speedMps: number) => void = () => {};
 
@@ -117,7 +120,7 @@ export class Player {
     const spacePressed = input.consumePress('Space');
     const crouchPressed = input.consumePress('KeyC');
 
-    if (spacePressed && this.grounded && !this.mantle.active && this.stance.stance !== 'sliding') this.tryStartMantle();
+    if (spacePressed && this.grounded && !this.handsBusy && !this.mantle.active && this.stance.stance !== 'sliding') this.tryStartMantle();
 
     if (this.mantle.active) {
       this.updateMantle(dtSec, input);
@@ -147,7 +150,7 @@ export class Player {
       {
         crouchHeld: input.isKeyDown('KeyC'),
         crouchPressed,
-        sprintHeld: !this.slowed && (input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight')),
+        sprintHeld: !this.slowed && !this.handsBusy && (input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight')),
         forwardInput: forward,
         canStand,
       },

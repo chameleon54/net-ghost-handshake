@@ -10,6 +10,8 @@ import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { PlayerHealth } from '../player/playerHealth';
+import type { HealItems } from '../player/healItems';
+import { difficultySetting } from '../config/difficulty';
 import { healthConfig, healthConfigDefaults } from '../config/health';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
 import type { WeaponSet } from '../weapons/weaponSet';
@@ -42,6 +44,7 @@ interface Parts {
   audio: AudioSystem;
   thrower: GrenadeThrower;
   health: PlayerHealth;
+  heals: HealItems;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -52,7 +55,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -221,6 +224,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   cheatFolder.add({ hurt: () => health.damage(hurtAmountHealth, 'debug') }, 'hurt').name('Hurt 25');
   cheatFolder.add({ kill: () => health.damage(Infinity, 'debug') }, 'kill').name('Kill');
   cheatFolder.add({ heal: () => health.reset() }, 'heal').name('Heal full (not when dead)');
+  cheatFolder.add({ give: () => heals.give(healthConfig.healCarryLimit) }, 'give').name('Give heals (to the limit)');
+  cheatFolder.add(difficultySetting, 'current', ['easy', 'normal', 'hard']).name('Difficulty (regeneration speed)');
   cheatFolder.add(health, 'invulnerable').name('Invulnerable');
   cheatFolder.add(cheats, 'infiniteAmmo').name('Infinite ammo').onChange((on: boolean) => weapons.setInfiniteAmmo(on));
 
@@ -240,7 +245,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     readoutTimerSec += dtSec;
     if (readoutTimerSec < readoutIntervalSec) return;
     readoutTimerSec = 0;
-    readouts.health = health.dead ? 'DEAD' : `${health.current.toFixed(0)}${health.invulnerable ? ' (invulnerable)' : ''}`;
+    readouts.health = health.dead ? 'DEAD' : `${health.current.toFixed(0)}${health.invulnerable ? ' (invulnerable)' : ''}${health.regenerating ? ', regenerating' : ''}`;
     const p = player.position;
     readouts.position = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
     readouts.speed = `${player.speedMps.toFixed(2)} m/s`;

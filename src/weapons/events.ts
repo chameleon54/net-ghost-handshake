@@ -64,6 +64,10 @@ export type WeaponEvents = {
   'player:blast': { damage: number; distanceM: number };
   /** The player took damage; `health` is what is left. The screen effects (3.3) and PP's lines (phase 6) listen. */
   'player:damaged': { amount: number; health: number; source: DamageSource };
+  /** A heal item was used: `amount` was added, `health` is the total. PP's lines (phase 6) listen. */
+  'player:healed': { amount: number; health: number };
+  /** The pin of a heal item is out: the use has begun (it takes `healUseSec`). */
+  'heal:started': undefined;
   /** The player's health reached 0. */
   'player:died': { source: DamageSource };
   /** A blast went off close to the player: his ears ring for `durationSec`. The sound is added later. */
