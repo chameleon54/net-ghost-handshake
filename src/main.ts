@@ -1,5 +1,15 @@
-// Scaffold only: a lit cube to prove the toolchain works. Milestone 1.1 replaces this with the real game loop.
 import * as THREE from 'three';
+import { Game } from './core/game';
+import { Input } from './core/input';
+import { Loop } from './core/loop';
+import { uiText } from './data/uiText';
+import type { DebugTools } from './debug';
+import { buildGreybox } from './level/greybox';
+import { onFocusLost } from './platform/focus';
+import { attachInputListeners } from './platform/inputListeners';
+import { createPointerLock } from './platform/pointerLock';
+import { Player } from './player/player';
+import { createOverlay } from './ui/overlay';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -7,16 +17,17 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 3;
+scene.background = new THREE.Color(0x101418);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 100);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-const sun = new THREE.DirectionalLight(0xffffff, 2);
-sun.position.set(3, 4, 5);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x333a40, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(4, 8, 3);
 scene.add(sun);
 
-const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x66aaff }));
-scene.add(cube);
+const level = buildGreybox();
+scene.add(level.group);
+const player = new Player(level.collision);
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -24,8 +35,47 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-renderer.setAnimationLoop((timeMs) => {
-  cube.rotation.x = timeMs * 0.0005;
-  cube.rotation.y = timeMs * 0.0007;
-  renderer.render(scene, camera);
-});
+// Wiring: input, the play state, pointer lock, focus, overlay, loop.
+const input = new Input();
+attachInputListeners(input);
+
+// `pointerLock` is assigned just below; the game only calls releaseMouse later, never during construction.
+const game = new Game(input, () => pointerLock.exit());
+const pointerLock = createPointerLock(
+  renderer.domElement,
+  (locked) => game.handleLockChange(locked),
+  () => game.handleCaptureRefused(),
+);
+onFocusLost(() => game.handleFocusLost());
+
+const overlay = createOverlay(() => void pointerLock.request());
+overlay.show(uiText.clickToPlay);
+game.events.on('game:playing', () => overlay.hide());
+game.events.on('game:paused', () => overlay.show(uiText.paused));
+game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused));
+
+// Debug tools (tuning panel, free camera) exist only on the dev server. Vite removes this block from the production
+// build, so neither the tools nor lil-gui are shipped to players.
+let debug: DebugTools | null = null;
+if (import.meta.env.DEV) {
+  void import('./debug').then((tools) => {
+    debug = tools.installDebugTools({ scene, input, player });
+  });
+}
+
+const loop = new Loop(
+  (stepSec) => {
+    if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
+    player.fixedUpdate(stepSec, input);
+  },
+  (alpha) => {
+    // The free camera, when on, places the camera itself; otherwise the player does.
+    if (!debug?.beforeRender(camera)) {
+      player.look(input);
+      player.applyToCamera(camera, alpha);
+    }
+    renderer.render(scene, camera);
+  },
+  () => game.isPlaying,
+);
+loop.start();
