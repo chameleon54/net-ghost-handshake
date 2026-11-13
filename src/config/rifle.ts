@@ -19,6 +19,20 @@ export const rifleConfigDefaults = {
   /** Longest a bullet travels. Shared by every gun. */
   maxRangeM: 100,
 
+  // Heat and jams (weapons.md): spraying heats the barrel, smoke from 50, jams from 60 and up.
+  // One full magazine sprayed ends near 46 heat: no smoke and no jam. Two or three magazines in a row get it hot, and the jam risk then builds up shot by shot and only resets when a jam happens.
+  heatPerShot: 1.5,
+  heatCoolPerSec: 4, // slow: a barrel stays hot for a good while after spraying
+  heatCoolDelaySec: 0.4,
+  heatSmokeStart: 50,
+  jamHeatStart: 60,
+  jamRiskPerShotAtMaxHeat: 0.003,
+  jamRiskMax: 0.3,
+  jamChanceFlat: 0,
+  jamFreeRounds: 5,
+  jamFreeAfterClearSec: 10,
+  jamClearTaps: 4,
+
   // Aiming down sights. About 1.4 degrees of scatter from the hip, about 0.1 when aimed.
   hipSpreadRad: 0.025,
   aimedSpreadRad: 0.002,

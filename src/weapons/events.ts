@@ -25,6 +25,14 @@ export type WeaponEvents = {
   'weapon:empty-click': undefined;
   'weapon:reload-started': undefined;
   'weapon:reloaded': undefined;
+  /** The gun jammed instead of firing: the chambered round is stuck. Enemies will hear this later. */
+  'weapon:jammed': { weapon: GunId };
+  /** The trigger was pulled on a jammed gun: a dead click. */
+  'weapon:jam-click': { weapon: GunId };
+  /** One fast rack while clearing a jam: `tap` of `taps` done. */
+  'weapon:rack': { weapon: GunId; tap: number; taps: number };
+  /** The last tap: the stuck round is thrown out and the gun is ready. */
+  'weapon:jam-cleared': { weapon: GunId };
   /** The player looked at the magazine in the gun and the spares and judged how full each is (rough words, never numbers). */
   'weapon:magazine-checked': { check: MagazineCheck };
   /** A different weapon was taken out. */

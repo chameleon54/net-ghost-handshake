@@ -35,6 +35,19 @@ export const viewmodelConfigDefaults = {
   handDipM: 0.32,
   reloadTiltRad: 0.25,
 
+  // Clearing a jam: each tap of R is one fast rack. While jammed the slide or bolt sits part way back.
+  rackTapSec: 0.18,
+  jammedSlideShare: 0.45,
+
+  // A hot barrel (the heat values come from each gun's config): the smoke puffs.
+  smokeEverySecAtStart: 0.35,
+  smokeEverySecAtMaxHeat: 0.07,
+  smokeLifeSec: 1.2,
+  smokeRiseMps: 0.25,
+  smokeSizeM: 0.03,
+  smokeGrowth: 3,
+  smokeOpacity: 0.35,
+
   // Checking the magazine (hold R): it slides part way out and the gun rolls toward the eyes.
   checkMagPullM: 0.07,
   checkRollRad: 0.35,

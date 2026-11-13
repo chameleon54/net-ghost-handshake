@@ -10,6 +10,7 @@ import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
+import type { WeaponSet } from '../weapons/weaponSet';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { casingFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
@@ -29,6 +30,7 @@ interface Parts {
   input: Input;
   player: Player;
   viewmodel: Viewmodel;
+  weapons: WeaponSet;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -39,7 +41,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -76,9 +78,9 @@ export function installDebugTools({ scene, input, player, viewmodel }: Parts): D
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { position: '', speed: '', state: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { position: '', speed: '', state: '', weapon: '', freeCamera: 'off (press ` to toggle)', status: '' };
   const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['position', 'speed', 'state', 'freeCamera', 'status'] as const) {
+  for (const key of ['position', 'speed', 'state', 'weapon', 'freeCamera', 'status'] as const) {
     readoutFolder.add(readouts, key).listen().disable();
   }
   readoutFolder.open();
@@ -172,6 +174,11 @@ export function installDebugTools({ scene, input, player, viewmodel }: Parts): D
   dummyPanel.close();
   for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
 
+  // Testing aids that change the rules on purpose. Dev server only.
+  const cheats = { infiniteAmmo: false };
+  const cheatFolder = gui.addFolder('Testing aids');
+  cheatFolder.add(cheats, 'infiniteAmmo').name('Infinite ammo').onChange((on: boolean) => weapons.setInfiniteAmmo(on));
+
   const cameraFolder = gui.addFolder('Free camera');
   cameraFolder.close();
   cameraFolder.add(freeCamera, 'speedMps', 1, 30, 0.5).name('Speed (m/s)');
@@ -195,6 +202,8 @@ export function installDebugTools({ scene, input, player, viewmodel }: Parts): D
     if (player.mantle.active) flags.push('climbing');
     if (player.isSprinting) flags.push('sprinting');
     readouts.state = flags.join(', ');
+    const gun = weapons.gun;
+    readouts.weapon = gun ? `heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 
   return {

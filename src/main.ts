@@ -20,6 +20,7 @@ import { Tracers } from './fx/tracers';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
 import { inputConfig } from './config/input';
+import { BarrelSmoke } from './fx/barrelSmoke';
 import { Casings } from './fx/casings';
 import { Aim } from './weapons/aim';
 import { HoldTap } from './weapons/holdTap';
@@ -74,6 +75,7 @@ for (const view of dummyViews) scene.add(view.group);
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, dummies, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, dummies);
 const tracers = new Tracers(scene, weaponEvents);
+const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmodel.ejectionPorts);
 // R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
 const reloadKey = new HoldTap();
@@ -116,7 +118,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons });
   });
 }
 
@@ -157,6 +159,7 @@ const loop = new Loop(
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
     casings.update(stepSec);
+    barrelSmoke.update(stepSec, weapons.rifleHeat, weapons.current === 'rifle');
     dummies.forEach((dummy, i) => {
       dummy.update(stepSec);
       dummyViews[i].update();
@@ -190,6 +193,7 @@ const loop = new Loop(
     animatorInput.reloadRackShare = gun?.reloadRackShare ?? 0;
     animatorInput.checkProgress = gun?.checking ? gun.checkProgress : null;
     animatorInput.lockedOpen = gun?.empty ?? false;
+    animatorInput.jammed = gun?.jammed ?? false;
     animatorInput.sprinting = player.isSprinting;
     animatorInput.aimBlend = aim.eased;
     // The bob only runs while walking on the ground, not while sliding, climbing or in the air.

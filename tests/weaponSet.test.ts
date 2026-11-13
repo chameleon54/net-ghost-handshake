@@ -9,6 +9,7 @@ import { Knife } from '../src/weapons/knife';
 import { WeaponSet, type WeaponSetInput } from '../src/weapons/weaponSet';
 
 const dtSec = 1 / 60;
+const neverJam = () => 0.999; // a random number that never rolls a jam
 const none: WeaponSetInput = { select: null, wheelSteps: 0, triggerHeld: false, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
 
 function setup() {
@@ -17,8 +18,8 @@ function setup() {
   events.on('weapon:fired', () => count.fired++);
   events.on('weapon:swing', () => count.swings++);
   events.on('weapon:reloaded', () => count.reloaded++);
-  const rifle = new Gun(events, 'rifle', rifleConfig, true);
-  const pistol = new Gun(events, 'pistol', pistolConfig, false);
+  const rifle = new Gun(events, 'rifle', rifleConfig, true, neverJam);
+  const pistol = new Gun(events, 'pistol', pistolConfig, false, neverJam);
   const weapons = new WeaponSet(events, rifle, pistol, new Knife(events));
   return { weapons, rifle, pistol, count, events };
 }

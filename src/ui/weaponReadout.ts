@@ -61,6 +61,7 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
         const { loadedRounds, spareCount, capacityRounds } = gun.magazines;
         const state = gun.reloading ? ' RELOADING' : loadedRounds === 0 ? ' EMPTY' : '';
         next += `   Mags: ${spareCount}  (${loadedRounds}/${capacityRounds})${state}`;
+        if (gun.jammed) next += `   ${uiText.jammed}`;
       }
       if (performance.now() < feelUntilMs) next += `   ${uiText.magazineCheck.gun}: ${feelWord}`;
       if (next === shown) return; // only touch the page when the text changes

@@ -147,6 +147,22 @@ export const rifleFolders: Folder<RifleKey>[] = [
     ],
   },
   {
+    title: 'Rifle heat and jams',
+    sliders: [
+      { key: 'heatPerShot', label: 'Heat per shot', min: 0, max: 30, step: 0.5 },
+      { key: 'heatCoolPerSec', label: 'Cooling (heat per s)', min: 1, max: 80, step: 1 },
+      { key: 'heatCoolDelaySec', label: 'Cooling starts after (s)', min: 0, max: 3, step: 0.05 },
+      { key: 'heatSmokeStart', label: 'Smoke from heat', min: 0, max: 100, step: 1 },
+      { key: 'jamHeatStart', label: 'Shots add jam risk from heat', min: 0, max: 99, step: 1 },
+      { key: 'jamRiskPerShotAtMaxHeat', label: 'Jam risk added per shot at 100 heat', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'jamRiskMax', label: 'Most jam risk that builds up', min: 0, max: 1, step: 0.01 },
+      { key: 'jamChanceFlat', label: 'Jam chance per shot, flat', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'jamFreeRounds', label: 'No jam in a magazine\'s first rounds', min: 0, max: 30, step: 1 },
+      { key: 'jamFreeAfterClearSec', label: 'No jam for this long after clearing (s)', min: 0, max: 30, step: 0.5 },
+      { key: 'jamClearTaps', label: 'Taps of R to clear a jam', min: 1, max: 10, step: 1 },
+    ],
+  },
+  {
     title: 'Rifle recoil',
     sliders: [
       { key: 'recoilPitchPerShotRad', label: 'Kick up per shot (rad)', min: 0, max: 0.05, step: 0.001 },
@@ -188,6 +204,22 @@ export const pistolFolders: Folder<PistolKey>[] = [
       { key: 'aimFovDeg', label: 'Aimed field of view (deg)', min: 20, max: 90, step: 1 },
       { key: 'aimMoveSpeedScale', label: 'Aimed walking speed (share)', min: 0.1, max: 1, step: 0.05 },
       { key: 'aimSensitivityScale', label: 'Aimed turning (share)', min: 0.1, max: 1.5, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Pistol jams',
+    sliders: [
+      { key: 'heatPerShot', label: 'Heat per shot', min: 0, max: 30, step: 0.5 },
+      { key: 'heatCoolPerSec', label: 'Cooling (heat per s)', min: 1, max: 80, step: 1 },
+      { key: 'heatCoolDelaySec', label: 'Cooling starts after (s)', min: 0, max: 3, step: 0.05 },
+      { key: 'heatSmokeStart', label: 'Smoke from heat', min: 0, max: 100, step: 1 },
+      { key: 'jamHeatStart', label: 'Shots add jam risk from heat', min: 0, max: 99, step: 1 },
+      { key: 'jamRiskPerShotAtMaxHeat', label: 'Jam risk added per shot at 100 heat', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'jamRiskMax', label: 'Most jam risk that builds up', min: 0, max: 1, step: 0.01 },
+      { key: 'jamChanceFlat', label: 'Jam chance per shot, flat', min: 0, max: 0.05, step: 0.0005 },
+      { key: 'jamFreeRounds', label: 'No jam in a magazine\'s first rounds', min: 0, max: 30, step: 1 },
+      { key: 'jamFreeAfterClearSec', label: 'No jam for this long after clearing (s)', min: 0, max: 30, step: 0.5 },
+      { key: 'jamClearTaps', label: 'Taps of R to clear a jam', min: 1, max: 10, step: 1 },
     ],
   },
   {
@@ -245,6 +277,20 @@ export const viewmodelFolders: Folder<ViewmodelKey>[] = [
       { key: 'handDipM', label: 'Off hand dip (m)', min: 0.05, max: 0.6, step: 0.01 },
       { key: 'reloadTiltRad', label: 'Gun tilt in a reload (rad)', min: 0, max: 0.8, step: 0.01 },
       { key: 'knifeSlashSec', label: 'Knife slash time (s)', min: 0.05, max: 0.6, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Jam rack and smoke',
+    sliders: [
+      { key: 'rackTapSec', label: 'Rack per tap (s)', min: 0.05, max: 0.6, step: 0.01 },
+      { key: 'jammedSlideShare', label: 'Jammed slide position (share)', min: 0, max: 1, step: 0.05 },
+      { key: 'smokeEverySecAtStart', label: 'Smoke: puff every (s), just warm', min: 0.05, max: 2, step: 0.05 },
+      { key: 'smokeEverySecAtMaxHeat', label: 'Smoke: puff every (s), at 100 heat', min: 0.02, max: 1, step: 0.01 },
+      { key: 'smokeLifeSec', label: 'Smoke: lasts (s)', min: 0.2, max: 4, step: 0.1 },
+      { key: 'smokeRiseMps', label: 'Smoke: rises (m/s)', min: 0, max: 1.5, step: 0.05 },
+      { key: 'smokeSizeM', label: 'Smoke: starting size (m)', min: 0.005, max: 0.15, step: 0.005 },
+      { key: 'smokeGrowth', label: 'Smoke: growth (times)', min: 1, max: 8, step: 0.5 },
+      { key: 'smokeOpacity', label: 'Smoke: opacity', min: 0.05, max: 1, step: 0.05 },
     ],
   },
   {

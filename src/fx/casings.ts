@@ -49,6 +49,7 @@ export class Casings {
       this.pool.push({ mesh, velocity: new THREE.Vector3(), spin: new THREE.Vector3(), ageSec: 0, resting: false, active: false });
     }
     events.on('weapon:fired', ({ weapon }) => this.eject(weapon));
+    events.on('weapon:jam-cleared', ({ weapon }) => this.eject(weapon)); // the stuck round is thrown out
   }
 
   /** Throws a casing out of the gun's port, to the right and up, in the direction the camera is facing. */

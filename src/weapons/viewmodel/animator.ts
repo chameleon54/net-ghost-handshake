@@ -33,6 +33,8 @@ export interface Pose {
   magVisible: boolean;
   /** The slide (pistol) or bolt (rifle), moved toward the player. */
   slideZ: number;
+  /** A brass casing stuck in the ejection port (a jam). */
+  stuckCasing: boolean;
   /** The off hand. */
   handX: number;
   handY: number;
@@ -52,6 +54,8 @@ export interface AnimatorInput {
   checkProgress?: number | null;
   /** True when the gun is empty: the slide or bolt stays locked back. */
   lockedOpen?: boolean;
+  /** True while the gun is jammed: the slide or bolt sits part way back with a casing stuck in the port. */
+  jammed?: boolean;
   sprinting: boolean;
   /** 0 at the hip, 1 fully aimed. Walk bob and turning sway get smaller as it rises. */
   aimBlend?: number;
@@ -84,7 +88,7 @@ const softLimit = (value: number, limit: number): number => (limit <= 0 ? 0 : li
 export class ViewmodelAnimator {
   readonly pose: Pose = {
     x: 0, y: 0, z: 0, pitchRad: 0, yawRad: 0, rollRad: 0,
-    magY: 0, magVisible: true, slideZ: 0, handX: 0, handY: 0, handZ: 0,
+    magY: 0, magVisible: true, slideZ: 0, stuckCasing: false, handX: 0, handY: 0, handZ: 0,
   };
 
   private readonly kickBack = new Spring(config.kickFrequencyHz, config.kickDampingRatio);
@@ -96,6 +100,7 @@ export class ViewmodelAnimator {
   private readonly keyed: Transform = { x: 0, y: 0, z: 0, pitchRad: 0, yawRad: 0, rollRad: 0 };
   private sinceShotSec = notStarted;
   private sinceSwingSec = notStarted;
+  private sinceRackSec = notStarted;
   private inspectSec: number | null = null;
   private sprintBlend = 0;
   private bobPhase = 0;
@@ -108,6 +113,12 @@ export class ViewmodelAnimator {
     this.kickBack.impulse(weapon === 'rifle' ? config.rifleKickBackM : config.pistolKickBackM);
     this.kickUp.impulse(weapon === 'rifle' ? config.rifleKickUpRad : config.pistolKickUpRad);
     this.sinceShotSec = 0;
+    this.inspectSec = null;
+  }
+
+  /** One fast rack while clearing a jam. */
+  racked(): void {
+    this.sinceRackSec = 0;
     this.inspectSec = null;
   }
 
@@ -148,6 +159,7 @@ export class ViewmodelAnimator {
     this.kickUp.update(motionDtSec);
     this.sinceShotSec += motionDtSec;
     this.sinceSwingSec += motionDtSec;
+    this.sinceRackSec += motionDtSec;
 
     // Sprint pose eases in and out over its time.
     const sprintStep = dtSec / Math.max(config.sprintPoseTimeSec, 0.01);
@@ -200,6 +212,18 @@ export class ViewmodelAnimator {
     // The slide or bolt: cycles on a shot, and stays locked back when the gun is empty.
     const slideTravelM = gun === null ? 0 : gun === 'rifle' ? config.rifleBoltBackM : config.pistolSlideBackM;
     pose.slideZ = this.slideOffset(slideTravelM, lockedOpen);
+    pose.stuckCasing = gun !== null && (input.jammed ?? false);
+    if (pose.stuckCasing) pose.slideZ = slideTravelM * config.jammedSlideShare;
+    if (gun !== null) {
+      // Each tap that clears a jam: the off hand reaches back and the slide or bolt is pulled and let go, fast.
+      const rack = this.sinceRackSec / Math.max(config.rackTapSec, 0.01);
+      if (rack < 1) {
+        const bump = Math.sin(Math.PI * rack);
+        pose.slideZ = Math.max(pose.slideZ, slideTravelM * bump);
+        pose.handZ = rackReachM[gun] * bump;
+        pose.handY = 0.02 * bump;
+      }
+    }
 
     if (gun !== null && reloadProgress !== null) {
       // A reload with an empty chamber ends with a rack: the first part is the magazine swap, the last part the rack.
@@ -313,6 +337,7 @@ export class ViewmodelAnimator {
     this.swayPitch.reset();
     this.sinceShotSec = notStarted;
     this.sinceSwingSec = notStarted;
+    this.sinceRackSec = notStarted;
     this.inspectSec = null;
     this.preview = null;
   }

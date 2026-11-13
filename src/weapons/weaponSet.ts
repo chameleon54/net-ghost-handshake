@@ -44,6 +44,17 @@ export class WeaponSet {
     return this.current === 'rifle' ? this.rifle : this.current === 'pistol' ? this.pistol : null;
   }
 
+  /** Dev panel testing aid: no gun uses ammo while on. */
+  setInfiniteAmmo(on: boolean): void {
+    this.rifle.infiniteAmmo = on;
+    this.pistol.infiniteAmmo = on;
+  }
+
+  /** The rifle's heat, 0 to 100, even while it is not in hand (its smoke follows it). */
+  get rifleHeat(): number {
+    return this.rifle.heat;
+  }
+
   /** How far through the draw we are, 0 to 1 (1 when done). The draw animation follows this. */
   get drawProgress(): number {
     return this.drawing ? 1 - this.drawLeftSec / this.drawTotalSec : 1;
@@ -76,6 +87,9 @@ export class WeaponSet {
     this.drawLeftSec = Math.max(this.drawLeftSec - dtSec, 0);
     const ready = !this.drawing;
     const canFire = input.canFire && ready;
+
+    // A gun that is not in hand still cools down.
+    for (const holstered of [this.rifle, this.pistol]) if (holstered !== this.gun) holstered.tickHeat(dtSec);
 
     const gun = this.gun;
     if (gun) {

@@ -20,6 +20,8 @@ export interface WeaponModel {
   muzzle: THREE.Object3D | null;
   /** Where spent casings leave the gun. Null for the knife. */
   ejection: THREE.Object3D | null;
+  /** A brass casing sticking out of the port, shown while the gun is jammed. Null for the knife. */
+  stuckCasing: THREE.Object3D | null;
   /** Where the root sits in the camera's space when hanging at rest, and when fully aimed. */
   rest: { x: number; y: number; z: number; pitchRad: number; yawRad: number; rollRad: number };
   aimed: { x: number; y: number; z: number };
@@ -36,7 +38,9 @@ const colours = {
   blade: 0xc5ced6,
   handle: 0x2a2d31,
   sight: 0x0f1113,
+  brass: 0xc9a227,
 } as const;
+
 
 const materials = new Map<number, THREE.MeshStandardMaterial>();
 function material(colour: number): THREE.MeshStandardMaterial {
@@ -94,8 +98,10 @@ function buildRifle(): WeaponModel {
   box(handOff, 0.06, 0.055, 0.1, colours.glove, 0, 0, 0);
   const muzzle = anchor(root, 0, 0.005, -0.72);
   const ejection = anchor(root, 0.035, 0.03, 0.0); // the port on the right of the receiver
+  const stuckCasing = box(root, 0.025, 0.012, 0.035, colours.brass, 0.045, 0.03, 0.0);
+  stuckCasing.visible = false;
   return {
-    root, mag, slide, handStrong, handOff, muzzle, ejection,
+    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing,
     rest: { x: 0.17, y: -0.2, z: -0.4, ...noRotation },
     aimed: { x: 0, y: -0.095, z: -0.4 },
     base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
@@ -118,8 +124,10 @@ function buildPistol(): WeaponModel {
   box(handOff, 0.05, 0.05, 0.06, colours.glove, 0, 0, 0);
   const muzzle = anchor(root, 0, 0.04, -0.23);
   const ejection = anchor(root, 0.016, 0.04, 0.0); // the slide's ejection port
+  const stuckCasing = box(root, 0.02, 0.012, 0.03, colours.brass, 0.03, 0.05, 0.0);
+  stuckCasing.visible = false;
   return {
-    root, mag, slide, handStrong, handOff, muzzle, ejection,
+    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing,
     rest: { x: 0.13, y: -0.17, z: -0.33, ...noRotation },
     aimed: { x: 0, y: -0.075, z: -0.33 },
     base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
@@ -134,7 +142,7 @@ function buildKnife(): WeaponModel {
   const handStrong = anchor(root, 0, -0.012, 0.05);
   box(handStrong, 0.04, 0.045, 0.06, colours.glove, 0, 0, 0);
   return {
-    root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null,
+    root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null, stuckCasing: null,
     // Held blade-up and angled across, ready to swing.
     rest: { x: 0.14, y: -0.17, z: -0.36, pitchRad: 0.6, yawRad: 0.3, rollRad: -0.2 },
     aimed: { x: 0.14, y: -0.17, z: -0.36 },

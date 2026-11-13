@@ -14,6 +14,19 @@ export const pistolConfigDefaults = {
   /** The least lethal gun in the game, the same class as the enemy pistol (enemies.md). A headshot always kills. */
   bodyDamagePerHit: 8,
 
+  // Heat and jams: the P9 does not heat, but has a very rare flat chance (about 1 in 400 shots) to jam.
+  heatPerShot: 0,
+  heatCoolPerSec: 15,
+  heatCoolDelaySec: 0.4,
+  heatSmokeStart: 50,
+  jamHeatStart: 60,
+  jamRiskPerShotAtMaxHeat: 0,
+  jamRiskMax: 0.3,
+  jamChanceFlat: 0.0025,
+  jamFreeRounds: 5,
+  jamFreeAfterClearSec: 10,
+  jamClearTaps: 2,
+
   // Aiming down sights. About 1.1 degrees of scatter from the hip, about 0.1 when aimed.
   hipSpreadRad: 0.019,
   aimedSpreadRad: 0.002,

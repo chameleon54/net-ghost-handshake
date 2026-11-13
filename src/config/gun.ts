@@ -15,6 +15,29 @@ export interface GunConfig {
   checkMagazineSec: number;
   /** Damage of a body hit. A headshot always kills. */
   bodyDamagePerHit: number;
+  /** Heat added by each shot (0 for a gun that does not heat). Heat runs from 0 to 100. */
+  heatPerShot: number;
+  heatCoolPerSec: number;
+  /** After the last shot the gun waits this long before it starts to cool. */
+  heatCoolDelaySec: number;
+  /** Heat at which barrel smoke starts. */
+  heatSmokeStart: number;
+  /** Heat below which shots add no jam risk. */
+  jamHeatStart: number;
+  /**
+   * Jam risk added by each shot at 100 heat (it rises smoothly from nothing at `jamHeatStart`). The risk builds up and
+   * does not fall when the barrel cools: it goes back to 0 only when a jam happens (and clearing it resets the heat to 0).
+   */
+  jamRiskPerShotAtMaxHeat: number;
+  /** The most jam risk can build up to. */
+  jamRiskMax: number;
+  /** A jam chance per shot that does not depend on heat (the pistol's rare one). */
+  jamChanceFlat: number;
+  /** No jam in this many first rounds fired from a magazine, and none for this long after clearing a jam. */
+  jamFreeRounds: number;
+  jamFreeAfterClearSec: number;
+  /** Separate taps of R needed to clear a jam. */
+  jamClearTaps: number;
   /** Bullet scatter (half-angle of a cone) when not aiming, and when fully aimed down sights. */
   hipSpreadRad: number;
   aimedSpreadRad: number;

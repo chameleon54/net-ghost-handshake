@@ -9,5 +9,7 @@ export const uiText = {
   magazineFeel: { full: 'full', mostlyFull: 'mostly full', aboutHalf: 'about half', nearlyEmpty: 'nearly empty', empty: 'empty' },
   /** Temporary readout labels for the magazine check. */
   magazineCheck: { gun: 'Magazine', spares: 'Spares', noSpares: 'none' },
+  /** The jam prompt (ui.md: "Tap R"). */
+  jammed: 'JAMMED   Tap R',
   captureRefused: 'The browser did not allow that yet. Click again',
 } as const;

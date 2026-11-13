@@ -36,6 +36,7 @@ export class Viewmodel {
     }
     events.on('weapon:fired', ({ weapon }) => this.animator.fired(weapon));
     events.on('weapon:swing', () => this.animator.swung());
+    events.on('weapon:rack', () => this.animator.racked());
   }
 
   setAspect(aspect: number): void {
@@ -77,6 +78,7 @@ export class Viewmodel {
       model.mag.visible = pose.magVisible;
     }
     if (model.slide) model.slide.position.z = base.slideZ + pose.slideZ;
+    if (model.stuckCasing) model.stuckCasing.visible = pose.stuckCasing;
     if (model.handOff) model.handOff.position.set(base.handOff.x + pose.handX, base.handOff.y + pose.handY, base.handOff.z + pose.handZ);
 
     // Tracers start where the muzzle really is this frame, and casings where the ejection port is.

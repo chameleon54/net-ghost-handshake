@@ -6,6 +6,7 @@ import type { WeaponEvents } from '../src/weapons/events';
 import { Gun, type GunInput } from '../src/weapons/gun';
 
 const dtSec = 1 / 60;
+const neverJam = () => 0.999; // a random number that never rolls a jam
 const held: GunInput = { triggerHeld: true, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
 const idle: GunInput = { triggerHeld: false, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
 
@@ -17,7 +18,7 @@ function setup(kind: 'rifle' | 'pistol' = 'rifle') {
   events.on('weapon:reload-started', () => count.started++);
   events.on('weapon:reloaded', () => count.reloaded++);
   const gun =
-    kind === 'rifle' ? new Gun(events, 'rifle', { ...rifleConfigDefaults }, true) : new Gun(events, 'pistol', { ...pistolConfigDefaults }, false);
+    kind === 'rifle' ? new Gun(events, 'rifle', { ...rifleConfigDefaults }, true, neverJam) : new Gun(events, 'pistol', { ...pistolConfigDefaults }, false, neverJam);
   return { gun, count };
 }
 
@@ -143,7 +144,7 @@ describe('reloads and checks', () => {
     let fired = 0;
     events.on('weapon:magazine-checked', ({ check }) => words.push(check.gun.feel));
     events.on('weapon:fired', () => fired++);
-    const gun = new Gun(events, 'rifle', { ...rifleConfigDefaults }, true);
+    const gun = new Gun(events, 'rifle', { ...rifleConfigDefaults }, true, neverJam);
     gun.update(dtSec, { ...idle, checkRequested: true });
     expect(gun.checking).toBe(true);
     run(gun, held, rifleConfigDefaults.checkMagazineSec * 0.6); // trying to fire during the check
