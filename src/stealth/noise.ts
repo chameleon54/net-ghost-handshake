@@ -13,7 +13,12 @@ export type NoiseKind =
   | 'knife-swing'
   | 'knife-stab'
   | 'grenade-bounce'
-  | 'grenade-blast';
+  | 'grenade-blast'
+  | 'footstep'
+  | 'slide'
+  | 'vault'
+  | 'climb'
+  | 'landing';
 
 /**
  * A sound the player made that enemies could hear (architecture.md: the Noise service). It carries where it came from

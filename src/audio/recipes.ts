@@ -38,12 +38,20 @@ export const soundNames = [
   'heal-done',
   'heartbeat',
   'breath-heavy',
+  'step-concrete',
+  'step-metal',
+  'step-tile',
+  'slide',
+  'vault',
+  'climb',
+  'land-soft',
+  'land-hard',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
 
 /** Which volume group a sound belongs to (see config/audio.ts). */
-export type SoundGroup = 'weapon' | 'handling' | 'impact';
+export type SoundGroup = 'weapon' | 'handling' | 'impact' | 'movement';
 
 interface Recipe {
   group: SoundGroup;
@@ -427,6 +435,107 @@ export const recipes: Record<SoundName, Recipe> = {
       addNoise(s, sr, { duration: 0.6, decay: 0.5, gain: 0.7, highpass: 250, lowpass: between(rng, 1800, 2400), attack: 0.22, rng });
       addNoise(s, sr, { start: 0.55, duration: 0.8, decay: 0.25, gain: 0.55, highpass: 200, lowpass: between(rng, 1300, 1800), attack: 0.12, rng });
       return finish(s, sr, { peak: 0.5 });
+    },
+  },
+  // Footsteps, one per surface. Several versions each, picked at random, so a walk does not repeat one sample.
+  // Concrete: a dull thud with a gritty scuff.
+  'step-concrete': {
+    group: 'movement',
+    variants: 4,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.22);
+      thunk(s, sr, 0, 0.8, between(rng, 95, 125), 55);
+      addNoise(s, sr, { duration: 0.1, decay: 0.03, gain: 0.7, highpass: 200, lowpass: between(rng, 1400, 2000), rng });
+      addNoise(s, sr, { start: 0.015, duration: 0.08, decay: 0.03, gain: 0.25, highpass: 2500, lowpass: 6000, rng });
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // Metal grating: a hollow clank with a short ring.
+  'step-metal': {
+    group: 'movement',
+    variants: 4,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.35);
+      thunk(s, sr, 0, 0.6, between(rng, 130, 170), 80);
+      addNoise(s, sr, { duration: 0.06, decay: 0.015, gain: 0.6, highpass: 800, lowpass: 5000, rng });
+      addTone(s, sr, { duration: 0.3, freq: between(rng, 420, 520), decay: 0.09, gain: 0.3 });
+      addTone(s, sr, { duration: 0.25, freq: between(rng, 1100, 1400), decay: 0.06, gain: 0.15 });
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // Tile: a sharp click on a hard floor with a faint thud under it.
+  'step-tile': {
+    group: 'movement',
+    variants: 4,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.16);
+      addNoise(s, sr, { duration: 0.03, decay: 0.008, gain: 0.9, highpass: 1500, lowpass: 8000, rng });
+      addTone(s, sr, { duration: 0.08, freq: between(rng, 1700, 2100), decay: 0.02, gain: 0.3 });
+      thunk(s, sr, 0, 0.4, between(rng, 110, 140), 70);
+      return finish(s, sr, { peak: 0.5 });
+    },
+  },
+  // A slide: a long scuff of cloth and boots that fades out.
+  'slide': {
+    group: 'movement',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.8);
+      addNoise(s, sr, { duration: 0.75, decay: 0.3, gain: 0.8, highpass: 350, lowpass: between(rng, 2600, 3400), attack: 0.06, rng });
+      addNoise(s, sr, { duration: 0.6, decay: 0.25, gain: 0.3, highpass: 2500, lowpass: 7000, attack: 0.05, rng });
+      thunk(s, sr, 0, 0.35, 100, 60);
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // A vault: a rush of cloth over the obstacle, then a boot tap on the far side.
+  'vault': {
+    group: 'movement',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.6);
+      addSweep(s, sr, { duration: 0.34, fromHz: 300, toHz: 1300, q: 1.2, gain: 1.3, rng });
+      addNoise(s, sr, { start: 0.04, duration: 0.2, decay: 0.08, gain: 0.25, highpass: 400, lowpass: 3000, attack: 0.03, rng });
+      thunk(s, sr, 0.34, 0.6, between(rng, 120, 150), 70);
+      addNoise(s, sr, { start: 0.34, duration: 0.08, decay: 0.025, gain: 0.5, highpass: 200, lowpass: 2200, rng });
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // A climb: hands slapping and boots scraping up the face of the obstacle, then a push over the edge.
+  'climb': {
+    group: 'movement',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.9);
+      for (const start of [0, 0.22, 0.44]) {
+        addNoise(s, sr, { start, duration: 0.14, decay: 0.05, gain: 0.55, highpass: 500, lowpass: between(rng, 3000, 4200), attack: 0.01, rng });
+        thunk(s, sr, start + 0.02, 0.35, between(rng, 140, 190), 90);
+      }
+      addNoise(s, sr, { start: 0.62, duration: 0.25, decay: 0.1, gain: 0.45, highpass: 300, lowpass: 2600, attack: 0.05, rng });
+      thunk(s, sr, 0.7, 0.5, 110, 60);
+      return finish(s, sr, { peak: 0.55 });
+    },
+  },
+  // Landings: a light one, and a heavy one for a hard fall.
+  'land-soft': {
+    group: 'movement',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.3);
+      thunk(s, sr, 0, 1.0, between(rng, 100, 125), 55);
+      addNoise(s, sr, { duration: 0.12, decay: 0.04, gain: 0.6, lowpass: 1300, rng });
+      return finish(s, sr, { peak: 0.6 });
+    },
+  },
+  'land-hard': {
+    group: 'movement',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.7);
+      thunk(s, sr, 0, 1.4, between(rng, 75, 95), 32);
+      addTone(s, sr, { duration: 0.5, freq: 48, freqEnd: 28, decay: 0.15, gain: 1.0 });
+      addNoise(s, sr, { duration: 0.25, decay: 0.08, gain: 0.9, lowpass: 1000, rng });
+      addNoise(s, sr, { duration: 0.04, decay: 0.01, gain: 0.6, highpass: 1500, lowpass: 6000, rng });
+      return finish(s, sr, { peak: 0.8, drive: 1.8 });
     },
   },
 };

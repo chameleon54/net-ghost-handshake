@@ -6,6 +6,8 @@ export const audioConfigDefaults = {
   weaponVolume: 1,
   /** Handling: clicks, racks, magazines, draws, swings, inspects. */
   handlingVolume: 0.8,
+  /** Movement: footsteps, the slide, vaults, climbs and landings. */
+  movementVolume: 0.8,
   /** Bullet impacts, hit ticks and bouncing casings. */
   impactVolume: 0.6,
   /** How loud the suppressed P9 is next to the rifle: quieter, never silent. */

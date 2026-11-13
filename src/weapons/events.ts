@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { HitZone } from '../enemies/dummy';
+import type { Surface } from '../data/greyboxRoom';
 import type { DamageSource } from '../player/playerHealth';
 import type { Noise } from '../stealth/noise';
 import type { MagazineCheck } from './magazineFeel';
@@ -74,6 +75,14 @@ export type WeaponEvents = {
   'player:died': { source: DamageSource };
   /** A blast went off close to the player: his ears ring for `durationSec`. The sound is added later. */
   'player:deafened': { intensity: number; durationSec: number };
+  /** A footstep: `foot` alternates 0 and 1. The sound and the noise service listen. The position vector is a copy. */
+  'player:step': { kind: 'walk' | 'crouch' | 'sprint'; surface: Surface; foot: 0 | 1; position: Vector3 };
+  /** A slide began. */
+  'player:slid': { surface: Surface; position: Vector3 };
+  /** A vault or a climb began. */
+  'player:mantled': { kind: 'vault' | 'climb'; position: Vector3 };
+  /** The player came down onto something after being in the air, at `speedMps` downward. */
+  'player:landed': { speedMps: number; surface: Surface; position: Vector3 };
   /** A spent casing bounced off a surface, at `speedMps` into it. For the clink. The position vector is reused. */
   'casing:bounced': { position: Vector3; speedMps: number };
 };

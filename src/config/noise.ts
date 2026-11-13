@@ -21,6 +21,16 @@ export const noiseConfigDefaults = {
   /** A grenade bouncing, and its blast. */
   grenadeBounceM: 8,
   grenadeBlastM: 80,
+  /** Footsteps (milestone 3.4): crouching is close to silent, sprinting is loud (gameplay.md). */
+  walkStepM: 6,
+  crouchStepM: 2,
+  sprintStepM: 15,
+  slideM: 10,
+  vaultM: 6,
+  climbM: 5,
+  /** A landing: this far for a light one, this far for a hard fall. */
+  landingSoftM: 6,
+  landingHardM: 15,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

@@ -2,11 +2,25 @@
 // Interior is 16 m (x) by 12 m (z), centred on 0,0. Heights follow the bands in level.md:
 // low cover about 1.0 m, climbable 1.1-2.0 m, wall above 2.0 m.
 
+/** What a floor or the top of a prop is made of. It decides which footstep sound plays (audio.md). */
+export type Surface = 'concrete' | 'metal' | 'tile';
+
+/** A patch of floor with its own surface. Anywhere not covered is concrete. */
+export interface FloorZone {
+  xM: number;
+  zM: number;
+  widthM: number;
+  depthM: number;
+  surface: Surface;
+}
+
 export interface RoomBox {
   kind: 'wall' | 'prop' | 'marker';
   /** Centre of the box on the floor. */
   xM: number;
   zM: number;
+  /** What the top of this box is made of, for footsteps. Leave out for the default: props metal, walls concrete. */
+  surface?: Surface;
   /** Whether Space can climb or vault it. Leave out for the default: props yes, walls no (so nobody climbs out of the room). */
   climbable?: boolean;
   /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
@@ -29,6 +43,12 @@ export interface HazardPad {
   widthM: number;
   depthM: number;
 }
+
+/** The floor: concrete everywhere except these patches, so each footstep sound can be heard (milestone 3.4). */
+export const greyboxFloors: readonly FloorZone[] = [
+  { xM: -5.5, zM: 4.8, widthM: 4, depthM: 2.4, surface: 'tile' },
+  { xM: 4.7, zM: 4.6, widthM: 3, depthM: 2.8, surface: 'metal' },
+];
 
 export const greyboxHazards: readonly HazardPad[] = [{ xM: 6, zM: -0.5, widthM: 2, depthM: 2 }];
 

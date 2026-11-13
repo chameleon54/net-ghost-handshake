@@ -9,6 +9,8 @@ import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
+import type { SoundTap } from '../audio/soundTap';
+import { CaptionList, CaptionView, formatCaption } from './captions';
 import type { PlayerHealth } from '../player/playerHealth';
 import type { HealItems } from '../player/healItems';
 import { difficultySetting } from '../config/difficulty';
@@ -24,7 +26,8 @@ import { soundNames } from '../audio/recipes';
 import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { movementConfig, movementConfigDefaults } from '../config/movement';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -46,6 +49,8 @@ interface Parts {
   thrower: GrenadeThrower;
   health: PlayerHealth;
   heals: HealItems;
+  /** Every sound the game plays goes through it, so the captions can list them. */
+  soundTap: SoundTap;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -56,7 +61,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -115,6 +120,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(noiseConfig, noiseConfigDefaults);
       resetToDefaults(healthConfig, healthConfigDefaults);
       resetToDefaults(healthFx, healthFxDefaults);
+      resetToDefaults(movementConfig, movementConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -134,6 +140,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/noise.ts': changedValues(noiseConfig, noiseConfigDefaults),
           'src/config/health.ts': changedValues(healthConfig, healthConfigDefaults),
           'src/config/healthFx.ts': changedValues(healthFx, healthFxDefaults),
+          'src/config/movement.ts': changedValues(movementConfig, movementConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -215,6 +222,22 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     for (const s of folder.sliders) f.add(healthFx, s.key, s.min, s.max, s.step).name(s.label);
   }
 
+  const movementPanel = gui.addFolder(movementFolder.title);
+  movementPanel.close();
+  for (const s of movementFolder.sliders) movementPanel.add(movementConfig, s.key, s.min, s.max, s.step).name(s.label);
+  // Sound captions: a line on screen for every sound the game plays (or would play), so placeholders can be checked by eye.
+  const captionList = new CaptionList();
+  const captionView = new CaptionView();
+  const captionState = { on: false };
+  movementPanel
+    .add(captionState, 'on')
+    .name('Show sound captions (all sounds)')
+    .onChange((on: boolean) => {
+      soundTap.onPlay = on ? (name, options, audible) => captionList.add(formatCaption(name, options, audible)) : null;
+      if (!on) captionList.clear();
+      captionView.show(captionList);
+    });
+
   const noisePanel = gui.addFolder(noiseFolder.title);
   noisePanel.close();
   for (const s of noiseFolder.sliders) noisePanel.add(noiseConfig, s.key, s.min, s.max, s.step).name(s.label);
@@ -282,6 +305,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
 
       if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
       updateReadouts(dtSec);
+      if (captionState.on) {
+        captionList.update(dtSec);
+        captionView.show(captionList);
+      }
       if (!freeCamera.active) return false;
       updateMarker();
       freeCamera.update(dtSec, input, camera);

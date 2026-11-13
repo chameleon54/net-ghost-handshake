@@ -20,6 +20,9 @@ import { createHud } from './ui/hud';
 import { HealthScreen } from './ui/healthScreen';
 import { HealthFeelState } from './player/healthFeel';
 import { HealthSounds } from './audio/healthSounds';
+import { MovementSounds } from './audio/movementSounds';
+import { MovementReporter } from './player/movementReporter';
+import { surfaceAt } from './level/surfaces';
 import { EventBus } from './core/events';
 import { greyboxDummies } from './data/greyboxDummies';
 import { Dummy } from './enemies/dummy';
@@ -32,6 +35,7 @@ import { grenadeConfig } from './config/grenade';
 import { inputConfig } from './config/input';
 import { BarrelSmoke } from './fx/barrelSmoke';
 import { AudioSystem } from './audio/audioSystem';
+import { SoundTap } from './audio/soundTap';
 import { NoiseReporter } from './stealth/noiseReporter';
 import { WeaponSounds } from './audio/weaponSounds';
 import { viewmodelConfig } from './config/viewmodel';
@@ -96,8 +100,16 @@ const tracers = new Tracers(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
 const audio = new AudioSystem(scene, camera);
-const weaponSounds = new WeaponSounds(weaponEvents, audio);
-new NoiseReporter(weaponEvents, () => camera.position); // what the player does that enemies could hear (they listen from 4.10)
+const sounds = new SoundTap(audio, () => audio.running); // every sound passes through it; the dev panel's captions listen
+const weaponSounds = new WeaponSounds(weaponEvents, sounds);
+new NoiseReporter(weaponEvents, () => camera.position);
+// Movement sounds (3.4): the reporter says what the player did, the sounds and the noise service listen.
+const movement = new MovementReporter(weaponEvents, player, surfaceAt);
+new MovementSounds(weaponEvents, sounds);
+player.onLanded = (speedMps) => {
+  playerHealth.damage(fallDamage(speedMps), 'fall');
+  movement.landed(speedMps);
+}; // what the player does that enemies could hear (they listen from 4.10)
 const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmodel.ejectionPorts);
 // R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
 const reloadKey = new HoldTap();
@@ -108,7 +120,6 @@ const thrower = new GrenadeThrower(weaponEvents);
 const blastTargets = dummies.map((dummy) => dummyBlastTarget(dummy, weaponEvents));
 const playerHealth = new PlayerHealth(weaponEvents);
 const heals = new HealItems(weaponEvents, playerHealth);
-player.onLanded = (speedMps) => playerHealth.damage(fallDamage(speedMps), 'fall');
 const playerBlastTarget = {
   chest: (out: THREE.Vector3) => out.set(player.position.x, player.position.y + grenadeConfig.targetChestHeightM, player.position.z),
   vulnerable: () => !playerHealth.dead,
@@ -121,7 +132,7 @@ const cameraShake = new CameraShake(weaponEvents, () => camera.position);
 const hud = createHud(weaponEvents, viewmodel);
 const healthFeel = new HealthFeelState();
 const healthScreen = new HealthScreen(renderer.domElement);
-const healthSounds = new HealthSounds(audio);
+const healthSounds = new HealthSounds(sounds);
 weaponEvents.on('player:damaged', ({ amount }) => healthFeel.hit(amount));
 
 window.addEventListener('resize', () => {
@@ -167,6 +178,7 @@ function restart(): void {
   deathOverlay.hide();
   playerHealth.reset();
   player.respawn();
+  movement.reset();
   weapons.reset();
   thrower.reset();
   heals.reset();
@@ -200,7 +212,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds });
   });
 }
 
@@ -239,6 +251,7 @@ const loop = new Loop(
 
     player.handsBusy = heals.busy;
     player.fixedUpdate(stepSec, input);
+    movement.update();
     // R and F: tap or hold. Their presses are consumed so nothing stale is remembered.
     input.consumePress('KeyR');
     input.consumePress('KeyF');

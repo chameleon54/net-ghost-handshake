@@ -11,7 +11,13 @@ const duckFadeSec = 0.6; // the lowering fades back over this long at the end
 const spatialRefDistanceM = 4; // inside this distance a positional sound is at full volume; beyond it, it fades
 
 const groupVolume = (group: SoundGroup): number =>
-  group === 'weapon' ? audioConfig.weaponVolume : group === 'handling' ? audioConfig.handlingVolume : audioConfig.impactVolume;
+  group === 'weapon'
+    ? audioConfig.weaponVolume
+    : group === 'handling'
+      ? audioConfig.handlingVolume
+      : group === 'movement'
+        ? audioConfig.movementVolume
+        : audioConfig.impactVolume;
 
 // The game's sound: three.js's built-in audio on a listener that rides on the camera, with a fixed number of voices
 // (so nothing is created while shooting). Sounds in the world are positional, so they come from where they happen.
@@ -35,6 +41,11 @@ export class AudioSystem implements SoundPlayer {
   unlock(): void {
     if (!this.listener) this.create();
     resumeAudio(this.listener!.context as AudioContext);
+  }
+
+  /** True when sound can really be heard: the audio has started and is not suspended. */
+  get running(): boolean {
+    return this.listener !== null && this.listener.context.state === 'running';
   }
 
   /** Lowers everything by `share` for `seconds` (ringing ears). A longer or stronger one wins over a weaker one still running. */

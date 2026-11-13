@@ -216,6 +216,11 @@ export class Mantle {
     }
   }
 
+  /** Whether the move under way is a vault (over low cover) or a climb (up onto something). */
+  get kind(): 'vault' | 'climb' {
+    return this.phase;
+  }
+
   /** Stops a move in progress (instant restart). */
   cancel(): void {
     this.active = false;

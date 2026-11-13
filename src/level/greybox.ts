@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { greyboxHazards, greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
+import { greyboxFloors, greyboxHazards, greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
 import { LevelCollision } from './collision';
 
 export interface GreyboxLevel {
@@ -31,6 +31,17 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
     new THREE.MeshStandardMaterial({ color: shades.floor }),
   );
   group.add(floor);
+
+  // The floor patches with their own surface (footsteps): drawn in slightly different tints so they can be told apart.
+  const surfaceTints = { concrete: shades.floor, metal: 0x263340, tile: 0x4a5258 } as const;
+  for (const zone of greyboxFloors) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(zone.widthM, zone.depthM).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: surfaceTints[zone.surface], polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5 }),
+    );
+    mesh.position.set(zone.xM, 0.003, zone.zM);
+    group.add(mesh);
+  }
 
   // The test hazard pads: flat red squares on the floor.
   for (const pad of greyboxHazards) {

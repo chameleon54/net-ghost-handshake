@@ -6,6 +6,8 @@ export interface PlayOptions {
   volume?: number;
   /** Playback speed: 1 is normal, 1.04 is a little higher and faster. */
   rate?: number;
+  /** What the sound is for, in a few words. Not used for playing: the dev panel's captions show it. */
+  note?: string;
   /** Where the sound is in the world. Without it the sound is centred, like your own gun. */
   position?: Vector3;
 }

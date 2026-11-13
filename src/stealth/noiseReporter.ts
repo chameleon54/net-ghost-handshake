@@ -1,4 +1,5 @@
 import type { Vector3 } from 'three';
+import { landingLoudness } from '../config/movement';
 import { noiseConfig } from '../config/noise';
 import type { EventBus } from '../core/events';
 import type { WeaponEvents } from '../weapons/events';
@@ -31,6 +32,15 @@ export class NoiseReporter {
     events.on('target:hit', ({ weapon }) => {
       if (weapon === 'knife') this.fromPlayer('knife-stab', noiseConfig.knifeStabM);
     });
+    // Movement (3.4): crouching is close to silent, sprinting is loud. A landing carries further the harder it was.
+    events.on('player:step', ({ kind, position }) =>
+      this.at('footstep', position, kind === 'sprint' ? noiseConfig.sprintStepM : kind === 'crouch' ? noiseConfig.crouchStepM : noiseConfig.walkStepM),
+    );
+    events.on('player:slid', ({ position }) => this.at('slide', position, noiseConfig.slideM));
+    events.on('player:mantled', ({ kind, position }) => this.at(kind, position, kind === 'vault' ? noiseConfig.vaultM : noiseConfig.climbM));
+    events.on('player:landed', ({ speedMps, position }) =>
+      this.at('landing', position, noiseConfig.landingSoftM + (noiseConfig.landingHardM - noiseConfig.landingSoftM) * landingLoudness(speedMps)),
+    );
     events.on('grenade:bounced', ({ position }) => this.at('grenade-bounce', position, noiseConfig.grenadeBounceM));
     events.on('grenade:exploded', ({ position }) => this.at('grenade-blast', position, noiseConfig.grenadeBlastM));
   }

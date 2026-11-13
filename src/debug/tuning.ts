@@ -7,6 +7,7 @@ import type { GrenadeConfig } from '../config/grenade';
 import type { HealthConfig } from '../config/health';
 import type { HealthFxConfig } from '../config/healthFx';
 import type { KnifeConfig } from '../config/knife';
+import type { MovementConfig } from '../config/movement';
 import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
@@ -40,6 +41,7 @@ type AudioKey = keyof AudioConfig;
 type GrenadeKey = keyof GrenadeConfig;
 type NoiseKey = keyof NoiseConfig;
 type HealthKey = keyof HealthConfig;
+type MovementKey = keyof MovementConfig;
 type HealthFxKey = keyof HealthFxConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
@@ -335,6 +337,24 @@ export const viewmodelFolders: Folder<ViewmodelKey>[] = [
 /** Viewmodel config values that are deliberately not in those folders. */
 export const viewmodelKeysNotOnPanel: readonly ViewmodelKey[] = ['slowMotionScale']; // next to the preview buttons
 
+export const movementFolder: Folder<MovementKey> = {
+  title: 'Movement sounds',
+  sliders: [
+    { key: 'stepEveryWalkM', label: 'Step spacing, walking (m)', min: 0.5, max: 4, step: 0.1 },
+    { key: 'stepEveryCrouchM', label: 'Step spacing, crouching (m)', min: 0.5, max: 4, step: 0.1 },
+    { key: 'stepEverySprintM', label: 'Step spacing, sprinting (m)', min: 0.5, max: 5, step: 0.1 },
+    { key: 'stepVolumeWalk', label: 'Footstep volume, walking', min: 0, max: 1.5, step: 0.05 },
+    { key: 'stepVolumeCrouch', label: 'Footstep volume, crouching', min: 0, max: 1.5, step: 0.05 },
+    { key: 'stepVolumeSprint', label: 'Footstep volume, sprinting', min: 0, max: 1.5, step: 0.05 },
+    { key: 'footPitchShare', label: 'Left and right foot pitch apart', min: 0, max: 0.15, step: 0.005 },
+    { key: 'slideVolume', label: 'Slide volume', min: 0, max: 1.5, step: 0.05 },
+    { key: 'vaultVolume', label: 'Vault volume', min: 0, max: 1.5, step: 0.05 },
+    { key: 'climbVolume', label: 'Climb volume', min: 0, max: 1.5, step: 0.05 },
+    { key: 'landMinSpeedMps', label: 'Landings slower than this are silent (m/s)', min: 1, max: 9, step: 0.5 },
+    { key: 'landSoftMinVolume', label: 'Quietest landing volume', min: 0, max: 1, step: 0.05 },
+  ],
+};
+
 export const noiseFolder: Folder<NoiseKey> = {
   title: 'Noise (how far enemies hear)',
   sliders: [
@@ -350,6 +370,14 @@ export const noiseFolder: Folder<NoiseKey> = {
     { key: 'knifeStabM', label: 'Knife stab (m)', min: 0, max: 20, step: 0.5 },
     { key: 'grenadeBounceM', label: 'Grenade bounce (m)', min: 0, max: 40, step: 1 },
     { key: 'grenadeBlastM', label: 'Grenade blast (m)', min: 0, max: 200, step: 5 },
+    { key: 'walkStepM', label: 'Footstep, walking (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'crouchStepM', label: 'Footstep, crouching (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'sprintStepM', label: 'Footstep, sprinting (m)', min: 0, max: 60, step: 0.5 },
+    { key: 'slideM', label: 'Slide (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'vaultM', label: 'Vault (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'climbM', label: 'Climb (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'landingSoftM', label: 'Landing, light (m)', min: 0, max: 40, step: 0.5 },
+    { key: 'landingHardM', label: 'Landing, hard fall (m)', min: 0, max: 60, step: 0.5 },
   ],
 };
 
@@ -384,6 +412,7 @@ export const audioFolder: Folder<AudioKey> = {
     { key: 'masterVolume', label: 'Master volume', min: 0, max: 1.5, step: 0.05 },
     { key: 'weaponVolume', label: 'Gunshots and stabs', min: 0, max: 1.5, step: 0.05 },
     { key: 'handlingVolume', label: 'Handling (clicks, racks, magazines)', min: 0, max: 1.5, step: 0.05 },
+    { key: 'movementVolume', label: 'Movement (footsteps, slide, vault, climb)', min: 0, max: 1.5, step: 0.05 },
     { key: 'impactVolume', label: 'Impacts, hit ticks, casings', min: 0, max: 1.5, step: 0.05 },
     { key: 'pistolLoudness', label: 'Pistol loudness (share of rifle)', min: 0, max: 1, step: 0.05 },
     { key: 'rattleStartHeat', label: 'Hot-barrel rattle from heat', min: 0, max: 100, step: 1 },
