@@ -4,6 +4,7 @@ import type { AudioConfig } from '../config/audio';
 import type { CasingConfig } from '../config/casing';
 import type { DummyConfig } from '../config/dummy';
 import type { GrenadeConfig } from '../config/grenade';
+import type { HealthConfig } from '../config/health';
 import type { KnifeConfig } from '../config/knife';
 import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
@@ -37,6 +38,7 @@ type CasingKey = keyof CasingConfig;
 type AudioKey = keyof AudioConfig;
 type GrenadeKey = keyof GrenadeConfig;
 type NoiseKey = keyof NoiseConfig;
+type HealthKey = keyof HealthConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -415,6 +417,20 @@ export const dummyFolder: Folder<DummyKey> = {
     { key: 'healthPoints', label: 'Health (from next stand-up)', min: 1, max: 500, step: 1 },
     { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'respawnDelaySec', label: 'Time down before standing (s)', min: 0.5, max: 20, step: 0.5 },
+  ],
+};
+
+export const healthFolder: Folder<HealthKey> = {
+  title: 'Health and falls',
+  sliders: [
+    { key: 'maxHealth', label: 'Max health (from next restart)', min: 10, max: 500, step: 5 },
+    { key: 'hazardDamagePerSec', label: 'Hazard pad damage (per s)', min: 1, max: 200, step: 1 },
+    { key: 'fallSafeSpeedMps', label: 'Safe landing speed (m/s)', min: 3, max: 30, step: 0.5 },
+    { key: 'fallDamagePerMps', label: 'Fall damage per m/s over safe', min: 0, max: 100, step: 1 },
+    { key: 'fallSlowBaseSec', label: 'Slow after a hard landing (s)', min: 0, max: 5, step: 0.1 },
+    { key: 'fallSlowPerMpsSec', label: 'Extra slow per m/s over safe (s)', min: 0, max: 2, step: 0.05 },
+    { key: 'fallSlowMaxSec', label: 'Slow lasts at most (s)', min: 0.5, max: 10, step: 0.5 },
+    { key: 'fallSlowSpeedShare', label: 'Walking speed while slowed (share)', min: 0.1, max: 1, step: 0.05 },
   ],
 };
 

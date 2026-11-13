@@ -10,16 +10,24 @@ export class Magazines {
   /** True while a round is in the chamber. Only false when the gun is empty. */
   chambered: boolean;
   /** Rounds in each spare magazine. Never holds an empty one: empty magazines are dropped. */
-  private readonly pouch: number[];
+  private readonly pouch: number[] = [];
 
   /** Start with `count` full magazines, one of them in the gun, and a round chambered. */
   constructor(
     readonly capacityRounds: number,
-    count: number,
+    private readonly startCount: number,
   ) {
-    this.chambered = count > 0;
-    this.magRounds = count > 0 ? capacityRounds : 0;
-    this.pouch = Array.from({ length: Math.max(count - 1, 0) }, () => capacityRounds);
+    this.chambered = false;
+    this.magRounds = 0;
+    this.reset();
+  }
+
+  /** Every magazine full again, the first in the gun with a round chambered (instant restart). */
+  reset(): void {
+    this.chambered = this.startCount > 0;
+    this.magRounds = this.startCount > 0 ? this.capacityRounds : 0;
+    this.pouch.length = 0;
+    for (let i = 1; i < this.startCount; i++) this.pouch.push(this.capacityRounds);
   }
 
   /** Rounds ready to fire: the magazine plus the chambered round. */

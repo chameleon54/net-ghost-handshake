@@ -9,6 +9,11 @@ import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
 import { Player } from './player/player';
+import { fallDamage } from './player/fall';
+import { PlayerHealth } from './player/playerHealth';
+import { healthConfig } from './config/health';
+import { greyboxHazards } from './data/greyboxRoom';
+import { standsOnHazard } from './level/hazards';
 import { createOverlay } from './ui/overlay';
 import { createWeaponReadout } from './ui/weaponReadout';
 import { EventBus } from './core/events';
@@ -93,14 +98,16 @@ const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmo
 // R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
 const reloadKey = new HoldTap();
 const inspectKey = new HoldTap();
-new BulletMarks(scene, weaponEvents);
+const bulletMarks = new BulletMarks(scene, weaponEvents);
 // Grenades: G throws one (the thrower holds the rules), the system flies it and works out the blast, and the effects listen.
 const thrower = new GrenadeThrower(weaponEvents);
 const blastTargets = dummies.map((dummy) => dummyBlastTarget(dummy, weaponEvents));
+const playerHealth = new PlayerHealth(weaponEvents);
+player.onLanded = (speedMps) => playerHealth.damage(fallDamage(speedMps), 'fall');
 const playerBlastTarget = {
   chest: (out: THREE.Vector3) => out.set(player.position.x, player.position.y + grenadeConfig.targetChestHeightM, player.position.z),
-  vulnerable: () => true,
-  hurt: () => {}, // the player has no health until milestone 3.1; the system publishes `player:blast` with the damage
+  vulnerable: () => !playerHealth.dead,
+  hurt: (damage: number) => playerHealth.damage(damage, 'blast'),
 };
 const grenades = new GrenadeSystem(scene, weaponEvents, level.collision, camera, blastTargets, playerBlastTarget);
 const explosions = new Explosions(scene, weaponEvents, level.collision);
@@ -133,6 +140,37 @@ const overlay = createOverlay(() => {
   void pointerLock.request();
 });
 overlay.show(uiText.clickToPlay);
+
+// Death (milestone 3.1): the world freezes under a line of text until Enter, which restarts at once (no page reload).
+// The real death screen is 7.3. The overlay is made after the pause overlay so it sits on top, and clicking it resumes too.
+const deathOverlay = createOverlay(() => void pointerLock.request());
+deathOverlay.hide();
+let dead = false;
+weaponEvents.on('player:died', () => {
+  dead = true;
+  input.consumePress('Enter'); // a stale press must not restart at once
+  deathOverlay.show(uiText.died);
+});
+
+function restart(): void {
+  dead = false;
+  deathOverlay.hide();
+  playerHealth.reset();
+  player.respawn();
+  weapons.reset();
+  thrower.reset();
+  grenades.clear();
+  dummies.forEach((dummy) => dummy.reset());
+  bulletMarks.clear();
+  tracers.clear();
+  casings.clear();
+  explosions.clear();
+  barrelSmoke.clear();
+  cameraShake.reset();
+  shooter.recoil.reset();
+  reloadKey.reset();
+  inspectKey.reset();
+}
 game.events.on('game:playing', () => {
   overlay.hide();
   reloadKey.reset(); // a key that was down when the game paused must not count as a tap on resume
@@ -149,7 +187,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth });
   });
 }
 
@@ -167,6 +205,13 @@ const maxFrameSec = 0.1; // a long pause must not make the weapon jump
 const loop = new Loop(
   (stepSec) => {
     if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
+    if (dead) {
+      if (input.consumePress('Enter')) restart();
+      return;
+    }
+    if (standsOnHazard(player.position.x, player.position.y, player.position.z, greyboxHazards)) {
+      playerHealth.damage(healthConfig.hazardDamagePerSec * stepSec, 'hazard');
+    }
     // Aiming is allowed with a gun out that is not being drawn, and not while sprinting, climbing or vaulting.
     // Reloading does not stop it (owner's choice).
     const gunInHand = weapons.gun;

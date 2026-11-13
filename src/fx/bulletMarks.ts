@@ -35,6 +35,12 @@ export class BulletMarks {
     });
   }
 
+  /** Removes every mark (instant restart). */
+  clear(): void {
+    for (const mark of this.marks) mark.visible = false;
+    this.next = 0;
+  }
+
   private place(point: THREE.Vector3, normal: THREE.Vector3): void {
     const mark = this.marks[this.next];
     this.next = (this.next + 1) % maxMarks;

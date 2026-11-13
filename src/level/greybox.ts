@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
+import { greyboxHazards, greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
 import { LevelCollision } from './collision';
 
 export interface GreyboxLevel {
@@ -31,6 +31,16 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
     new THREE.MeshStandardMaterial({ color: shades.floor }),
   );
   group.add(floor);
+
+  // The test hazard pads: flat red squares on the floor.
+  for (const pad of greyboxHazards) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(pad.widthM, pad.depthM).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xc41e1e, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
+    );
+    mesh.position.set(pad.xM, 0.005, pad.zM);
+    group.add(mesh);
+  }
 
   // A grid helps the eye judge movement. 0.01 m up so it does not flicker against the floor.
   const grid = new THREE.GridHelper(greyboxRoomSize.widthM, greyboxRoomSize.widthM, 0x55606b, 0x3a424a);

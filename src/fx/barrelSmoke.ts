@@ -38,6 +38,15 @@ export class BarrelSmoke {
     }
   }
 
+  /** Removes every puff (instant restart). */
+  clear(): void {
+    for (const puff of this.pool) {
+      puff.active = false;
+      puff.mesh.visible = false;
+    }
+    this.timerSec = 0;
+  }
+
   /** `smoking` is true while the rifle is the weapon in hand; `heat` is its heat, 0 to 100. */
   update(dtSec: number, heat: number, smoking: boolean): void {
     if (smoking && heat >= rifleConfig.heatSmokeStart) {

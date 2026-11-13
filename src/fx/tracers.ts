@@ -36,6 +36,14 @@ export class Tracers {
     events.on('shot:landed', (shot) => this.spawn(shot.muzzle, shot.end));
   }
 
+  /** Removes every streak (instant restart). */
+  clear(): void {
+    for (const tracer of this.pool) {
+      tracer.active = false;
+      tracer.line.visible = false;
+    }
+  }
+
   private spawn(muzzle: THREE.Vector3, end: THREE.Vector3): void {
     // shortcut: if all are busy the shot gets no tracer; the pool is far bigger than a spray needs.
     const tracer = this.pool.find((t) => !t.active);

@@ -66,6 +66,14 @@ export class GrenadeSystem implements GrenadeHooks {
     return this.pool.filter((p) => p.grenade.active).length;
   }
 
+  /** Removes every grenade in the air without a blast (instant restart). */
+  clear(): void {
+    for (const { grenade, mesh } of this.pool) {
+      grenade.active = false;
+      mesh.visible = false;
+    }
+  }
+
   update(dtSec: number): void {
     for (const { grenade, mesh } of this.pool) {
       if (!grenade.active) continue;

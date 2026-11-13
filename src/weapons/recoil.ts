@@ -22,6 +22,12 @@ export class Recoil {
     this.sinceShotSec = 0;
   }
 
+  reset(): void {
+    this.pitchRad = 0;
+    this.yawRad = 0;
+    this.sinceShotSec = Infinity;
+  }
+
   update(dtSec: number): void {
     this.sinceShotSec += dtSec;
     if (this.sinceShotSec < this.config.recoilRecoveryDelaySec) return;

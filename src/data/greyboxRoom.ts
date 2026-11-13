@@ -22,6 +22,16 @@ export function isClimbable(box: RoomBox): boolean {
 
 export const greyboxRoomSize = { widthM: 16, depthM: 12 } as const;
 
+/** A flat pad on the floor that hurts whoever stands on it (milestone 3.1's test hazard). */
+export interface HazardPad {
+  xM: number;
+  zM: number;
+  widthM: number;
+  depthM: number;
+}
+
+export const greyboxHazards: readonly HazardPad[] = [{ xM: 6, zM: -0.5, widthM: 2, depthM: 2 }];
+
 export const greyboxRoom: readonly RoomBox[] = [
   // Outer walls, 0.3 m thick and 3 m tall, just outside the interior.
   { kind: 'wall', xM: 0, zM: -6.15, widthM: 16.6, depthM: 0.3, heightM: 3 },
@@ -47,5 +57,9 @@ export const greyboxRoom: readonly RoomBox[] = [
   // For climbing: a 1.9 m platform (the highest ledge that can be climbed, limit 2.0 m)
   // and a low beam over a corridor, 1.3 m up: you fit under it crouched (1.2 m) but not standing (1.8 m).
   { kind: 'prop', xM: -2, zM: -4, widthM: 2, depthM: 2, heightM: 1.9 }, // leaves a 1 m walkway behind it; a gap narrower than the player would trap them
+  // A second 1.9 m platform stacked on the west edge of the first (x -3 to -2.3): its top is 3.8 m up, for testing falls
+  // (decision 115). Climb the first from the south at x -2 or east of it (from the west it is blocked overhead), stand on its
+  // free part, then climb this one facing west.
+  { kind: 'prop', xM: -2.65, zM: -4, yM: 1.9, widthM: 0.7, depthM: 2, heightM: 1.9 },
   { kind: 'prop', xM: 6.2, zM: -3.5, yM: 1.3, widthM: 3, depthM: 2, heightM: 0.8 },
 ];

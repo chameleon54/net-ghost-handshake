@@ -15,6 +15,10 @@ export class Knife {
 
   constructor(private readonly events: EventBus<WeaponEvents>) {}
 
+  reset(): void {
+    this.cooldownSec = 0;
+  }
+
   update(dtSec: number, input: KnifeInput): void {
     this.cooldownSec = Math.max(this.cooldownSec - dtSec, 0);
     if (!input.triggerPressed || !input.canFire || this.cooldownSec > 0) return;

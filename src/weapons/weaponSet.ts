@@ -73,6 +73,16 @@ export class WeaponSet {
     this.events.emit('weapon:switched', { weapon });
   }
 
+  /** Every weapon back to its starting state, with the rifle drawn (instant restart). */
+  reset(): void {
+    this.rifle.reset();
+    this.pistol.reset();
+    this.knife.reset();
+    this.current = 'rifle';
+    this.redraw();
+    this.events.emit('weapon:switched', { weapon: 'rifle' }); // so the weapon in view is drawn again
+  }
+
   /** Draws the weapon in hand again, as after a grenade throw. No switch happens, so no switch sound. */
   redraw(): void {
     this.drawTotalSec = Math.max(drawTimeSec(this.current), 0.01);

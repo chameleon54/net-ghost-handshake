@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { HitZone } from '../enemies/dummy';
+import type { DamageSource } from '../player/playerHealth';
 import type { Noise } from '../stealth/noise';
 import type { MagazineCheck } from './magazineFeel';
 
@@ -59,8 +60,12 @@ export type WeaponEvents = {
   'grenade:bounced': { position: Vector3; speedMps: number };
   /** A grenade went off. Glass (phase 5) and enemies (4.12) will react to this; enemies hear it too. The position vector is reused. */
   'grenade:exploded': { position: Vector3; radiusM: number };
-  /** The blast would hurt the player by `damage`. Nothing uses it until the health milestone (3.1). */
+  /** A blast hurt the player by `damage` (the health system has already taken it). */
   'player:blast': { damage: number; distanceM: number };
+  /** The player took damage; `health` is what is left. The screen effects (3.3) and PP's lines (phase 6) listen. */
+  'player:damaged': { amount: number; health: number; source: DamageSource };
+  /** The player's health reached 0. */
+  'player:died': { source: DamageSource };
   /** A blast went off close to the player: his ears ring for `durationSec`. The sound is added later. */
   'player:deafened': { intensity: number; durationSec: number };
   /** A spent casing bounced off a surface, at `speedMps` into it. For the clink. The position vector is reused. */

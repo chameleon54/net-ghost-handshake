@@ -57,6 +57,23 @@ export class Gun {
     this.magazines = new Magazines(config.magazineRounds, config.startingMagazines);
   }
 
+  /** Back to a cold, unjammed gun with full magazines (instant restart). */
+  reset(): void {
+    this.magazines.reset();
+    this.heat = 0;
+    this.jamRisk = 0;
+    this.cooldownSec = 0;
+    this.sinceShotSec = Infinity;
+    this.reloadLeftSec = 0;
+    this.checkLeftSec = 0;
+    this.checkReported = false;
+    this.clickedThisPull = false;
+    this.roundsFiredFromMagazine = 0;
+    this.sinceClearSec = Infinity;
+    this.isJammed = false;
+    this.clearTapsDone = 0;
+  }
+
   get reloading(): boolean {
     return this.reloadLeftSec > 0;
   }

@@ -216,6 +216,12 @@ export class Mantle {
     }
   }
 
+  /** Stops a move in progress (instant restart). */
+  cancel(): void {
+    this.active = false;
+    this.plan = null;
+  }
+
   /** Advances the move and writes where the feet are now into `out`. */
   update(dtSec: number, spaceHeld: boolean, out: Spot): void {
     const plan = this.plan;

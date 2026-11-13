@@ -9,6 +9,8 @@ import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
+import type { PlayerHealth } from '../player/playerHealth';
+import { healthConfig, healthConfigDefaults } from '../config/health';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
 import type { WeaponSet } from '../weapons/weaponSet';
 import type { AudioSystem } from '../audio/audioSystem';
@@ -19,7 +21,7 @@ import { soundNames } from '../audio/recipes';
 import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -39,6 +41,7 @@ interface Parts {
   weapons: WeaponSet;
   audio: AudioSystem;
   thrower: GrenadeThrower;
+  health: PlayerHealth;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -49,7 +52,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -86,9 +89,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { position: '', speed: '', state: '', weapon: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', freeCamera: 'off (press ` to toggle)', status: '' };
   const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['position', 'speed', 'state', 'weapon', 'freeCamera', 'status'] as const) {
+  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'freeCamera', 'status'] as const) {
     readoutFolder.add(readouts, key).listen().disable();
   }
   readoutFolder.open();
@@ -106,6 +109,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(audioConfig, audioConfigDefaults);
       resetToDefaults(grenadeConfig, grenadeConfigDefaults);
       resetToDefaults(noiseConfig, noiseConfigDefaults);
+      resetToDefaults(healthConfig, healthConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -123,6 +127,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/audio.ts': changedValues(audioConfig, audioConfigDefaults),
           'src/config/grenade.ts': changedValues(grenadeConfig, grenadeConfigDefaults),
           'src/config/noise.ts': changedValues(noiseConfig, noiseConfigDefaults),
+          'src/config/health.ts': changedValues(healthConfig, healthConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -192,6 +197,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   grenadePanel.close();
   for (const s of grenadeFolder.sliders) grenadePanel.add(grenadeConfig, s.key, s.min, s.max, s.step).name(s.label);
 
+  const healthPanel = gui.addFolder(healthFolder.title);
+  healthPanel.close();
+  for (const s of healthFolder.sliders) healthPanel.add(healthConfig, s.key, s.min, s.max, s.step).name(s.label);
+
   const noisePanel = gui.addFolder(noiseFolder.title);
   noisePanel.close();
   for (const s of noiseFolder.sliders) noisePanel.add(noiseConfig, s.key, s.min, s.max, s.step).name(s.label);
@@ -208,6 +217,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const cheats = { infiniteAmmo: false };
   const cheatFolder = gui.addFolder('Testing aids');
   cheatFolder.add({ give: () => thrower.give(grenadeConfig.carryLimit) }, 'give').name('Give grenades (to the limit)');
+  const hurtAmountHealth = 25;
+  cheatFolder.add({ hurt: () => health.damage(hurtAmountHealth, 'debug') }, 'hurt').name('Hurt 25');
+  cheatFolder.add({ kill: () => health.damage(Infinity, 'debug') }, 'kill').name('Kill');
+  cheatFolder.add({ heal: () => health.reset() }, 'heal').name('Heal full (not when dead)');
+  cheatFolder.add(health, 'invulnerable').name('Invulnerable');
   cheatFolder.add(cheats, 'infiniteAmmo').name('Infinite ammo').onChange((on: boolean) => weapons.setInfiniteAmmo(on));
 
   const cameraFolder = gui.addFolder('Free camera');
@@ -226,12 +240,14 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     readoutTimerSec += dtSec;
     if (readoutTimerSec < readoutIntervalSec) return;
     readoutTimerSec = 0;
+    readouts.health = health.dead ? 'DEAD' : `${health.current.toFixed(0)}${health.invulnerable ? ' (invulnerable)' : ''}`;
     const p = player.position;
     readouts.position = `${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}`;
     readouts.speed = `${player.speedMps.toFixed(2)} m/s`;
     const flags = [player.stance.stance, player.grounded ? 'grounded' : 'in the air'];
     if (player.mantle.active) flags.push('climbing');
     if (player.isSprinting) flags.push('sprinting');
+    if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
     readouts.weapon = gun ? `heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;

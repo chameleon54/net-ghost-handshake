@@ -69,6 +69,17 @@ export class Explosions {
     events.on('grenade:exploded', ({ position, radiusM }) => this.explode(position, radiusM));
   }
 
+  /** Removes every flash, smoke ball and scorch mark (instant restart). */
+  clear(): void {
+    for (const blast of this.blasts) {
+      blast.active = false;
+      blast.flash.visible = false;
+      blast.smoke.visible = false;
+    }
+    for (const mark of this.scorches) mark.visible = false;
+    this.nextScorch = 0;
+  }
+
   private explode(position: THREE.Vector3, radiusM: number): void {
     this.radiusM = radiusM;
     const blast = this.blasts[this.nextBlast];

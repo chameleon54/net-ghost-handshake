@@ -67,7 +67,7 @@ describe('random play never puts the player somewhere impossible', () => {
         const where = `step ${step} at ${feet.x.toFixed(2)}, ${feet.y.toFixed(2)}, ${feet.z.toFixed(2)} (${player.stance.stance})`;
         expect(Number.isFinite(feet.x + feet.y + feet.z), where).toBe(true);
         expect(feet.y, `below the floor: ${where}`).toBeGreaterThanOrEqual(0);
-        expect(feet.y, `too high: ${where}`).toBeLessThan(2.0);
+        expect(feet.y, `too high: ${where}`).toBeLessThan(3.9); // the stacked test platform's top is 3.8 m (milestone 3.1)
         expect(Math.abs(feet.x), `outside the room: ${where}`).toBeLessThan(8);
         expect(Math.abs(feet.z), `outside the room: ${where}`).toBeLessThan(6);
 

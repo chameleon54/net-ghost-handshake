@@ -27,6 +27,14 @@ export class GrenadeThrower {
     this.carried = Math.min(startingGrenades, grenadeConfig.carryLimit);
   }
 
+  /** Back to the starting grenades, hands free (instant restart). */
+  reset(): void {
+    this.carried = Math.min(grenadeConfig.startingGrenades, grenadeConfig.carryLimit);
+    this.sinceStartSec = null;
+    this.released = false;
+    this.justFinished = false;
+  }
+
   get count(): number {
     return this.carried;
   }

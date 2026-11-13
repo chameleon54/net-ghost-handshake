@@ -54,6 +54,14 @@ export class Casings {
     events.on('weapon:jam-cleared', ({ weapon }) => this.eject(weapon)); // the stuck round is thrown out
   }
 
+  /** Removes every casing (instant restart). */
+  clear(): void {
+    for (const casing of this.pool) {
+      casing.active = false;
+      casing.mesh.visible = false;
+    }
+  }
+
   /** Throws a casing out of the gun's port, to the right and up, in the direction the camera is facing. */
   private eject(weapon: GunId): void {
     this.camera.updateMatrixWorld();

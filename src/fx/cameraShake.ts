@@ -23,6 +23,12 @@ export class CameraShake {
     events.on('grenade:exploded', ({ position }) => this.shake(position.distanceTo(this.headPosition())));
   }
 
+  /** Stops any shake (instant restart). */
+  reset(): void {
+    this.pitch.reset();
+    this.yaw.reset();
+  }
+
   get pitchRad(): number {
     return this.pitch.value;
   }

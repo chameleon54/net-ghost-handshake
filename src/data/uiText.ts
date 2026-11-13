@@ -13,5 +13,7 @@ export const uiText = {
   jammed: 'JAMMED   Tap R',
   /** Temporary readout label for the grenade count (ui.md: the real HUD shows it only briefly). */
   grenades: 'Grenades',
+  /** Temporary death text (the real death screen is milestone 7.3). */
+  died: 'You died. Press Enter to restart',
   captureRefused: 'The browser did not allow that yet. Click again',
 } as const;

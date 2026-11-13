@@ -18,6 +18,12 @@ export class Dummy {
     readonly yawRad = 0,
   ) {}
 
+  /** Standing again at full health (instant restart). */
+  reset(): void {
+    this.health = new Health(dummyConfig.healthPoints);
+    this.setState('standing');
+  }
+
   /** Only a standing dummy can be hit; a falling or lying one is out of the fight. */
   get hittable(): boolean {
     return this.state === 'standing';
