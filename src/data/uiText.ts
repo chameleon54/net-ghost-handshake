@@ -7,5 +7,7 @@ export const uiText = {
   weaponNames: { rifle: 'M4-A', pistol: 'P9', knife: 'Knife' },
   /** Temporary readout words for checking the magazine (weapons.md: a rough word, never a number). */
   magazineFeel: { full: 'full', mostlyFull: 'mostly full', aboutHalf: 'about half', nearlyEmpty: 'nearly empty', empty: 'empty' },
+  /** Temporary readout labels for the magazine check. */
+  magazineCheck: { gun: 'Magazine', spares: 'Spares', noSpares: 'none' },
   captureRefused: 'The browser did not allow that yet. Click again',
 } as const;

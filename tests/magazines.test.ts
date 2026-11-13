@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Magazines } from '../src/weapons/magazines';
-import { magazineFeel } from '../src/weapons/magazineFeel';
+import { checkMagazines, magazineFeel, readMagazine } from '../src/weapons/magazineFeel';
 
 const fire = (m: Magazines, shots: number) => {
   for (let i = 0; i < shots; i++) m.takeRound();
@@ -116,5 +116,38 @@ describe('magazineFeel', () => {
     expect(feelAfter(25)).toBe('nearlyEmpty');
     expect(feelAfter(30)).toBe('nearlyEmpty'); // one round still chambered
     expect(feelAfter(31)).toBe('empty');
+  });
+});
+
+describe('checking the spares', () => {
+  it('lists the spares fullest first, the order a reload will use them', () => {
+    const m = new Magazines(30, 3);
+    fire(m, 15);
+    m.reload(); // the gun now holds a full magazine; the pouch has a full one and one with 15
+    expect(m.spareRounds()).toEqual([30, 15]);
+    expect(m.spareRounds()).not.toBe(m.spareRounds()); // a copy each time
+  });
+
+  it('gives the gun and each spare a rough word and an exact share for a picture', () => {
+    const m = new Magazines(30, 3);
+    fire(m, 15);
+    m.reload();
+    fire(m, 20); // the gun is down to 11 ready
+    const check = checkMagazines(m);
+    expect(check.gun.feel).toBe('aboutHalf'); // 11 of 30
+    expect(check.spares.map((s) => s.feel)).toEqual(['full', 'aboutHalf']);
+    expect(check.spares[1].share).toBeCloseTo(0.5);
+  });
+
+  it('reads one magazine: full, mostly full, about half, nearly empty, empty', () => {
+    expect(readMagazine(30, 30)).toEqual({ feel: 'full', share: 1 });
+    expect(readMagazine(20, 30).feel).toBe('mostlyFull');
+    expect(readMagazine(15, 30).feel).toBe('aboutHalf');
+    expect(readMagazine(3, 30).feel).toBe('nearlyEmpty');
+    expect(readMagazine(0, 30)).toEqual({ feel: 'empty', share: 0 });
+  });
+
+  it('a gun with no spares shows an empty list', () => {
+    expect(checkMagazines(new Magazines(30, 1)).spares).toEqual([]);
   });
 });

@@ -32,6 +32,11 @@ export class Magazines {
     return this.pouch.length;
   }
 
+  /** Rounds in each spare, fullest first: the order a reload will use them. A copy, safe to keep. */
+  spareRounds(): number[] {
+    return [...this.pouch].sort((a, b) => b - a);
+  }
+
   /** Every round carried: gun, chamber and spares. For tests and checks. */
   get totalRounds(): number {
     return this.pouch.reduce((sum, rounds) => sum + rounds, this.loadedRounds);

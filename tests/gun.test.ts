@@ -141,7 +141,7 @@ describe('reloads and checks', () => {
     const events = new EventBus<WeaponEvents>();
     const words: string[] = [];
     let fired = 0;
-    events.on('weapon:magazine-checked', ({ feel }) => words.push(feel));
+    events.on('weapon:magazine-checked', ({ check }) => words.push(check.gun.feel));
     events.on('weapon:fired', () => fired++);
     const gun = new Gun(events, 'rifle', { ...rifleConfigDefaults }, true);
     gun.update(dtSec, { ...idle, checkRequested: true });

@@ -44,8 +44,10 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
   // After checking the magazine the rough word stays up for a few seconds.
   let feelWord = '';
   let feelUntilMs = 0;
-  events.on('weapon:magazine-checked', ({ feel }) => {
-    feelWord = uiText.magazineFeel[feel];
+  events.on('weapon:magazine-checked', ({ check }) => {
+    // Text for now. A picture of each magazine, filled white by `share`, can replace this later.
+    const words = check.spares.map((spare) => uiText.magazineFeel[spare.feel]);
+    feelWord = `${uiText.magazineFeel[check.gun.feel]}   ${uiText.magazineCheck.spares}: ${words.length > 0 ? words.join(', ') : uiText.magazineCheck.noSpares}`;
     feelUntilMs = performance.now() + feelShownMs;
   });
 
@@ -60,7 +62,7 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
         const state = gun.reloading ? ' RELOADING' : loadedRounds === 0 ? ' EMPTY' : '';
         next += `   Mags: ${spareCount}  (${loadedRounds}/${capacityRounds})${state}`;
       }
-      if (performance.now() < feelUntilMs) next += `   Magazine: ${feelWord}`;
+      if (performance.now() < feelUntilMs) next += `   ${uiText.magazineCheck.gun}: ${feelWord}`;
       if (next === shown) return; // only touch the page when the text changes
       shown = next;
       text.textContent = next;

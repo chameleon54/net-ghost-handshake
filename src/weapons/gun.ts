@@ -1,7 +1,7 @@
 import type { GunConfig } from '../config/gun';
 import type { EventBus } from '../core/events';
 import type { GunId, WeaponEvents } from './events';
-import { magazineFeel } from './magazineFeel';
+import { checkMagazines } from './magazineFeel';
 import { Magazines } from './magazines';
 
 export interface GunInput {
@@ -96,7 +96,7 @@ export class Gun {
       this.checkLeftSec -= dtSec;
       if (!this.checkReported && this.checkProgress >= checkLooksAtProgress) {
         this.checkReported = true;
-        this.events.emit('weapon:magazine-checked', { feel: magazineFeel(this.magazines) });
+        this.events.emit('weapon:magazine-checked', { check: checkMagazines(this.magazines) });
       }
       // Sprinting, climbing or vaulting puts the magazine away.
       if (!input.canFire) this.interrupt();
