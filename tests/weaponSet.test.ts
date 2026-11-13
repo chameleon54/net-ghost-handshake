@@ -9,7 +9,7 @@ import { Knife } from '../src/weapons/knife';
 import { WeaponSet, type WeaponSetInput } from '../src/weapons/weaponSet';
 
 const dtSec = 1 / 60;
-const none: WeaponSetInput = { select: null, wheelSteps: 0, triggerHeld: false, triggerPressed: false, reloadPressed: false, canFire: true };
+const none: WeaponSetInput = { select: null, wheelSteps: 0, triggerHeld: false, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
 
 function setup() {
   const events = new EventBus<WeaponEvents>();
@@ -97,7 +97,7 @@ describe('WeaponSet', () => {
     const rifleRounds = rifle.magazines.loadedRounds;
     weapons.select('pistol');
     run(weapons, {}, 1);
-    expect(pistol.magazines.loadedRounds).toBe(pistolConfigDefaults.magazineRounds);
+    expect(pistol.magazines.loadedRounds).toBe(pistolConfigDefaults.magazineRounds + 1); // a full magazine plus the chambered round
     weapons.select('rifle');
     expect(rifle.magazines.loadedRounds).toBe(rifleRounds);
   });
@@ -137,6 +137,7 @@ describe('weapon random play', () => {
           triggerHeld: held,
           triggerPressed: random() < 0.1,
           reloadPressed: random() < 0.02,
+          checkRequested: random() < 0.01,
           canFire: random() < 0.9,
         });
         expect(rifle.magazines.totalRounds).toBe(start.rifle - shots.rifle);

@@ -9,6 +9,10 @@ export interface GunConfig {
   magazineRounds: number;
   /** Magazines carried at the start, including the loaded one. Read once at start. */
   startingMagazines: number;
+  /** Extra time an empty reload takes: the rack that chambers a round. */
+  emptyReloadRackSec: number;
+  /** How long checking the magazine takes. Firing and reloading are blocked meanwhile. */
+  checkMagazineSec: number;
   /** Damage of a body hit. A headshot always kills. */
   bodyDamagePerHit: number;
   /** Bullet scatter (half-angle of a cone) when not aiming, and when fully aimed down sights. */

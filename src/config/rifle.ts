@@ -4,6 +4,10 @@ export const rifleConfigDefaults = {
   fireRateRpm: 700,
   /** Time from pressing R to the new magazine being in. */
   reloadTimeSec: 1.8,
+  /** Extra time an empty reload takes: the rack that chambers a round. */
+  emptyReloadRackSec: 0.4,
+  /** How long checking the magazine takes (hold R). */
+  checkMagazineSec: 1.0,
   /** Time after switching to the rifle before it can fire or reload (weapons.md). */
   drawTimeSec: 0.4,
   /** Rounds in a full magazine. Read once at start, so it is not on the tuning panel. */

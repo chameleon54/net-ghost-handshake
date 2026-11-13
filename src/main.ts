@@ -19,13 +19,17 @@ import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
+import { inputConfig } from './config/input';
+import { Casings } from './fx/casings';
 import { Aim } from './weapons/aim';
+import { HoldTap } from './weapons/holdTap';
+import type { AnimatorInput } from './weapons/viewmodel/animator';
 import { rifleConfig } from './config/rifle';
 import type { WeaponEvents, WeaponId } from './weapons/events';
 import { Gun } from './weapons/gun';
 import { Knife } from './weapons/knife';
 import { KnifeStrike } from './weapons/knifeStrike';
-import { PlaceholderViewmodels } from './weapons/placeholderGun';
+import { Viewmodel } from './weapons/viewmodel/viewmodel';
 import { Shooter } from './weapons/shooter';
 import { WeaponSet } from './weapons/weaponSet';
 
@@ -36,6 +40,7 @@ const weaponKeys: Record<string, WeaponId> = { Digit1: 'rifle', Digit2: 'pistol'
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.autoClear = false; // the world and the weapon are drawn in two passes (see the render step)
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -53,24 +58,26 @@ const player = new Player(level.collision);
 
 // Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
 const weaponEvents = new EventBus<WeaponEvents>();
-scene.add(camera); // the placeholder weapons are children of the camera, so the camera must be in the scene
 const weapons = new WeaponSet(
   weaponEvents,
   new Gun(weaponEvents, 'rifle', rifleConfig, true),
   new Gun(weaponEvents, 'pistol', pistolConfig, false),
   new Knife(weaponEvents),
 );
-const viewmodels = new PlaceholderViewmodels(camera);
+const viewmodel = new Viewmodel(weaponEvents); // the weapon in hand, drawn in its own pass after the world
+viewmodel.setAspect(window.innerWidth / window.innerHeight);
 const aim = new Aim();
 const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
-weaponEvents.on('weapon:switched', ({ weapon }) => viewmodels.show(weapon));
-weaponEvents.on('weapon:swing', () => viewmodels.jab());
 const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
-const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodels.muzzles, dummies, gunConfigs);
+const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, dummies, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, dummies);
 const tracers = new Tracers(scene, weaponEvents);
+const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmodel.ejectionPorts);
+// R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
+const reloadKey = new HoldTap();
+const inspectKey = new HoldTap();
 new BulletMarks(scene, weaponEvents);
 const weaponReadout = createWeaponReadout(weaponEvents); // made before the overlay so the overlay covers it
 
@@ -78,6 +85,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  viewmodel.setAspect(window.innerWidth / window.innerHeight);
 });
 
 // Wiring: input, the play state, pointer lock, focus, overlay, loop.
@@ -95,7 +103,11 @@ onFocusLost(() => game.handleFocusLost());
 
 const overlay = createOverlay(() => void pointerLock.request());
 overlay.show(uiText.clickToPlay);
-game.events.on('game:playing', () => overlay.hide());
+game.events.on('game:playing', () => {
+  overlay.hide();
+  reloadKey.reset(); // a key that was down when the game paused must not count as a tap on resume
+  inspectKey.reset();
+});
 game.events.on('game:paused', () => overlay.show(uiText.paused));
 game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused));
 
@@ -104,9 +116,13 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel });
   });
 }
+
+const animatorInput: AnimatorInput = { weapon: 'rifle', drawProgress: 1, reloadProgress: null, sprinting: false };
+let lastFrameMs = performance.now();
+const maxFrameSec = 0.1; // a long pause must not make the weapon jump
 
 const loop = new Loop(
   (stepSec) => {
@@ -118,9 +134,13 @@ const loop = new Loop(
     aim.update(stepSec, canAim && input.isButtonDown(aimButton), gunInHand ? gunConfigs[gunInHand.id] : null);
     player.speedScale = aim.moveSpeedScale;
     shooter.aimBlend = aim.eased;
-    viewmodels.setAim(aim.eased);
 
     player.fixedUpdate(stepSec, input);
+    // R and F: tap or hold. Their presses are consumed so nothing stale is remembered.
+    input.consumePress('KeyR');
+    input.consumePress('KeyF');
+    reloadKey.update(stepSec, input.isKeyDown('KeyR'), inputConfig.holdTimeSec);
+    inspectKey.update(stepSec, input.isKeyDown('KeyF'), inputConfig.holdTimeSec);
     // Every press is consumed each update, so a click that could not be used is not remembered for later.
     let select: WeaponId | null = null;
     for (const [code, weapon] of Object.entries(weaponKeys)) if (input.consumePress(code)) select = weapon;
@@ -129,12 +149,14 @@ const loop = new Loop(
       wheelSteps: input.consumeWheelSteps(),
       triggerHeld: input.isButtonDown(fireButton),
       triggerPressed: input.consumeButtonPress(fireButton),
-      reloadPressed: input.consumePress('KeyR'),
+      reloadPressed: reloadKey.tapped,
+      checkRequested: reloadKey.holdStarted,
       canFire: !player.isSprinting && !player.mantle.active,
     });
-    viewmodels.update(stepSec);
+    if (inspectKey.holdStarted) viewmodel.inspect();
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
+    casings.update(stepSec);
     dummies.forEach((dummy, i) => {
       dummy.update(stepSec);
       dummyViews[i].update();
@@ -143,8 +165,12 @@ const loop = new Loop(
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
+    let lookYawRad = 0;
+    let lookPitchRad = 0;
     if (!debug?.beforeRender(camera)) {
       player.look(input, aim.sensitivityScale);
+      lookYawRad = player.lookYawDeltaRad;
+      lookPitchRad = player.lookPitchDeltaRad;
       const fovDeg = aim.fovDeg(viewConfig.baseFovDeg);
       if (camera.fov !== fovDeg) {
         camera.fov = fovDeg;
@@ -152,7 +178,31 @@ const loop = new Loop(
       }
       player.applyToCamera(camera, alpha, shooter.recoil.pitchRad, shooter.recoil.yawRad);
     }
+    // The weapon animates with real time, every screen frame, so it stays smooth on fast screens.
+    const nowMs = performance.now();
+    const frameSec = Math.min((nowMs - lastFrameMs) / 1000, maxFrameSec);
+    lastFrameMs = nowMs;
+    const gun = weapons.gun;
+    // One input object reused every frame, so nothing is allocated here.
+    animatorInput.weapon = weapons.current;
+    animatorInput.drawProgress = weapons.drawProgress;
+    animatorInput.reloadProgress = gun?.reloading ? gun.reloadProgress : null;
+    animatorInput.reloadRackShare = gun?.reloadRackShare ?? 0;
+    animatorInput.checkProgress = gun?.checking ? gun.checkProgress : null;
+    animatorInput.lockedOpen = gun?.empty ?? false;
+    animatorInput.sprinting = player.isSprinting;
+    animatorInput.aimBlend = aim.eased;
+    // The bob only runs while walking on the ground, not while sliding, climbing or in the air.
+    const walking = player.grounded && !player.mantle.active && player.stance.stance !== 'sliding';
+    animatorInput.speedMps = walking ? player.speedMps : 0;
+    animatorInput.crouching = player.stance.stance === 'crouching';
+    animatorInput.lookYawRad = lookYawRad;
+    animatorInput.lookPitchRad = lookPitchRad;
+    viewmodel.update(frameSec, animatorInput);
+    renderer.clear();
     renderer.render(scene, camera);
+    renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls
+    renderer.render(viewmodel.scene, viewmodel.camera);
   },
   () => game.isPlaying,
 );

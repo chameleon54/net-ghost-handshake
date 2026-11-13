@@ -9,6 +9,7 @@ const crosshairSizePx = 4;
 const hitMarkerFadeMs = 150;
 const hitColour = '#ffffff';
 const killColour = '#ff4444';
+const feelShownMs = 3000;
 
 export interface WeaponReadout {
   /** `aimBlend`: 0 hip, 1 aimed. The crosshair dot hides while aiming. */
@@ -40,6 +41,14 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
     'text-shadow:0 0 3px #000;pointer-events:none;user-select:none';
   document.body.appendChild(text);
 
+  // After checking the magazine the rough word stays up for a few seconds.
+  let feelWord = '';
+  let feelUntilMs = 0;
+  events.on('weapon:magazine-checked', ({ feel }) => {
+    feelWord = uiText.magazineFeel[feel];
+    feelUntilMs = performance.now() + feelShownMs;
+  });
+
   let shown = '';
   return {
     update(weapons, aimBlend) {
@@ -51,6 +60,7 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
         const state = gun.reloading ? ' RELOADING' : loadedRounds === 0 ? ' EMPTY' : '';
         next += `   Mags: ${spareCount}  (${loadedRounds}/${capacityRounds})${state}`;
       }
+      if (performance.now() < feelUntilMs) next += `   Magazine: ${feelWord}`;
       if (next === shown) return; // only touch the page when the text changes
       shown = next;
       text.textContent = next;

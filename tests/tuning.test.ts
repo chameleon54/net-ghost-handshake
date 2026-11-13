@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
+import { casingConfigDefaults } from '../src/config/casing';
 import { dummyConfigDefaults } from '../src/config/dummy';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
+import { viewmodelConfigDefaults } from '../src/config/viewmodel';
 import {
   changedValues,
   inputFolder,
   playerFolders,
+  casingFolder,
   dummyFolder,
   dummyKeysNotOnPanel,
   knifeFolder,
@@ -17,6 +20,8 @@ import {
   playerKeysNotOnPanel,
   rifleFolders,
   rifleKeysNotOnPanel,
+  viewmodelFolders,
+  viewmodelKeysNotOnPanel,
   resetToDefaults,
   toCodeSnippet,
 } from '../src/debug/tuning';
@@ -59,6 +64,31 @@ describe('the pistol and knife tuning panels', () => {
 
   it('list every knife value', () => {
     check(knifeFolder.sliders, knifeConfigDefaults, []);
+  });
+});
+
+describe('the weapon animation tuning panel', () => {
+  it('has a sensible range around every default, and every animation value is listed or excluded on purpose', () => {
+    const sliders = viewmodelFolders.flatMap((f) => f.sliders);
+    for (const s of sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(viewmodelConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(viewmodelConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...viewmodelKeysNotOnPanel]);
+    for (const key of Object.keys(viewmodelConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the casing tuning panel', () => {
+  it('lists every casing value with a sensible range around its default', () => {
+    for (const s of casingFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(casingConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(casingConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(casingFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(casingConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

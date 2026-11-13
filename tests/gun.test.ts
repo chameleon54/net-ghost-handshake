@@ -6,8 +6,8 @@ import type { WeaponEvents } from '../src/weapons/events';
 import { Gun, type GunInput } from '../src/weapons/gun';
 
 const dtSec = 1 / 60;
-const held: GunInput = { triggerHeld: true, triggerPressed: false, reloadPressed: false, canFire: true };
-const idle: GunInput = { triggerHeld: false, triggerPressed: false, reloadPressed: false, canFire: true };
+const held: GunInput = { triggerHeld: true, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
+const idle: GunInput = { triggerHeld: false, triggerPressed: false, reloadPressed: false, checkRequested: false, canFire: true };
 
 function setup(kind: 'rifle' | 'pistol' = 'rifle') {
   const events = new EventBus<WeaponEvents>();
@@ -42,7 +42,7 @@ describe('rifle (automatic)', () => {
   it('empties the magazine, then clicks once per trigger pull', () => {
     const { gun, count } = setup();
     run(gun, held, 5);
-    expect(count.fired).toBe(rifleConfigDefaults.magazineRounds);
+    expect(count.fired).toBe(rifleConfigDefaults.magazineRounds + 1); // the magazine plus the chambered round
     expect(count.empty).toBe(1); // holding does not click again and again
     run(gun, idle, 0.1);
     run(gun, held, 0.1);
@@ -61,7 +61,7 @@ describe('rifle (automatic)', () => {
     run(gun, idle, 0.3);
     expect(gun.reloading).toBe(false);
     expect(count.reloaded).toBe(1);
-    expect(gun.magazines.loadedRounds).toBe(rifleConfigDefaults.magazineRounds);
+    expect(gun.magazines.loadedRounds).toBe(rifleConfigDefaults.magazineRounds + 1); // a full magazine plus the chambered round
   });
 
   it('ignores R when there is nothing better to load', () => {
@@ -76,7 +76,7 @@ describe('rifle (automatic)', () => {
     const rounds = gun.magazines.loadedRounds;
     gun.update(dtSec, { ...idle, reloadPressed: true });
     run(gun, idle, 0.5);
-    gun.cancelReload();
+    gun.interrupt();
     expect(gun.reloading).toBe(false);
     run(gun, idle, 3);
     expect(count.reloaded).toBe(0);
@@ -105,18 +105,73 @@ describe('pistol (semi-automatic)', () => {
     expect(count.fired).toBe(1);
   });
 
-  it('has 17 rounds, clicks when empty and reloads in 1.2 s', () => {
+  it('has 17 rounds and one chambered, clicks when empty and reloads (with a rack) after an extra moment', () => {
     const { gun, count } = setup('pistol');
-    for (let i = 0; i < 17; i++) {
+    for (let i = 0; i < 18; i++) {
       gun.update(dtSec, { ...held, triggerPressed: true });
       run(gun, idle, 0.2);
     }
-    expect(count.fired).toBe(17);
+    expect(count.fired).toBe(18);
     gun.update(dtSec, { ...held, triggerPressed: true });
     expect(count.empty).toBe(1);
     gun.update(dtSec, { ...idle, reloadPressed: true });
     run(gun, idle, pistolConfigDefaults.reloadTimeSec + 0.1);
+    expect(count.reloaded).toBe(0); // an empty gun also racks, which takes longer
+    run(gun, idle, pistolConfigDefaults.emptyReloadRackSec);
     expect(count.reloaded).toBe(1);
-    expect(gun.magazines.loadedRounds).toBe(17);
+    expect(gun.magazines.loadedRounds).toBe(17); // the rack chambered one from the new magazine
+  });
+});
+
+describe('reloads and checks', () => {
+  it('an empty gun takes the rack time longer to reload than one with rounds left', () => {
+    const { gun } = setup();
+    run(gun, held, 5); // empty it
+    expect(gun.empty).toBe(true);
+    gun.update(dtSec, { ...idle, reloadPressed: true });
+    expect(gun.reloadRackShare).toBeCloseTo(rifleConfigDefaults.emptyReloadRackSec / (rifleConfigDefaults.reloadTimeSec + rifleConfigDefaults.emptyReloadRackSec));
+
+    const second = setup();
+    run(second.gun, held, 0.3);
+    second.gun.update(dtSec, { ...idle, reloadPressed: true });
+    expect(second.gun.reloadRackShare).toBe(0);
+  });
+
+  it('holding R checks the magazine: it reports a rough word once, and blocks firing and reloading meanwhile', () => {
+    const events = new EventBus<WeaponEvents>();
+    const words: string[] = [];
+    let fired = 0;
+    events.on('weapon:magazine-checked', ({ feel }) => words.push(feel));
+    events.on('weapon:fired', () => fired++);
+    const gun = new Gun(events, 'rifle', { ...rifleConfigDefaults }, true);
+    gun.update(dtSec, { ...idle, checkRequested: true });
+    expect(gun.checking).toBe(true);
+    run(gun, held, rifleConfigDefaults.checkMagazineSec * 0.6); // trying to fire during the check
+    expect(fired).toBe(0);
+    expect(words).toEqual(['full']);
+    run(gun, idle, rifleConfigDefaults.checkMagazineSec);
+    expect(gun.checking).toBe(false);
+    expect(words).toHaveLength(1);
+    gun.update(dtSec, { ...held, triggerPressed: true });
+    expect(fired).toBe(1); // firing works again afterwards
+  });
+
+  it('sprinting or switching away puts the magazine away', () => {
+    const { gun } = setup();
+    gun.update(dtSec, { ...idle, checkRequested: true });
+    gun.update(dtSec, { ...idle, canFire: false });
+    expect(gun.checking).toBe(false);
+    gun.update(dtSec, { ...idle, checkRequested: true });
+    gun.interrupt();
+    expect(gun.checking).toBe(false);
+  });
+
+  it('cannot check the magazine in the middle of a reload', () => {
+    const { gun } = setup();
+    run(gun, held, 0.5);
+    gun.update(dtSec, { ...idle, reloadPressed: true });
+    gun.update(dtSec, { ...idle, checkRequested: true });
+    expect(gun.checking).toBe(false);
+    expect(gun.reloading).toBe(true);
   });
 });

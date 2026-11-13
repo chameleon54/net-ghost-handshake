@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { HitZone } from '../enemies/dummy';
+import type { MagazineFeel } from './magazineFeel';
 
 export type GunId = 'rifle' | 'pistol';
 export type WeaponId = GunId | 'knife';
@@ -24,6 +25,8 @@ export type WeaponEvents = {
   'weapon:empty-click': undefined;
   'weapon:reload-started': undefined;
   'weapon:reloaded': undefined;
+  /** The player looked at the magazine and judged how full it is (a rough word, never a number). */
+  'weapon:magazine-checked': { feel: MagazineFeel };
   /** A different weapon was taken out. */
   'weapon:switched': { weapon: WeaponId };
   'shot:landed': ShotLanded;

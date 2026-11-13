@@ -4,6 +4,8 @@ export const pistolConfigDefaults = {
   /** Semi-automatic: one shot per click. This caps how fast clicking can fire. */
   fireRateRpm: 600,
   reloadTimeSec: 1.2,
+  emptyReloadRackSec: 0.3,
+  checkMagazineSec: 0.9,
   drawTimeSec: 0.25,
   /** Read once at start, so it is not on the tuning panel. */
   magazineRounds: 17,

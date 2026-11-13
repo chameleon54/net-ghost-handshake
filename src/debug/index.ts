@@ -2,14 +2,17 @@ import * as THREE from 'three';
 import GUI from 'lil-gui';
 import { inputConfig, inputConfigDefaults } from '../config/input';
 import { playerConfig, playerConfigDefaults } from '../config/player';
+import { casingConfig, casingConfigDefaults } from '../config/casing';
 import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
 import { knifeConfig, knifeConfigDefaults } from '../config/knife';
 import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
+import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
+import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { changedValues, dummyFolder, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { casingFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -25,6 +28,7 @@ interface Parts {
   scene: THREE.Scene;
   input: Input;
   player: Player;
+  viewmodel: Viewmodel;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -35,7 +39,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -87,6 +91,8 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
       resetToDefaults(dummyConfig, dummyConfigDefaults);
       resetToDefaults(pistolConfig, pistolConfigDefaults);
       resetToDefaults(knifeConfig, knifeConfigDefaults);
+      resetToDefaults(viewmodelConfig, viewmodelConfigDefaults);
+      resetToDefaults(casingConfig, casingConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -99,6 +105,8 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
         {
           'src/config/pistol.ts': changedValues(pistolConfig, pistolConfigDefaults),
           'src/config/knife.ts': changedValues(knifeConfig, knifeConfigDefaults),
+          'src/config/viewmodel.ts': changedValues(viewmodelConfig, viewmodelConfigDefaults),
+          'src/config/casing.ts': changedValues(casingConfig, casingConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -136,6 +144,29 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
   const knifePanel = gui.addFolder(knifeFolder.title);
   knifePanel.close();
   for (const s of knifeFolder.sliders) knifePanel.add(knifeConfig, s.key, s.min, s.max, s.step).name(s.label);
+
+  // Weapon animation: play each one on demand, slow it down to judge it, and tune its numbers.
+  const animationFolder = gui.addFolder('Weapon animation');
+  animationFolder.close();
+  const previewSec = { reload: 1.8, draw: 0.4, check: 1.0 };
+  animationFolder.add(viewmodelConfig, 'slowMotionScale', 0.05, 1, 0.05).name('Slow motion (kicks and previews)');
+  animationFolder.add(previewSec, 'reload', 0.5, 5, 0.1).name('Preview reload time (s)');
+  animationFolder.add(previewSec, 'draw', 0.1, 2, 0.05).name('Preview draw time (s)');
+  animationFolder.add(previewSec, 'check', 0.3, 3, 0.05).name('Preview check time (s)');
+  animationFolder.add({ play: () => viewmodel.preview('draw', previewSec.draw) }, 'play').name('Play: draw');
+  animationFolder.add({ play: () => viewmodel.preview('fire', 0) }, 'play').name('Play: fire');
+  animationFolder.add({ play: () => viewmodel.preview('reload', previewSec.reload) }, 'play').name('Play: reload');
+  animationFolder.add({ play: () => viewmodel.preview('emptyReload', previewSec.reload + 0.4) }, 'play').name('Play: empty reload (with rack)');
+  animationFolder.add({ play: () => viewmodel.preview('check', previewSec.check) }, 'play').name('Play: check magazine');
+  animationFolder.add({ play: () => viewmodel.preview('inspect', 0) }, 'play').name('Play: inspect');
+  const casingPanel = animationFolder.addFolder(casingFolder.title);
+  casingPanel.close();
+  for (const s of casingFolder.sliders) casingPanel.add(casingConfig, s.key, s.min, s.max, s.step).name(s.label);
+  for (const folder of viewmodelFolders) {
+    const f = animationFolder.addFolder(folder.title);
+    f.close();
+    for (const s of folder.sliders) f.add(viewmodelConfig, s.key, s.min, s.max, s.step).name(s.label);
+  }
 
   const dummyPanel = gui.addFolder(dummyFolder.title);
   dummyPanel.close();

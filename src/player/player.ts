@@ -217,13 +217,20 @@ export class Player {
     this.leanOffsetM = limitLean(easedM, side, wallDistanceM, clearanceM);
   }
 
+  /** How far the view turned in the last `look` call: left and up are positive. The weapon sways with it. */
+  lookYawDeltaRad = 0;
+  lookPitchDeltaRad = 0;
+
   /** Turn with the mouse. Called once per screen frame. `sensitivityScale` slows the turn while aiming. */
   look(input: Input, sensitivityScale = 1): void {
     input.consumeMouseMove(this.mouseMove);
     const radPerPx = inputConfig.mouseSensitivityRadPerPx * sensitivityScale;
-    this.yawRad -= this.mouseMove.x * radPerPx;
+    const pitchBefore = this.pitchRad;
+    this.lookYawDeltaRad = -this.mouseMove.x * radPerPx;
+    this.yawRad += this.lookYawDeltaRad;
     this.pitchRad -= this.mouseMove.y * radPerPx;
     this.pitchRad = Math.max(-inputConfig.pitchLimitRad, Math.min(inputConfig.pitchLimitRad, this.pitchRad));
+    this.lookPitchDeltaRad = this.pitchRad - pitchBefore;
   }
 
   /** Place the camera. `alpha` blends between the last two updates so motion is smooth on fast screens. */

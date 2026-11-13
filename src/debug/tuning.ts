@@ -1,9 +1,11 @@
 import type { InputConfig } from '../config/input';
 import type { PlayerConfig } from '../config/player';
+import type { CasingConfig } from '../config/casing';
 import type { DummyConfig } from '../config/dummy';
 import type { KnifeConfig } from '../config/knife';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
+import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
 
@@ -27,6 +29,8 @@ type RifleKey = keyof RifleConfig;
 type DummyKey = keyof DummyConfig;
 type PistolKey = keyof PistolConfig;
 type KnifeKey = keyof KnifeConfig;
+type ViewmodelKey = keyof ViewmodelConfig;
+type CasingKey = keyof CasingConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -114,6 +118,7 @@ export const inputFolder: Folder<InputKey> = {
   sliders: [
     { key: 'mouseSensitivityRadPerPx', label: 'Sensitivity (rad per pixel)', min: 0.0005, max: 0.008, step: 0.0001 },
     { key: 'pitchLimitRad', label: 'Look up and down limit (rad)', min: 0.5, max: 1.57, step: 0.01 },
+    { key: 'holdTimeSec', label: 'Hold time for check or inspect (s)', min: 0.1, max: 0.8, step: 0.01 },
   ],
 };
 
@@ -123,6 +128,8 @@ export const rifleFolders: Folder<RifleKey>[] = [
     sliders: [
       { key: 'fireRateRpm', label: 'Fire rate (rounds/min)', min: 100, max: 1500, step: 10 },
       { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'emptyReloadRackSec', label: 'Extra time for an empty reload (s)', min: 0, max: 2, step: 0.05 },
+      { key: 'checkMagazineSec', label: 'Check magazine time (s)', min: 0.3, max: 3, step: 0.05 },
       { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
       { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
       { key: 'maxRangeM', label: 'Bullet range (m)', min: 10, max: 300, step: 5 },
@@ -166,6 +173,8 @@ export const pistolFolders: Folder<PistolKey>[] = [
     sliders: [
       { key: 'fireRateRpm', label: 'Fastest clicking (rounds/min)', min: 100, max: 1500, step: 10 },
       { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'emptyReloadRackSec', label: 'Extra time for an empty reload (s)', min: 0, max: 2, step: 0.05 },
+      { key: 'checkMagazineSec', label: 'Check magazine time (s)', min: 0.3, max: 3, step: 0.05 },
       { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
       { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
     ],
@@ -196,6 +205,86 @@ export const pistolFolders: Folder<PistolKey>[] = [
 
 /** Pistol config values that are deliberately not on the panel: they are read once when the game starts. */
 export const pistolKeysNotOnPanel: readonly PistolKey[] = ['magazineRounds', 'startingMagazines'];
+
+/** Weapon animation numbers. Slow motion is not here: it has its own slider next to the preview buttons. */
+export const viewmodelFolders: Folder<ViewmodelKey>[] = [
+  {
+    title: 'Kick and slide',
+    sliders: [
+      { key: 'kickFrequencyHz', label: 'Spring speed (Hz)', min: 4, max: 40, step: 0.5 },
+      { key: 'kickDampingRatio', label: 'Spring damping (1 = no overshoot)', min: 0.1, max: 1.5, step: 0.05 },
+      { key: 'rifleKickBackM', label: 'Rifle kick back (m)', min: 0, max: 0.1, step: 0.005 },
+      { key: 'rifleKickUpRad', label: 'Rifle muzzle flip (rad)', min: 0, max: 0.3, step: 0.005 },
+      { key: 'pistolKickBackM', label: 'Pistol kick back (m)', min: 0, max: 0.1, step: 0.005 },
+      { key: 'pistolKickUpRad', label: 'Pistol muzzle flip (rad)', min: 0, max: 0.4, step: 0.005 },
+      { key: 'rifleBoltBackM', label: 'Rifle bolt travel (m)', min: 0, max: 0.1, step: 0.005 },
+      { key: 'pistolSlideBackM', label: 'Pistol slide travel (m)', min: 0, max: 0.1, step: 0.005 },
+      { key: 'slideBackSec', label: 'Slide back time (s)', min: 0.01, max: 0.2, step: 0.005 },
+      { key: 'slideForwardSec', label: 'Slide forward time (s)', min: 0.01, max: 0.3, step: 0.005 },
+    ],
+  },
+  {
+    title: 'Draw and sprint pose',
+    sliders: [
+      { key: 'drawLowerM', label: 'Draw: start this far down (m)', min: 0, max: 0.6, step: 0.01 },
+      { key: 'drawTiltRad', label: 'Draw: start tilted (rad)', min: 0, max: 1.5, step: 0.05 },
+      { key: 'drawOvershoot', label: 'Draw: overshoot', min: 0, max: 4, step: 0.1 },
+      { key: 'sprintPoseTimeSec', label: 'Sprint pose time (s)', min: 0.02, max: 0.6, step: 0.01 },
+      { key: 'sprintOffsetXM', label: 'Sprint: right (m)', min: -0.2, max: 0.2, step: 0.005 },
+      { key: 'sprintOffsetYM', label: 'Sprint: up (m)', min: -0.3, max: 0.1, step: 0.005 },
+      { key: 'sprintOffsetZM', label: 'Sprint: toward you (m)', min: -0.2, max: 0.2, step: 0.005 },
+      { key: 'sprintPitchRad', label: 'Sprint: muzzle up (rad)', min: -1, max: 1, step: 0.05 },
+      { key: 'sprintYawRad', label: 'Sprint: muzzle left (rad)', min: -1, max: 1, step: 0.05 },
+      { key: 'sprintRollRad', label: 'Sprint: roll (rad)', min: -1, max: 1, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Reload and knife',
+    sliders: [
+      { key: 'magDropM', label: 'Magazine drop (m)', min: 0.05, max: 0.6, step: 0.01 },
+      { key: 'handDipM', label: 'Off hand dip (m)', min: 0.05, max: 0.6, step: 0.01 },
+      { key: 'reloadTiltRad', label: 'Gun tilt in a reload (rad)', min: 0, max: 0.8, step: 0.01 },
+      { key: 'knifeSlashSec', label: 'Knife slash time (s)', min: 0.05, max: 0.6, step: 0.01 },
+    ],
+  },
+  {
+    title: 'Check, inspect and walking',
+    sliders: [
+      { key: 'checkMagPullM', label: 'Check: magazine pulled out (m)', min: 0, max: 0.15, step: 0.005 },
+      { key: 'checkRollRad', label: 'Check: gun roll (rad)', min: 0, max: 1, step: 0.01 },
+      { key: 'inspectGunSec', label: 'Inspect a gun (s)', min: 0.5, max: 6, step: 0.1 },
+      { key: 'inspectKnifeSec', label: 'Inspect the knife (s)', min: 0.5, max: 6, step: 0.1 },
+      { key: 'bobStrideM', label: 'Bob: one cycle every (m)', min: 0.5, max: 8, step: 0.1 },
+      { key: 'bobSideM', label: 'Bob: sideways (m)', min: 0, max: 0.03, step: 0.001 },
+      { key: 'bobUpM', label: 'Bob: up and down (m)', min: 0, max: 0.03, step: 0.001 },
+      { key: 'bobReferenceSpeedMps', label: 'Bob: full at this speed (m/s)', min: 1, max: 8, step: 0.1 },
+      { key: 'bobCrouchScale', label: 'Bob: crouched (share)', min: 0, max: 1, step: 0.05 },
+      { key: 'bobAimScale', label: 'Bob: aiming (share)', min: 0, max: 1, step: 0.05 },
+      { key: 'swayGain', label: 'Sway: strength', min: 0, max: 400, step: 5 },
+      { key: 'swayFrequencyHz', label: 'Sway: spring speed (Hz)', min: 1, max: 30, step: 0.5 },
+      { key: 'swayDampingRatio', label: 'Sway: damping (1 = no overshoot)', min: 0.1, max: 1.5, step: 0.05 },
+      { key: 'swayMaxRad', label: 'Sway: most lag (rad)', min: 0, max: 0.2, step: 0.005 },
+      { key: 'swayAimScale', label: 'Sway: aiming (share)', min: 0, max: 1, step: 0.05 },
+    ],
+  },
+];
+
+/** Viewmodel config values that are deliberately not in those folders. */
+export const viewmodelKeysNotOnPanel: readonly ViewmodelKey[] = ['slowMotionScale']; // next to the preview buttons
+
+export const casingFolder: Folder<CasingKey> = {
+  title: 'Casings',
+  sliders: [
+    { key: 'ejectSpeedMps', label: 'Eject speed, sideways (m/s)', min: 0, max: 8, step: 0.1 },
+    { key: 'ejectUpMps', label: 'Eject speed, up (m/s)', min: 0, max: 8, step: 0.1 },
+    { key: 'ejectSpreadMps', label: 'Random extra speed (m/s)', min: 0, max: 3, step: 0.1 },
+    { key: 'gravityMps2', label: 'Gravity (m/s²)', min: 1, max: 30, step: 0.5 },
+    { key: 'restitution', label: 'Bounce (share of speed kept)', min: 0, max: 0.9, step: 0.05 },
+    { key: 'friction', label: 'Sideways speed lost in a bounce', min: 0, max: 1, step: 0.05 },
+    { key: 'restSpeedMps', label: 'Comes to rest below (m/s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'lifetimeSec', label: 'Lasts (s)', min: 1, max: 20, step: 0.5 },
+  ],
+};
 
 export const knifeFolder: Folder<KnifeKey> = {
   title: 'Knife',

@@ -20,6 +20,8 @@ export interface WeaponSetInput {
   triggerHeld: boolean;
   triggerPressed: boolean;
   reloadPressed: boolean;
+  /** True once when R has been held long enough to check the magazine. */
+  checkRequested: boolean;
   /** False while sprinting, climbing or vaulting. */
   canFire: boolean;
 }
@@ -28,6 +30,7 @@ export interface WeaponSetInput {
 export class WeaponSet {
   current: WeaponId = 'rifle';
   private drawLeftSec = 0;
+  private drawTotalSec = 1;
 
   constructor(
     private readonly events: EventBus<WeaponEvents>,
@@ -41,15 +44,21 @@ export class WeaponSet {
     return this.current === 'rifle' ? this.rifle : this.current === 'pistol' ? this.pistol : null;
   }
 
+  /** How far through the draw we are, 0 to 1 (1 when done). The draw animation follows this. */
+  get drawProgress(): number {
+    return this.drawing ? 1 - this.drawLeftSec / this.drawTotalSec : 1;
+  }
+
   get drawing(): boolean {
     return this.drawLeftSec > 0;
   }
 
   select(weapon: WeaponId): void {
     if (weapon === this.current) return;
-    this.gun?.cancelReload(); // weapons.md: reloads can be cancelled by switching
+    this.gun?.interrupt(); // weapons.md: reloads can be cancelled by switching, and so can a magazine check
     this.current = weapon;
-    this.drawLeftSec = drawTimeSec(weapon);
+    this.drawTotalSec = Math.max(drawTimeSec(weapon), 0.01);
+    this.drawLeftSec = this.drawTotalSec;
     this.events.emit('weapon:switched', { weapon });
   }
 
@@ -74,6 +83,7 @@ export class WeaponSet {
         triggerHeld: input.triggerHeld,
         triggerPressed: input.triggerPressed,
         reloadPressed: input.reloadPressed && ready,
+        checkRequested: input.checkRequested && ready,
         canFire,
       });
     } else {
