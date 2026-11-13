@@ -1,16 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
+import { rifleConfigDefaults } from '../src/config/rifle';
 import {
   changedValues,
   inputFolder,
   playerFolders,
   playerKeysNotOnPanel,
+  rifleFolders,
+  rifleKeysNotOnPanel,
   resetToDefaults,
   toCodeSnippet,
 } from '../src/debug/tuning';
 
 const playerSliders = playerFolders.flatMap((folder) => folder.sliders);
+
+describe('the rifle tuning panel', () => {
+  const sliders = rifleFolders.flatMap((folder) => folder.sliders);
+
+  it('has a sensible range around every default, and every rifle value is listed or excluded on purpose', () => {
+    for (const s of sliders) {
+      expect(Object.keys(rifleConfigDefaults)).toContain(s.key);
+      expect(s.min).toBeLessThan(s.max);
+      expect(rifleConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(rifleConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...rifleKeysNotOnPanel]);
+    for (const key of Object.keys(rifleConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
 
 describe('the tuning panel lists', () => {
   it('only keys that exist in the config, each once', () => {

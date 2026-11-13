@@ -1,5 +1,6 @@
 import type { InputConfig } from '../config/input';
 import type { PlayerConfig } from '../config/player';
+import type { RifleConfig } from '../config/rifle';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
 
@@ -19,6 +20,7 @@ export interface Folder<Key extends string> {
 
 type PlayerKey = keyof PlayerConfig;
 type InputKey = keyof InputConfig;
+type RifleKey = keyof RifleConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -109,6 +111,39 @@ export const inputFolder: Folder<InputKey> = {
   ],
 };
 
+export const rifleFolders: Folder<RifleKey>[] = [
+  {
+    title: 'Rifle',
+    sliders: [
+      { key: 'fireRateRpm', label: 'Fire rate (rounds/min)', min: 100, max: 1500, step: 10 },
+      { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'maxRangeM', label: 'Bullet range (m)', min: 10, max: 300, step: 5 },
+    ],
+  },
+  {
+    title: 'Rifle recoil',
+    sliders: [
+      { key: 'recoilPitchPerShotRad', label: 'Kick up per shot (rad)', min: 0, max: 0.05, step: 0.001 },
+      { key: 'recoilMaxPitchRad', label: 'Most kick up (rad)', min: 0, max: 0.5, step: 0.005 },
+      { key: 'recoilYawPerShotRad', label: 'Sideways kick per shot (rad)', min: 0, max: 0.02, step: 0.0005 },
+      { key: 'recoilMaxYawRad', label: 'Most sideways kick (rad)', min: 0, max: 0.2, step: 0.005 },
+      { key: 'recoilRecoveryDelaySec', label: 'Settle delay after last shot (s)', min: 0, max: 0.5, step: 0.01 },
+      { key: 'recoilRecoveryRadPerSec', label: 'Settle speed (rad/s)', min: 0.05, max: 3, step: 0.05 },
+    ],
+  },
+  {
+    title: 'Rifle effects',
+    sliders: [
+      { key: 'tracerSpeedMps', label: 'Tracer speed (m/s)', min: 50, max: 1000, step: 10 },
+      { key: 'tracerLengthM', label: 'Tracer length (m)', min: 0.5, max: 20, step: 0.5 },
+      { key: 'markRadiusM', label: 'Bullet mark radius (m)', min: 0.01, max: 0.2, step: 0.005 },
+    ],
+  },
+];
+
+/** Rifle config values that are deliberately not on the panel: they are read once when the game starts. */
+export const rifleKeysNotOnPanel: readonly RifleKey[] = ['magazineRounds', 'startingMagazines'];
+
 /** Player config values that are deliberately not on the panel, and why. A test makes sure nothing else is missing. */
 export const playerKeysNotOnPanel: readonly PlayerKey[] = [
   'capsuleRadiusM', // tied to collision and the camera clearances; change it in the file
@@ -133,7 +168,7 @@ export function resetToDefaults(current: Record<string, number>, defaults: Recor
 }
 
 /** Text to paste into the config files: only the changed values, in the files' own format. */
-export function toCodeSnippet(player: Record<string, number>, input: Record<string, number>): string {
+export function toCodeSnippet(player: Record<string, number>, input: Record<string, number>, rifle: Record<string, number> = {}): string {
   const lines: string[] = [];
   const add = (file: string, values: Record<string, number>): void => {
     const keys = Object.keys(values);
@@ -143,5 +178,6 @@ export function toCodeSnippet(player: Record<string, number>, input: Record<stri
   };
   add('src/config/player.ts', player);
   add('src/config/input.ts', input);
+  add('src/config/rifle.ts', rifle);
   return lines.length > 0 ? lines.join('\n') : '// Nothing changed from the defaults.';
 }

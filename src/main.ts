@@ -10,6 +10,16 @@ import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
 import { Player } from './player/player';
 import { createOverlay } from './ui/overlay';
+import { createWeaponReadout } from './ui/weaponReadout';
+import { EventBus } from './core/events';
+import { BulletMarks } from './fx/bulletMarks';
+import { Tracers } from './fx/tracers';
+import { addPlaceholderGun } from './weapons/placeholderGun';
+import { Rifle } from './weapons/rifle';
+import { Shooter } from './weapons/shooter';
+import type { WeaponEvents } from './weapons/events';
+
+const fireButton = 0; // left mouse
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -28,6 +38,15 @@ scene.add(sun);
 const level = buildGreybox();
 scene.add(level.group);
 const player = new Player(level.collision);
+
+// Weapons. The rifle decides when a shot happens; the shooter finds where it lands; the effects listen.
+const weaponEvents = new EventBus<WeaponEvents>();
+scene.add(camera); // the placeholder gun is a child of the camera, so the camera must be in the scene
+const rifle = new Rifle(weaponEvents);
+const shooter = new Shooter(weaponEvents, level.collision, camera, addPlaceholderGun(camera));
+const tracers = new Tracers(scene, weaponEvents);
+new BulletMarks(scene, weaponEvents);
+const weaponReadout = createWeaponReadout(); // made before the overlay so the overlay covers it
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -67,12 +86,20 @@ const loop = new Loop(
   (stepSec) => {
     if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
     player.fixedUpdate(stepSec, input);
+    rifle.update(stepSec, {
+      triggerHeld: input.isButtonDown(fireButton),
+      reloadPressed: input.consumePress('KeyR'),
+      canFire: !player.isSprinting && !player.mantle.active,
+    });
+    shooter.recoil.update(stepSec);
+    tracers.update(stepSec);
+    weaponReadout.update(rifle);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
     if (!debug?.beforeRender(camera)) {
       player.look(input);
-      player.applyToCamera(camera, alpha);
+      player.applyToCamera(camera, alpha, shooter.recoil.pitchRad, shooter.recoil.yawRad);
     }
     renderer.render(scene, camera);
   },

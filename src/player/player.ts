@@ -223,7 +223,7 @@ export class Player {
   }
 
   /** Place the camera. `alpha` blends between the last two updates so motion is smooth on fast screens. */
-  applyToCamera(camera: THREE.PerspectiveCamera, alpha: number): void {
+  applyToCamera(camera: THREE.PerspectiveCamera, alpha: number, kickPitchRad = 0, kickYawRad = 0): void {
     const wantedLeanM = this.previousLeanOffsetM + (this.leanOffsetM - this.previousLeanOffsetM) * alpha;
     const feetY = this.previousPosition.y + (this.position.y - this.previousPosition.y) * alpha;
     // The head position is checked against walls every frame with this frame's facing, so turning cannot clip it into one.
@@ -236,9 +236,10 @@ export class Player {
       this.headPosition,
     );
     camera.position.copy(this.headPosition);
+    // Weapon recoil is added on top of the mouse angles, never stored in them, so it settles back by itself.
     camera.rotation.set(
-      this.pitchRad,
-      this.yawRad,
+      this.pitchRad + kickPitchRad,
+      this.yawRad + kickYawRad,
       rollForLean(leanM, playerConfig.leanDistanceM, playerConfig.leanRollRad),
       'YXZ',
     );
