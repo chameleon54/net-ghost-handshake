@@ -3,7 +3,9 @@ import type { PlayerConfig } from '../config/player';
 import type { AudioConfig } from '../config/audio';
 import type { CasingConfig } from '../config/casing';
 import type { DummyConfig } from '../config/dummy';
+import type { GrenadeConfig } from '../config/grenade';
 import type { KnifeConfig } from '../config/knife';
+import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
 import type { ViewmodelConfig } from '../config/viewmodel';
@@ -33,6 +35,8 @@ type KnifeKey = keyof KnifeConfig;
 type ViewmodelKey = keyof ViewmodelConfig;
 type CasingKey = keyof CasingConfig;
 type AudioKey = keyof AudioConfig;
+type GrenadeKey = keyof GrenadeConfig;
+type NoiseKey = keyof NoiseConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -320,6 +324,49 @@ export const viewmodelFolders: Folder<ViewmodelKey>[] = [
 /** Viewmodel config values that are deliberately not in those folders. */
 export const viewmodelKeysNotOnPanel: readonly ViewmodelKey[] = ['slowMotionScale']; // next to the preview buttons
 
+export const noiseFolder: Folder<NoiseKey> = {
+  title: 'Noise (how far enemies hear)',
+  sliders: [
+    { key: 'rifleShotM', label: 'M4-A shot (m)', min: 0, max: 100, step: 1 },
+    { key: 'pistolShotM', label: 'P9 shot, suppressed (m)', min: 0, max: 50, step: 0.5 },
+    { key: 'impactM', label: 'Bullet hitting a surface (m)', min: 0, max: 60, step: 1 },
+    { key: 'emptyClickM', label: 'Empty click (m)', min: 0, max: 40, step: 1 },
+    { key: 'reloadM', label: 'Starting a reload (m)', min: 0, max: 40, step: 1 },
+    { key: 'jamM', label: 'A jam (m)', min: 0, max: 40, step: 1 },
+    { key: 'jamClickM', label: 'Dead click when jammed (m)', min: 0, max: 40, step: 1 },
+    { key: 'rackM', label: 'Rack while clearing a jam (m)', min: 0, max: 40, step: 1 },
+    { key: 'knifeSwingM', label: 'Knife swing (m)', min: 0, max: 20, step: 0.5 },
+    { key: 'knifeStabM', label: 'Knife stab (m)', min: 0, max: 20, step: 0.5 },
+    { key: 'grenadeBounceM', label: 'Grenade bounce (m)', min: 0, max: 40, step: 1 },
+    { key: 'grenadeBlastM', label: 'Grenade blast (m)', min: 0, max: 200, step: 5 },
+  ],
+};
+
+export const grenadeFolder: Folder<GrenadeKey> = {
+  title: 'Grenades',
+  sliders: [
+    { key: 'fuseSec', label: 'Fuse (s)', min: 0.5, max: 8, step: 0.1 },
+    { key: 'windupSec', label: 'Wind-up (s)', min: 0.05, max: 1.5, step: 0.05 },
+    { key: 'followThroughSec', label: 'Follow-through (s)', min: 0.05, max: 1, step: 0.05 },
+    { key: 'throwSpeedMps', label: 'Throw speed (m/s)', min: 3, max: 30, step: 0.5 },
+    { key: 'throwUpRad', label: 'Aimed above view (rad)', min: 0, max: 0.8, step: 0.01 },
+    { key: 'gravityMps2', label: 'Gravity (m/s²)', min: 1, max: 30, step: 0.5 },
+    { key: 'restitution', label: 'Bounce (share of speed kept)', min: 0, max: 0.9, step: 0.05 },
+    { key: 'friction', label: 'Sideways speed lost in a bounce', min: 0, max: 1, step: 0.05 },
+    { key: 'restSpeedMps', label: 'Comes to rest below (m/s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'blastRadiusM', label: 'Blast radius (m)', min: 1, max: 15, step: 0.5 },
+    { key: 'damageAtCentre', label: 'Damage at the centre', min: 1, max: 500, step: 5 },
+    { key: 'damageAtEdge', label: 'Damage at the edge', min: 0, max: 500, step: 5 },
+    { key: 'targetChestHeightM', label: 'Blast aims this high (m)', min: 0.3, max: 1.6, step: 0.05 },
+    { key: 'blastLiftM', label: 'Blast starts this far up (m)', min: 0, max: 0.6, step: 0.05 },
+    { key: 'shakeMaxRad', label: 'Camera shake, closest (rad)', min: 0, max: 0.2, step: 0.005 },
+    { key: 'shakeRadiusM', label: 'Camera shake reaches (m)', min: 1, max: 40, step: 1 },
+  ],
+};
+
+/** Grenade values that are deliberately not on the panel: they are read once when the game starts. */
+export const grenadeKeysNotOnPanel: readonly GrenadeKey[] = ['startingGrenades', 'carryLimit'];
+
 export const audioFolder: Folder<AudioKey> = {
   title: 'Audio',
   sliders: [
@@ -329,6 +376,10 @@ export const audioFolder: Folder<AudioKey> = {
     { key: 'impactVolume', label: 'Impacts, hit ticks, casings', min: 0, max: 1.5, step: 0.05 },
     { key: 'pistolLoudness', label: 'Pistol loudness (share of rifle)', min: 0, max: 1, step: 0.05 },
     { key: 'rattleStartHeat', label: 'Hot-barrel rattle from heat', min: 0, max: 100, step: 1 },
+    { key: 'earRingingVolume', label: 'Ringing ears volume (0 = none yet)', min: 0, max: 1.5, step: 0.05 },
+    { key: 'earRingingDuckShare', label: 'Ringing ears lower other sounds by', min: 0, max: 1, step: 0.05 },
+    { key: 'earRingingRadiusM', label: 'Blast rings the ears within (m)', min: 0, max: 20, step: 0.5 },
+    { key: 'earRingingMaxSec', label: 'Ringing lasts at most (s)', min: 0.5, max: 10, step: 0.5 },
     { key: 'pitchVariation', label: 'Pitch variation (share)', min: 0, max: 0.2, step: 0.005 },
     { key: 'casingClinkMinGapSec', label: 'Casing clinks at most every (s)', min: 0, max: 0.5, step: 0.01 },
   ],

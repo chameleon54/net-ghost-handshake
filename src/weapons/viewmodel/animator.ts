@@ -1,11 +1,14 @@
 import { viewmodelConfig as config } from '../../config/viewmodel';
-import type { GunId, WeaponId } from '../events';
+import type { GunId } from '../events';
+import type { ViewWeapon } from './models';
 import { Spring } from './spring';
 import {
   checkPose,
   clamp01,
   easeOutBack,
+  grenadeThrowKeys,
   gunInspectKeys,
+  type Key,
   inspectChamberCheck,
   knifeSlashKeys,
   rackPose,
@@ -43,7 +46,8 @@ export interface Pose {
 
 /** What the game tells the animator each frame. The optional ones default to "nothing is happening". */
 export interface AnimatorInput {
-  weapon: WeaponId;
+  /** What is in hand: a weapon, or 'grenade' while one is being thrown. */
+  weapon: ViewWeapon;
   /** 0 just after switching to the weapon, 1 when the draw is done. */
   drawProgress: number;
   /** 0 to 1 through a reload, or null when not reloading. */
@@ -52,6 +56,9 @@ export interface AnimatorInput {
   reloadRackShare?: number;
   /** 0 to 1 through checking the magazine, or null. */
   checkProgress?: number | null;
+  /** 0 to 1 through a grenade throw (while `weapon` is 'grenade'), and the share of it at which the grenade leaves the hand. */
+  throwProgress?: number | null;
+  throwReleaseShare?: number;
   /** True when the gun is empty: the slide or bolt stays locked back. */
   lockedOpen?: boolean;
   /** True while the gun is jammed: the slide or bolt sits part way back with a casing stuck in the port. */
@@ -105,7 +112,8 @@ export class ViewmodelAnimator {
   private sprintBlend = 0;
   private bobPhase = 0;
   private bobAmount = 0;
-  private weapon: WeaponId = 'rifle';
+  private weapon: ViewWeapon = 'rifle';
+  private throwKeys: { releaseShare: number; keys: readonly Key[] } = { releaseShare: -1, keys: [] };
   private preview: { kind: PreviewKind; timeSec: number; durationSec: number } | null = null;
 
   /** A round left a gun: kick it back and cycle the slide or bolt. */
@@ -137,7 +145,7 @@ export class ViewmodelAnimator {
   playPreview(kind: PreviewKind, durationSec: number): void {
     if (kind === 'fire') {
       if (this.weapon === 'knife') this.swung();
-      else this.fired(this.weapon);
+      else if (this.weapon !== 'grenade') this.fired(this.weapon);
     } else if (kind === 'inspect') {
       this.inspect();
     } else {
@@ -151,7 +159,7 @@ export class ViewmodelAnimator {
     // Slow motion slows the motion we drive ourselves (kicks, previews, inspect); the real timers cannot be slowed.
     const motionDtSec = dtSec * config.slowMotionScale;
     const isKnife = input.weapon === 'knife';
-    const gun: GunId | null = input.weapon === 'knife' ? null : input.weapon;
+    const gun: GunId | null = input.weapon === 'knife' || input.weapon === 'grenade' ? null : input.weapon;
 
     this.kickBack.frequencyHz = this.kickUp.frequencyHz = config.kickFrequencyHz;
     this.kickBack.dampingRatio = this.kickUp.dampingRatio = config.kickDampingRatio;
@@ -256,6 +264,14 @@ export class ViewmodelAnimator {
       pose.rollRad += this.reload.tilt * config.checkRollRad;
     } else if (this.inspectSec !== null) {
       this.addInspect(pose, gun, slideTravelM);
+    }
+
+    // The grenade throw: up with the pin pulled, back, forward through the release, away.
+    if (input.weapon === 'grenade') {
+      const releaseShare = input.throwReleaseShare ?? 0.5;
+      if (this.throwKeys.releaseShare !== releaseShare) this.throwKeys = { releaseShare, keys: grenadeThrowKeys(releaseShare) };
+      sampleKeys(this.throwKeys.keys, clamp01(input.throwProgress ?? 0), this.keyed);
+      this.addTransform(pose, this.keyed);
     }
 
     // The knife swing: wind back, slash across, recover.

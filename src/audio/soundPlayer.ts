@@ -13,4 +13,6 @@ export interface PlayOptions {
 /** Anything that can play a named sound. The game's audio system does; tests use a fake one. */
 export interface SoundPlayer {
   play(name: SoundName, options?: PlayOptions): void;
+  /** Lowers everything else by `share` (0 to 1) for `seconds`, for example while the ears ring after a blast. */
+  duck?(share: number, seconds: number): void;
 }

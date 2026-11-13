@@ -24,6 +24,9 @@ const distinctRackSounds = 3;
 const heatMax = 100;
 const clinkSpeedForFullVolumeMps = 3;
 const clinkMinVolume = 0.2;
+const grenadeBounceMinGapSec = 0.05;
+const bounceSpeedForFullVolumeMps = 6;
+const bounceMinVolume = 0.25;
 
 interface Scheduled {
   inSec: number;
@@ -38,6 +41,7 @@ export class WeaponSounds {
   private scheduled: Scheduled[] = [];
   private clockSec = 0;
   private lastClinkSec = -Infinity;
+  private lastBounceSec = -Infinity;
 
   constructor(
     events: EventBus<WeaponEvents>,
@@ -110,6 +114,20 @@ export class WeaponSounds {
     });
     events.on('shot:landed', ({ hit, end }) => {
       if (hit) this.player.play('impact', { position: end, rate: this.rate() }); // a bullet in a wall or the floor, where it landed
+    });
+    events.on('grenade:pin', () => this.play('grenade-pin'));
+    events.on('grenade:thrown', () => this.play('grenade-throw'));
+    events.on('grenade:bounced', ({ position, speedMps }) => {
+      if (this.clockSec - this.lastBounceSec < grenadeBounceMinGapSec) return;
+      this.lastBounceSec = this.clockSec;
+      const volume = Math.min(Math.max(speedMps / bounceSpeedForFullVolumeMps, bounceMinVolume), 1);
+      this.player.play('grenade-bounce', { position, volume, rate: this.rate() });
+    });
+    events.on('grenade:exploded', ({ position }) => this.player.play('grenade-explosion', { position, rate: this.rate() }));
+    // Ringing ears: the hook is ready; it stays silent until the sound's volume is raised (and the real sound added).
+    events.on('player:deafened', ({ intensity, durationSec }) => {
+      if (audioConfig.earRingingVolume > 0) this.play('ear-ringing', intensity * audioConfig.earRingingVolume);
+      if (audioConfig.earRingingDuckShare > 0) this.player.duck?.(audioConfig.earRingingDuckShare * intensity, durationSec);
     });
     events.on('casing:bounced', ({ position, speedMps }) => {
       if (this.clockSec - this.lastClinkSec < audioConfig.casingClinkMinGapSec) return; // not a wall of clinks in a spray

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
 import { audioConfigDefaults } from '../src/config/audio';
+import { grenadeConfigDefaults } from '../src/config/grenade';
+import { noiseConfigDefaults } from '../src/config/noise';
 import { casingConfigDefaults } from '../src/config/casing';
 import { dummyConfigDefaults } from '../src/config/dummy';
 import { knifeConfigDefaults } from '../src/config/knife';
@@ -13,6 +15,9 @@ import {
   inputFolder,
   playerFolders,
   audioFolder,
+  grenadeFolder,
+  grenadeKeysNotOnPanel,
+  noiseFolder,
   casingFolder,
   dummyFolder,
   dummyKeysNotOnPanel,
@@ -79,6 +84,30 @@ describe('the weapon animation tuning panel', () => {
     }
     const onPanel = new Set<string>([...sliders.map((s) => s.key), ...viewmodelKeysNotOnPanel]);
     for (const key of Object.keys(viewmodelConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the noise tuning panel', () => {
+  it('lists every noise radius with a sensible range around its default', () => {
+    for (const s of noiseFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(noiseConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(noiseConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(noiseFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(noiseConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the grenade tuning panel', () => {
+  it('has a sensible range around every default, and every grenade value is listed or excluded on purpose', () => {
+    for (const s of grenadeFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(grenadeConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(grenadeConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>([...grenadeFolder.sliders.map((s) => s.key), ...grenadeKeysNotOnPanel]);
+    for (const key of Object.keys(grenadeConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

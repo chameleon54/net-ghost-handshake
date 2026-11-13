@@ -7,6 +7,9 @@ import type { WeaponId } from '../events';
 // The hands are named anchors (`handStrong`, `handOff`) holding plain gloved blocks. A hand with fingers can later
 // replace the contents of an anchor without touching the animation or the rules.
 
+/** What the viewmodel can show: a weapon in hand, or the grenade being thrown. */
+export type ViewWeapon = WeaponId | 'grenade';
+
 export interface WeaponModel {
   root: THREE.Group;
   /** Moves down and away in a reload. Null for the knife. */
@@ -16,6 +19,8 @@ export interface WeaponModel {
   handStrong: THREE.Object3D;
   /** The hand that dips out of frame to fetch a magazine. Null for the knife. */
   handOff: THREE.Object3D | null;
+  /** The part that leaves the hand when thrown (the grenade). Null for weapons. */
+  held: THREE.Object3D | null;
   /** Where tracers start. Null for the knife. */
   muzzle: THREE.Object3D | null;
   /** Where spent casings leave the gun. Null for the knife. */
@@ -39,6 +44,7 @@ const colours = {
   handle: 0x2a2d31,
   sight: 0x0f1113,
   brass: 0xc9a227,
+  grenade: 0x3d4a2c,
 } as const;
 
 
@@ -101,7 +107,7 @@ function buildRifle(): WeaponModel {
   const stuckCasing = box(root, 0.025, 0.012, 0.035, colours.brass, 0.045, 0.03, 0.0);
   stuckCasing.visible = false;
   return {
-    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing,
+    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing, held: null,
     rest: { x: 0.17, y: -0.2, z: -0.4, ...noRotation },
     aimed: { x: 0, y: -0.095, z: -0.4 },
     base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
@@ -127,7 +133,7 @@ function buildPistol(): WeaponModel {
   const stuckCasing = box(root, 0.02, 0.012, 0.03, colours.brass, 0.03, 0.05, 0.0);
   stuckCasing.visible = false;
   return {
-    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing,
+    root, mag, slide, handStrong, handOff, muzzle, ejection, stuckCasing, held: null,
     rest: { x: 0.13, y: -0.17, z: -0.33, ...noRotation },
     aimed: { x: 0, y: -0.075, z: -0.33 },
     base: { magY: mag.position.y, slideZ: slide.position.z, handOff: handOff.position.clone() },
@@ -142,7 +148,7 @@ function buildKnife(): WeaponModel {
   const handStrong = anchor(root, 0, -0.012, 0.05);
   box(handStrong, 0.04, 0.045, 0.06, colours.glove, 0, 0, 0);
   return {
-    root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null, stuckCasing: null,
+    root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null, stuckCasing: null, held: null,
     // Held blade-up and angled across, ready to swing.
     rest: { x: 0.14, y: -0.17, z: -0.36, pitchRad: 0.6, yawRad: 0.3, rollRad: -0.2 },
     aimed: { x: 0.14, y: -0.17, z: -0.36 },
@@ -150,6 +156,23 @@ function buildKnife(): WeaponModel {
   };
 }
 
-export function buildModels(): Record<WeaponId, WeaponModel> {
-  return { rifle: buildRifle(), pistol: buildPistol(), knife: buildKnife() };
+function buildGrenade(): WeaponModel {
+  const root = new THREE.Group();
+  const held = new THREE.Group(); // the grenade itself: it leaves the hand when thrown
+  root.add(held);
+  held.add(new THREE.Mesh(new THREE.SphereGeometry(0.035, 14, 10), material(colours.grenade)));
+  box(held, 0.012, 0.05, 0.018, colours.metal, 0.03, 0.02, 0); // the lever
+  box(held, 0.014, 0.014, 0.02, colours.brass, 0, 0.04, 0); // the fuse
+  const handStrong = anchor(root, 0, -0.05, 0.01);
+  box(handStrong, 0.055, 0.07, 0.07, colours.glove, 0, 0, 0);
+  return {
+    root, mag: null, slide: null, handStrong, handOff: null, muzzle: null, ejection: null, stuckCasing: null, held,
+    rest: { x: 0.14, y: -0.16, z: -0.32, ...noRotation },
+    aimed: { x: 0.14, y: -0.16, z: -0.32 },
+    base: { magY: 0, slideZ: 0, handOff: new THREE.Vector3() },
+  };
+}
+
+export function buildModels(): Record<ViewWeapon, WeaponModel> {
+  return { rifle: buildRifle(), pistol: buildPistol(), knife: buildKnife(), grenade: buildGrenade() };
 }

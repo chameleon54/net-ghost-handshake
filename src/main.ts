@@ -19,11 +19,17 @@ import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
+import { grenadeConfig } from './config/grenade';
 import { inputConfig } from './config/input';
 import { BarrelSmoke } from './fx/barrelSmoke';
 import { AudioSystem } from './audio/audioSystem';
+import { NoiseReporter } from './stealth/noiseReporter';
 import { WeaponSounds } from './audio/weaponSounds';
 import { viewmodelConfig } from './config/viewmodel';
+import { dummyBlastTarget, GrenadeSystem } from './weapons/grenade/grenadeSystem';
+import { GrenadeThrower } from './weapons/grenade/thrower';
+import { CameraShake } from './fx/cameraShake';
+import { Explosions } from './fx/explosions';
 import { Casings } from './fx/casings';
 import { Aim } from './weapons/aim';
 import { HoldTap } from './weapons/holdTap';
@@ -82,11 +88,23 @@ const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
 const audio = new AudioSystem(scene, camera);
 const weaponSounds = new WeaponSounds(weaponEvents, audio);
+new NoiseReporter(weaponEvents, () => camera.position); // what the player does that enemies could hear (they listen from 4.10)
 const casings = new Casings(scene, weaponEvents, level.collision, camera, viewmodel.ejectionPorts);
 // R: a tap reloads, a hold checks the magazine. F: a hold inspects the weapon.
 const reloadKey = new HoldTap();
 const inspectKey = new HoldTap();
 new BulletMarks(scene, weaponEvents);
+// Grenades: G throws one (the thrower holds the rules), the system flies it and works out the blast, and the effects listen.
+const thrower = new GrenadeThrower(weaponEvents);
+const blastTargets = dummies.map((dummy) => dummyBlastTarget(dummy, weaponEvents));
+const playerBlastTarget = {
+  chest: (out: THREE.Vector3) => out.set(player.position.x, player.position.y + grenadeConfig.targetChestHeightM, player.position.z),
+  vulnerable: () => true,
+  hurt: () => {}, // the player has no health until milestone 3.1; the system publishes `player:blast` with the damage
+};
+const grenades = new GrenadeSystem(scene, weaponEvents, level.collision, camera, blastTargets, playerBlastTarget);
+const explosions = new Explosions(scene, weaponEvents, level.collision);
+const cameraShake = new CameraShake(weaponEvents, () => camera.position);
 const weaponReadout = createWeaponReadout(weaponEvents); // made before the overlay so the overlay covers it
 
 window.addEventListener('resize', () => {
@@ -131,14 +149,14 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower });
   });
 }
 
 // An inspect only starts when nothing else is going on (the animator drops it otherwise), so its sounds match.
 function canInspect(): boolean {
   const gun = weapons.gun;
-  const busy = weapons.drawing || player.isSprinting || aim.eased > 0.05 || (gun !== null && (gun.reloading || gun.checking || gun.jammed));
+  const busy = thrower.busy || weapons.drawing || player.isSprinting || aim.eased > 0.05 || (gun !== null && (gun.reloading || gun.checking || gun.jammed));
   return !busy;
 }
 
@@ -152,7 +170,7 @@ const loop = new Loop(
     // Aiming is allowed with a gun out that is not being drawn, and not while sprinting, climbing or vaulting.
     // Reloading does not stop it (owner's choice).
     const gunInHand = weapons.gun;
-    const canAim = gunInHand !== null && !weapons.drawing && !player.isSprinting && !player.mantle.active;
+    const canAim = gunInHand !== null && !weapons.drawing && !thrower.busy && !player.isSprinting && !player.mantle.active;
     aim.update(stepSec, canAim && input.isButtonDown(aimButton), gunInHand ? gunConfigs[gunInHand.id] : null);
     player.speedScale = aim.moveSpeedScale;
     shooter.aimBlend = aim.eased;
@@ -166,14 +184,25 @@ const loop = new Loop(
     // Every press is consumed each update, so a click that could not be used is not remembered for later.
     let select: WeaponId | null = null;
     for (const [code, weapon] of Object.entries(weaponKeys)) if (input.consumePress(code)) select = weapon;
+    // G: throw a grenade. Not while sprinting, climbing, vaulting, drawing, reloading or checking the magazine.
+    const gunBusy = weapons.drawing || (gunInHand !== null && (gunInHand.reloading || gunInHand.checking));
+    thrower.update(stepSec, {
+      pressed: input.consumePress('KeyG'),
+      canThrow: !player.isSprinting && !player.mantle.active && !gunBusy,
+    });
+    if (thrower.justFinished) weapons.redraw(); // the weapon comes back up after the throw
+    // While the hands are busy with the grenade nothing else can be done with the weapons.
+    const handsFree = !thrower.busy;
+    if (!handsFree) select = null;
+    const wheelSteps = input.consumeWheelSteps();
     weapons.update(stepSec, {
       select,
-      wheelSteps: input.consumeWheelSteps(),
-      triggerHeld: input.isButtonDown(fireButton),
-      triggerPressed: input.consumeButtonPress(fireButton),
-      reloadPressed: reloadKey.tapped,
-      checkRequested: reloadKey.holdStarted,
-      canFire: !player.isSprinting && !player.mantle.active,
+      wheelSteps: handsFree ? wheelSteps : 0,
+      triggerHeld: handsFree && input.isButtonDown(fireButton),
+      triggerPressed: input.consumeButtonPress(fireButton) && handsFree,
+      reloadPressed: reloadKey.tapped && handsFree,
+      checkRequested: reloadKey.holdStarted && handsFree,
+      canFire: handsFree && !player.isSprinting && !player.mantle.active,
     });
     if (inspectKey.holdStarted && canInspect()) {
       viewmodel.inspect();
@@ -184,12 +213,16 @@ const loop = new Loop(
     tracers.update(stepSec);
     casings.update(stepSec);
     weaponSounds.update(stepSec);
+    audio.update(stepSec);
+    grenades.update(stepSec);
+    explosions.update(stepSec);
+    cameraShake.update(stepSec);
     barrelSmoke.update(stepSec, weapons.rifleHeat, weapons.current === 'rifle');
     dummies.forEach((dummy, i) => {
       dummy.update(stepSec);
       dummyViews[i].update();
     });
-    weaponReadout.update(weapons, aim.eased);
+    weaponReadout.update(weapons, aim.eased, thrower.count);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
@@ -204,7 +237,7 @@ const loop = new Loop(
         camera.fov = fovDeg;
         camera.updateProjectionMatrix();
       }
-      player.applyToCamera(camera, alpha, shooter.recoil.pitchRad, shooter.recoil.yawRad);
+      player.applyToCamera(camera, alpha, shooter.recoil.pitchRad + cameraShake.pitchRad, shooter.recoil.yawRad + cameraShake.yawRad);
     }
     // The weapon animates with real time, every screen frame, so it stays smooth on fast screens.
     const nowMs = performance.now();
@@ -212,7 +245,9 @@ const loop = new Loop(
     lastFrameMs = nowMs;
     const gun = weapons.gun;
     // One input object reused every frame, so nothing is allocated here.
-    animatorInput.weapon = weapons.current;
+    animatorInput.weapon = thrower.busy ? 'grenade' : weapons.current;
+    animatorInput.throwProgress = thrower.progress;
+    animatorInput.throwReleaseShare = thrower.releaseShare;
     animatorInput.drawProgress = weapons.drawProgress;
     animatorInput.reloadProgress = gun?.reloading ? gun.reloadProgress : null;
     animatorInput.reloadRackShare = gun?.reloadRackShare ?? 0;

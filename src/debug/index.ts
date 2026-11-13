@@ -12,11 +12,14 @@ import type { Player } from '../player/player';
 import type { Viewmodel } from '../weapons/viewmodel/viewmodel';
 import type { WeaponSet } from '../weapons/weaponSet';
 import type { AudioSystem } from '../audio/audioSystem';
+import { grenadeConfig, grenadeConfigDefaults } from '../config/grenade';
+import { noiseConfig, noiseConfigDefaults } from '../config/noise';
+import type { GrenadeThrower } from '../weapons/grenade/thrower';
 import { soundNames } from '../audio/recipes';
 import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
-import { audioFolder, casingFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -35,6 +38,7 @@ interface Parts {
   viewmodel: Viewmodel;
   weapons: WeaponSet;
   audio: AudioSystem;
+  thrower: GrenadeThrower;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -45,7 +49,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -100,6 +104,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(viewmodelConfig, viewmodelConfigDefaults);
       resetToDefaults(casingConfig, casingConfigDefaults);
       resetToDefaults(audioConfig, audioConfigDefaults);
+      resetToDefaults(grenadeConfig, grenadeConfigDefaults);
+      resetToDefaults(noiseConfig, noiseConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -115,6 +121,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/viewmodel.ts': changedValues(viewmodelConfig, viewmodelConfigDefaults),
           'src/config/casing.ts': changedValues(casingConfig, casingConfigDefaults),
           'src/config/audio.ts': changedValues(audioConfig, audioConfigDefaults),
+          'src/config/grenade.ts': changedValues(grenadeConfig, grenadeConfigDefaults),
+          'src/config/noise.ts': changedValues(noiseConfig, noiseConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -180,6 +188,14 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   dummyPanel.close();
   for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
 
+  const grenadePanel = gui.addFolder(grenadeFolder.title);
+  grenadePanel.close();
+  for (const s of grenadeFolder.sliders) grenadePanel.add(grenadeConfig, s.key, s.min, s.max, s.step).name(s.label);
+
+  const noisePanel = gui.addFolder(noiseFolder.title);
+  noisePanel.close();
+  for (const s of noiseFolder.sliders) noisePanel.add(noiseConfig, s.key, s.min, s.max, s.step).name(s.label);
+
   // Sound: volumes, and a button for every sound so each can be heard on its own (works while paused).
   const audioPanel = gui.addFolder('Audio');
   audioPanel.close();
@@ -191,6 +207,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   // Testing aids that change the rules on purpose. Dev server only.
   const cheats = { infiniteAmmo: false };
   const cheatFolder = gui.addFolder('Testing aids');
+  cheatFolder.add({ give: () => thrower.give(grenadeConfig.carryLimit) }, 'give').name('Give grenades (to the limit)');
   cheatFolder.add(cheats, 'infiniteAmmo').name('Infinite ammo').onChange((on: boolean) => weapons.setInfiniteAmmo(on));
 
   const cameraFolder = gui.addFolder('Free camera');

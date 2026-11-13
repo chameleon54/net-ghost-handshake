@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { viewConfig } from '../../config/view';
 import type { EventBus } from '../../core/events';
-import type { GunId, WeaponEvents, WeaponId } from '../events';
+import type { GunId, WeaponEvents } from '../events';
 import { ViewmodelAnimator, type AnimatorInput, type PreviewKind } from './animator';
-import { buildModels } from './models';
+import { buildModels, type ViewWeapon } from './models';
 
 const nearM = 0.01;
 const farM = 5;
@@ -60,7 +60,7 @@ export class Viewmodel {
     this.animator.update(dtSec, input);
     const pose = this.animator.pose;
 
-    for (const [id, model] of Object.entries(this.models) as [WeaponId, (typeof this.models)[WeaponId]][]) {
+    for (const [id, model] of Object.entries(this.models) as [ViewWeapon, (typeof this.models)[ViewWeapon]][]) {
       model.root.visible = id === input.weapon;
     }
     const model = this.models[input.weapon];
@@ -79,6 +79,8 @@ export class Viewmodel {
     }
     if (model.slide) model.slide.position.z = base.slideZ + pose.slideZ;
     if (model.stuckCasing) model.stuckCasing.visible = pose.stuckCasing;
+    // The grenade leaves the hand at the release; the empty hand follows through.
+    if (model.held) model.held.visible = (input.throwProgress ?? 0) < (input.throwReleaseShare ?? 1);
     if (model.handOff) model.handOff.position.set(base.handOff.x + pose.handX, base.handOff.y + pose.handY, base.handOff.z + pose.handZ);
 
     // Tracers start where the muzzle really is this frame, and casings where the ejection port is.

@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { HitZone } from '../enemies/dummy';
+import type { Noise } from '../stealth/noise';
 import type { MagazineCheck } from './magazineFeel';
 
 export type GunId = 'rifle' | 'pistol';
@@ -46,7 +47,22 @@ export type WeaponEvents = {
   'weapon:switched': { weapon: WeaponId };
   'shot:landed': ShotLanded;
   /** A weapon hit a target. Hit markers (and later sound) listen. */
-  'target:hit': { zone: HitZone; killed: boolean; weapon: WeaponId };
+  'target:hit': { zone: HitZone; killed: boolean; weapon: WeaponId | 'grenade' };
+  /** The player made a sound enemies could hear, at `position`, carrying `radiusM`. Enemy hearing (4.10) listens to this. */
+  'noise:made': Noise;
+  /** G was pressed with a grenade and the pin is out. */
+  'grenade:pin': undefined;
+  /** The grenade leaves the hand. The grenade system then flies it and says `grenade:thrown`. */
+  'grenade:release': undefined;
+  'grenade:thrown': { position: Vector3; velocity: Vector3 };
+  /** A grenade bounced off a surface at `speedMps` into it. The position vector is reused. */
+  'grenade:bounced': { position: Vector3; speedMps: number };
+  /** A grenade went off. Glass (phase 5) and enemies (4.12) will react to this; enemies hear it too. The position vector is reused. */
+  'grenade:exploded': { position: Vector3; radiusM: number };
+  /** The blast would hurt the player by `damage`. Nothing uses it until the health milestone (3.1). */
+  'player:blast': { damage: number; distanceM: number };
+  /** A blast went off close to the player: his ears ring for `durationSec`. The sound is added later. */
+  'player:deafened': { intensity: number; durationSec: number };
   /** A spent casing bounced off a surface, at `speedMps` into it. For the clink. The position vector is reused. */
   'casing:bounced': { position: Vector3; speedMps: number };
 };

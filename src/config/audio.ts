@@ -14,6 +14,13 @@ export const audioConfigDefaults = {
   rattleStartHeat: 70,
   /** Each sound is played a little higher or lower, up to this share, so a spray does not repeat one sample. */
   pitchVariation: 0.04,
+  /** Ears ringing after a close blast. Volume 0 means no ringing sound yet: drop `sfx-ear-ringing.ogg` into src/assets/audio/ and raise it. */
+  earRingingVolume: 0,
+  /** How much everything else is lowered while the ears ring (0 none, 1 silent). Off until the sound exists. */
+  earRingingDuckShare: 0,
+  /** A blast closer than this rings the ears (more the closer it is), and the ringing lasts up to this long. */
+  earRingingRadiusM: 6,
+  earRingingMaxSec: 4,
   /** Casing clinks come no more often than once per this gap, so a spray is not a wall of clinks. */
   casingClinkMinGapSec: 0.05,
 } as const;

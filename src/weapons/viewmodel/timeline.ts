@@ -138,6 +138,21 @@ export const knifeSlashKeys: readonly Key[] = [
   at(1, 0, 0, 0, 0, 0, 0),
 ];
 
+/**
+ * The grenade throw: the hand comes up with the pin pulled, goes back, swings forward through the release, and drops
+ * away. `releaseShare` is the share of the throw at which the grenade leaves the hand, so the swing meets it.
+ */
+export function grenadeThrowKeys(releaseShare: number): readonly Key[] {
+  const r = Math.min(Math.max(releaseShare, 0.1), 0.9);
+  return [
+    at(0, 0, -0.2, 0.05, 0.6, 0, 0),
+    at(r * 0.3, 0, 0, 0, 0.2, 0, 0),
+    at(r * 0.9, 0.04, 0.06, 0.1, 0.7, 0, 0.2),
+    at(r + (1 - r) * 0.35, -0.03, -0.02, -0.3, -0.5, 0, -0.1),
+    at(1, 0, -0.22, -0.05, -0.2, 0, 0),
+  ];
+}
+
 // ---- Checking the magazine ----
 
 /** Pull the magazine part way out, look at it, push it back. Uses the reload's fields; `magVisible` stays true. */

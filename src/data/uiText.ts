@@ -11,5 +11,7 @@ export const uiText = {
   magazineCheck: { gun: 'Magazine', spares: 'Spares', noSpares: 'none' },
   /** The jam prompt (ui.md: "Tap R"). */
   jammed: 'JAMMED   Tap R',
+  /** Temporary readout label for the grenade count (ui.md: the real HUD shows it only briefly). */
+  grenades: 'Grenades',
   captureRefused: 'The browser did not allow that yet. Click again',
 } as const;

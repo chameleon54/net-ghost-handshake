@@ -7,6 +7,7 @@ import type { PlayOptions, SoundPlayer } from './soundPlayer';
 
 const plainVoices = 20; // sounds that can play at once without a position (your own gun and handling)
 const spatialVoices = 10; // sounds that can play at once in the world (impacts, casings)
+const duckFadeSec = 0.6; // the lowering fades back over this long at the end
 const spatialRefDistanceM = 4; // inside this distance a positional sound is at full volume; beyond it, it fades
 
 const groupVolume = (group: SoundGroup): number =>
@@ -22,6 +23,8 @@ export class AudioSystem implements SoundPlayer {
   private spatial: THREE.PositionalAudio[] = [];
   private nextPlain = 0;
   private nextSpatial = 0;
+  private duckShare = 0;
+  private duckLeftSec = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -34,6 +37,19 @@ export class AudioSystem implements SoundPlayer {
     resumeAudio(this.listener!.context as AudioContext);
   }
 
+  /** Lowers everything by `share` for `seconds` (ringing ears). A longer or stronger one wins over a weaker one still running. */
+  duck(share: number, seconds: number): void {
+    if (seconds > this.duckLeftSec) this.duckLeftSec = seconds;
+    this.duckShare = Math.max(this.duckShare, Math.min(Math.max(share, 0), 1));
+  }
+
+  /** Once per game update: counts the ducking down. */
+  update(dtSec: number): void {
+    if (this.duckLeftSec <= 0) return;
+    this.duckLeftSec = Math.max(this.duckLeftSec - dtSec, 0);
+    if (this.duckLeftSec === 0) this.duckShare = 0;
+  }
+
   /** Freezes the sound while the game is paused. */
   suspend(): void {
     if (this.listener) suspendAudio(this.listener.context as AudioContext);
@@ -44,7 +60,9 @@ export class AudioSystem implements SoundPlayer {
     const buffer = this.bank?.pick(name);
     if (!listener || !buffer || listener.context.state !== 'running') return;
 
-    listener.setMasterVolume(audioConfig.masterVolume);
+    // While the ears ring everything else is lowered; the ducking fades out over its last moments.
+    const duck = this.duckShare * Math.min(this.duckLeftSec / duckFadeSec, 1);
+    listener.setMasterVolume(audioConfig.masterVolume * (1 - duck));
     const volume = (options.volume ?? 1) * groupVolume(recipes[name].group);
     const voice = options.position ? this.nextSpatialVoice() : this.nextPlainVoice();
     if (voice.isPlaying) voice.stop(); // all voices busy: the oldest is cut off

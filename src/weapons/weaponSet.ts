@@ -73,6 +73,12 @@ export class WeaponSet {
     this.events.emit('weapon:switched', { weapon });
   }
 
+  /** Draws the weapon in hand again, as after a grenade throw. No switch happens, so no switch sound. */
+  redraw(): void {
+    this.drawTotalSec = Math.max(drawTimeSec(this.current), 0.01);
+    this.drawLeftSec = this.drawTotalSec;
+  }
+
   /** Moves along the wheel order, wrapping around. */
   cycle(steps: number): void {
     const count = weaponOrder.length;

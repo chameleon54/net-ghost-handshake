@@ -29,6 +29,11 @@ export const soundNames = [
   'kill-tick',
   'impact',
   'casing-clink',
+  'grenade-pin',
+  'grenade-throw',
+  'grenade-bounce',
+  'grenade-explosion',
+  'ear-ringing',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -312,6 +317,66 @@ export const recipes: Record<SoundName, Recipe> = {
       addTone(s, sr, { duration: 0.14, freq: between(rng, 5100, 5700), decay: 0.07, gain: 0.25 });
       addNoise(s, sr, { duration: 0.01, decay: 0.004, gain: 0.3, highpass: 5000, rng });
       return finish(s, sr, { peak: 0.4 });
+    },
+  },
+  // The pin pulled: a small metal ting and a click.
+  'grenade-pin': {
+    group: 'handling',
+    variants: 1,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.16);
+      addTone(s, sr, { duration: 0.14, freq: 3300, decay: 0.05, gain: 0.5 });
+      metalClick(s, sr, rng, 0, 0.7, 2600);
+      addNoise(s, sr, { start: 0.05, duration: 0.03, decay: 0.01, gain: 0.3, highpass: 1500, lowpass: 6000, rng });
+      return finish(s, sr, { peak: 0.6 });
+    },
+  },
+  // A throw: a whoosh with a little grunt of air.
+  'grenade-throw': {
+    group: 'handling',
+    variants: 1,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.3);
+      addSweep(s, sr, { duration: 0.22, fromHz: 300, toHz: 1500, q: 1.1, gain: 1.6, rng });
+      thunk(s, sr, 0.02, 0.2, 120, 70);
+      return finish(s, sr, { peak: 0.6 });
+    },
+  },
+  // A metal body bouncing on a hard surface: a clunk with a short ring.
+  'grenade-bounce': {
+    group: 'impact',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.25);
+      thunk(s, sr, 0, 0.8, between(rng, 260, 340), 140);
+      addNoise(s, sr, { duration: 0.08, decay: 0.02, gain: 0.5, lowpass: 3000, rng });
+      addTone(s, sr, { duration: 0.2, freq: between(rng, 1600, 2000), decay: 0.06, gain: 0.18 });
+      return finish(s, sr, { peak: 0.65 });
+    },
+  },
+  // A blast: a crack, a huge thump that falls in pitch, and a long rumbling tail.
+  'grenade-explosion': {
+    group: 'weapon',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 1.8);
+      addNoise(s, sr, { duration: 0.12, decay: 0.03, gain: 0.9, highpass: 1500, attack: 0.0002, rng });
+      addNoise(s, sr, { duration: 0.5, decay: 0.16, gain: 1.0, lowpass: 1800, rng });
+      addTone(s, sr, { duration: 0.8, freq: between(rng, 85, 100), freqEnd: 26, decay: 0.28, gain: 1.5 });
+      addNoise(s, sr, { start: 0.05, duration: 1.7, decay: 0.55, gain: 0.5, lowpass: 450, rng });
+      return finish(s, sr, { peak: 0.98, drive: 2.6 });
+    },
+  },
+  // A placeholder for the ringing of ears after a close blast: a thin high tone that fades. Replace it with a real
+  // recording by adding src/assets/audio/sfx-ear-ringing.ogg. It is silent in the game until its volume is raised.
+  'ear-ringing': {
+    group: 'weapon',
+    variants: 1,
+    make: (sr) => {
+      const s = createSamples(sr, 3);
+      addTone(s, sr, { duration: 3, freq: 4200, decay: 1.2, gain: 0.5, attack: 0.05 });
+      addTone(s, sr, { duration: 3, freq: 6100, decay: 0.8, gain: 0.15, attack: 0.05 });
+      return finish(s, sr, { peak: 0.3 });
     },
   },
 };
