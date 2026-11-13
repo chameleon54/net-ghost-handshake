@@ -54,3 +54,19 @@ export function accelerate(
     velocity.z += (diffZ / diffLength) * maxChange;
   }
 }
+
+/**
+ * Turns the unit direction `dir` toward the wanted direction by at most `maxTurnRad`.
+ * Does nothing when no key is held. Used for the slight steer during a slide.
+ */
+export function steerToward(dir: Vec2, wish: Vec2, maxTurnRad: number): void {
+  if (wish.x === 0 && wish.z === 0) return;
+  const current = Math.atan2(dir.z, dir.x);
+  const wanted = Math.atan2(wish.z, wish.x);
+  // Shortest way round, in the range -PI to PI.
+  let diff = wanted - current;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  const turn = Math.max(-maxTurnRad, Math.min(maxTurnRad, diff));
+  dir.x = Math.cos(current + turn);
+  dir.z = Math.sin(current + turn);
+}

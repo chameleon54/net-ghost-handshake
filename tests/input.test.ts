@@ -18,6 +18,28 @@ describe('Input', () => {
     expect(input.isButtonDown(0)).toBe(true);
   });
 
+  it('reports a key press once, even if the key was released before it was read', () => {
+    const input = new Input();
+    input.enabled = true;
+    input.keyDown('KeyC');
+    input.keyUp('KeyC');
+    expect(input.consumePress('KeyC')).toBe(true);
+    expect(input.consumePress('KeyC')).toBe(false);
+  });
+
+  it('does not report a held key as pressed again, and forgets presses on clear', () => {
+    const input = new Input();
+    input.enabled = true;
+    input.keyDown('KeyC');
+    input.consumePress('KeyC');
+    input.keyDown('KeyC'); // still held
+    expect(input.consumePress('KeyC')).toBe(false);
+    input.keyUp('KeyC');
+    input.keyDown('KeyC');
+    input.clear();
+    expect(input.consumePress('KeyC')).toBe(false);
+  });
+
   it('returns mouse movement once, then zero', () => {
     const input = new Input();
     input.enabled = true;

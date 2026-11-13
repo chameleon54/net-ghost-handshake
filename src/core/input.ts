@@ -6,12 +6,20 @@ export class Input {
   enabled = false;
 
   private heldKeys = new Set<string>();
+  private pressedKeys = new Set<string>();
   private heldButtons = new Set<number>();
   private mouseDx = 0;
   private mouseDy = 0;
 
   keyDown(code: string): void {
-    if (this.enabled) this.heldKeys.add(code);
+    if (!this.enabled) return;
+    if (!this.heldKeys.has(code)) this.pressedKeys.add(code);
+    this.heldKeys.add(code);
+  }
+
+  /** True once per key press, even if the key was tapped and released between two updates. */
+  consumePress(code: string): boolean {
+    return this.pressedKeys.delete(code);
   }
 
   // Key-ups always count, so a key released while paused is not left stuck.
@@ -52,6 +60,7 @@ export class Input {
   /** Forget everything held. Called on pause so nothing sticks. */
   clear(): void {
     this.heldKeys.clear();
+    this.pressedKeys.clear();
     this.heldButtons.clear();
     this.mouseDx = 0;
     this.mouseDy = 0;

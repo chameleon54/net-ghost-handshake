@@ -35,6 +35,21 @@ describe('LevelCollision.pushOut', () => {
     expect(position.x).toBeCloseTo(1.0 - radiusM, 2);
   });
 
+  it('stops a player moving at slide speed (8 m/s) even at a thin wall', () => {
+    const position = walk(oneWall, new Vector3(0, 0, 0), 8, 0, 60);
+    expect(position.x).toBeCloseTo(1.0 - radiusM, 2);
+  });
+
+  it('stops a crouched or sliding capsule too (shorter height)', () => {
+    const { collision } = buildGreybox(oneWall);
+    const position = new Vector3(0, 0, 0);
+    for (let i = 0; i < 60; i++) {
+      position.x += 8 * dtSec;
+      collision.pushOut(position, radiusM, 0.9, iterations);
+    }
+    expect(position.x).toBeCloseTo(1.0 - radiusM, 2);
+  });
+
   it('slides along a wall when walking into it at an angle', () => {
     const position = walk(oneWall, new Vector3(0, 0, 0), 4, 4, 60);
     expect(position.x).toBeCloseTo(1.0 - radiusM, 2);

@@ -3,7 +3,8 @@ import { MeshBVH } from 'three-mesh-bvh';
 
 // Static level collision: a BVH (a fast spatial index) over every wall and prop triangle.
 // shortcut: the floor is not in here and the player only moves sideways. Add vertical collision in 1.5.
-// shortcut: no continuous collision; safe while the player moves far less than the thinnest wall per update.
+// shortcut: no continuous collision. To tunnel, the capsule would have to cross a wall's thickness plus its own width in one
+// update (at least 0.8 m, about 48 m/s at 60 Hz). Safe for walking, sprinting and sliding (8 m/s); re-check if anything faster carries the player.
 export class LevelCollision {
   private readonly bvh: MeshBVH;
 

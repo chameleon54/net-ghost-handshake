@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { accelerate, wishDirection } from '../src/player/movement';
+import { accelerate, steerToward, wishDirection } from '../src/player/movement';
 
 describe('wishDirection', () => {
   it('forward at yaw 0 points toward -z', () => {
@@ -47,5 +47,36 @@ describe('accelerate', () => {
     expect(velocity.x).toBeCloseTo(1);
     accelerate(velocity, { x: 0, z: 0 }, 4, 40, 60, 0.05);
     expect(velocity.x).toBe(0);
+  });
+});
+
+describe('steerToward', () => {
+  const angleOf = (d: { x: number; z: number }) => Math.atan2(d.z, d.x);
+
+  it('turns by at most the allowed amount', () => {
+    const dir = { x: 1, z: 0 };
+    steerToward(dir, { x: 0, z: 1 }, 0.25); // wants 90 degrees, allowed about 14
+    expect(angleOf(dir)).toBeCloseTo(0.25);
+    expect(Math.hypot(dir.x, dir.z)).toBeCloseTo(1);
+  });
+
+  it('reaches the wanted direction when it is within the allowed turn', () => {
+    const dir = { x: 1, z: 0 };
+    steerToward(dir, { x: 0, z: 1 }, 3);
+    expect(dir.x).toBeCloseTo(0);
+    expect(dir.z).toBeCloseTo(1);
+  });
+
+  it('takes the short way round across the -PI/PI seam', () => {
+    const dir = { x: -1, z: 0.01 }; // just under PI
+    const wish = { x: -1, z: -0.01 }; // just over -PI, so a tiny turn away
+    steerToward(dir, wish, 1);
+    expect(dir.x).toBeCloseTo(-1, 2);
+  });
+
+  it('does nothing when no key is held', () => {
+    const dir = { x: 0, z: -1 };
+    steerToward(dir, { x: 0, z: 0 }, 1);
+    expect(dir).toEqual({ x: 0, z: -1 });
   });
 });
