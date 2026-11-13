@@ -93,9 +93,13 @@ export const playerConfigDefaults = {
   vaultHoldDecisionSec: 0.12,
   /** Climbing onto a low obstacle (Space held): the time from wherever you are, up and onto the top. */
   climbLowSec: 0.4,
-  /** Climbing a tall ledge: a slow rise, then onto the top. About 0.7 s. */
-  climbRiseSec: 0.45,
-  climbTopSec: 0.25,
+  /** Climbing a tall ledge (1.1 to 2.0 m): one smooth motion from where you are to the top. About 0.7 s. */
+  climbHighSec: 0.7,
+  /**
+   * How much the forward movement of a climb lags behind the rise. 1 is a straight diagonal; higher means you rise
+   * along the face first and pull over the edge later. Keep it at 1 or more, or the camera could pass through the obstacle's face.
+   */
+  climbForwardLag: 1.5,
 
   // Collision and spawn
   /** How many times per update the player is pushed out of walls. More resolves tight corners. */

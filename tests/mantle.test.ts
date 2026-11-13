@@ -94,8 +94,8 @@ describe('Mantle (the scripted move)', () => {
     vaultArcMinHeightM: 0.25,
     vaultHoldDecisionSec: 0.1,
     climbLowSec: 0.4,
-    climbRiseSec: 0.4,
-    climbTopSec: 0.2,
+    climbHighSec: 0.6,
+    climbForwardLag: 1.5,
     mantleMinHeightM: 0.3,
     vaultMaxHeightM: 1.1,
   };
@@ -205,12 +205,47 @@ describe('Mantle (the scripted move)', () => {
     expect(path[path.length - 1]).toEqual({ x: 0, y: 1, z: -1 });
   });
 
-  it('a tall ledge is always climbed (rise, then onto the top), taking longer than a vault', () => {
+  it('a tall ledge is climbed in one motion: it ends exactly on top and takes longer than a vault', () => {
     const climb = vault(0, highPlan);
     expect(climb.path[climb.path.length - 1]).toEqual({ x: 0, y: 1.5, z: -1 });
     expect(climb.seconds).toBeGreaterThan(vault(-5).seconds);
-    // The tall climb is unchanged: it rises first without moving forward.
-    expect(climb.path[Math.floor(0.3 / stepSec)].z).toBe(0);
+    expect(climb.seconds).toBeCloseTo(settings.climbHighSec, 1);
+  });
+
+  it('a climb moves forward and up together from the start, never going down or backwards (it no longer rises first and then moves forward)', () => {
+    const { path } = vault(0, highPlan);
+    const early = path[Math.floor(0.25 * path.length)];
+    expect(early.y).toBeGreaterThan(0.05); // rising ...
+    expect(early.z).toBeLessThan(-0.005); // ... and already moving forward at the same time
+    for (let i = 1; i < path.length; i++) {
+      expect(path[i].y, `step ${i} y`).toBeGreaterThanOrEqual(path[i - 1].y - 1e-9);
+      expect(path[i].z, `step ${i} z`).toBeLessThanOrEqual(path[i - 1].z + 1e-9);
+    }
+  });
+
+  it('the forward part lags behind the rise, so you rise along the face and pull over the edge', () => {
+    const { path } = vault(0, highPlan);
+    for (const fraction of [0.2, 0.4, 0.6, 0.8]) {
+      const p = path[Math.floor(fraction * path.length)];
+      const risen = p.y / 1.5; // how much of the height is done
+      const forward = -p.z / 1; // how much of the forward distance is done
+      expect(forward, `at ${fraction}`).toBeLessThan(risen);
+    }
+  });
+
+  it('a forward lag of 1 is a straight diagonal: equal progress forward and up at every step', () => {
+    const m = new Mantle({ ...settings, climbForwardLag: 1 });
+    m.start(spot(0, 0, 0), highPlan, { x: 0, z: 0 });
+    const { path } = run(m, 0);
+    for (const p of path) expect(-p.z / 1).toBeCloseTo(p.y / 1.5, 6);
+  });
+
+  it('a climb has no jump between steps', () => {
+    const { path } = vault(0, highPlan);
+    for (let i = 1; i < path.length; i++) {
+      const stepM = Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y, path[i].z - path[i - 1].z);
+      expect(stepM, `step ${i}`).toBeLessThan(0.05); // under 5 m/s
+    }
   });
 });
 
@@ -277,6 +312,37 @@ describe('the whole thing through the real Player', () => {
     expect(player.mantle.active).toBe(true);
     while (player.mantle.active) player.fixedUpdate(dt, input);
     expect(Math.hypot(player.mantle.exitVelocity.x, player.mantle.exitVelocity.z)).toBeGreaterThan(4);
+  });
+
+  /** Climbs from here and returns the closest the camera gets to any surface, as a small sphere at the eye. */
+  function cameraInsideDuringClimb(x: number, z: number, holdSpace: boolean): { climbed: boolean; inside: boolean } {
+    const { player, input } = setup(x, z);
+    input.keyDown('Space');
+    if (!holdSpace) input.keyUp('Space');
+    let inside = false;
+    let climbed = false;
+    const eye = new Vector3();
+    for (let i = 0; i < 120; i++) {
+      player.fixedUpdate(dt, input);
+      if (player.mantle.active) climbed = true;
+      // A sphere of radius 0.1 m at the eye: the camera's near plane reaches about 0.09 m sideways.
+      eye.set(player.position.x, player.position.y + player.eyeHeightNowM - 0.1, player.position.z);
+      if (collision.overlapsCapsule(eye, 0.1, 0.2, 0.01)) inside = true;
+    }
+    return { climbed, inside };
+  }
+
+  it('the camera never goes inside the obstacle while climbing the 1.5 m crate, the 1.9 m platform or the low crate', () => {
+    for (const [name, x, z, hold] of [
+      ['1.5 m crate', 3, -1.7, false],
+      ['1.9 m platform', -2, -2.3, false],
+      ['1.0 m crate, Space held', -4, -0.9, true],
+      ['bench, Space held', -2.5, 4.0, true],
+    ] as const) {
+      const result = cameraInsideDuringClimb(x, z, hold);
+      expect(result.climbed, `${name} did not climb`).toBe(true);
+      expect(result.inside, `${name}: the camera went inside the obstacle`).toBe(false);
+    }
   });
 
   it('no sprint or lean state is reported while climbing', () => {

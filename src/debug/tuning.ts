@@ -95,8 +95,8 @@ export const playerFolders: Folder<PlayerKey>[] = [
       { key: 'vaultArcMinHeightM', label: 'Vault lift, lowest obstacle (m)', min: 0, max: 0.8, step: 0.01 },
       { key: 'vaultHoldDecisionSec', label: 'Hold Space this long to climb (s)', min: 0.02, max: 0.4, step: 0.01 },
       { key: 'climbLowSec', label: 'Climb onto low cover (s)', min: 0.1, max: 1.5, step: 0.01 },
-      { key: 'climbRiseSec', label: 'Tall climb rise (s)', min: 0.1, max: 2, step: 0.01 },
-      { key: 'climbTopSec', label: 'Tall climb onto top (s)', min: 0.1, max: 1.5, step: 0.01 },
+      { key: 'climbHighSec', label: 'Tall climb time (s)', min: 0.2, max: 2, step: 0.01 },
+      { key: 'climbForwardLag', label: 'Climb: forward lag (1 = straight diagonal)', min: 1, max: 3, step: 0.05 },
     ],
   },
 ];
