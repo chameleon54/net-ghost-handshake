@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
 import { dummyConfigDefaults } from '../src/config/dummy';
+import { knifeConfigDefaults } from '../src/config/knife';
+import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
 import {
   changedValues,
@@ -9,6 +11,9 @@ import {
   playerFolders,
   dummyFolder,
   dummyKeysNotOnPanel,
+  knifeFolder,
+  pistolFolders,
+  pistolKeysNotOnPanel,
   playerKeysNotOnPanel,
   rifleFolders,
   rifleKeysNotOnPanel,
@@ -30,6 +35,30 @@ describe('the rifle tuning panel', () => {
     }
     const onPanel = new Set<string>([...sliders.map((s) => s.key), ...rifleKeysNotOnPanel]);
     for (const key of Object.keys(rifleConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the pistol and knife tuning panels', () => {
+  const check = (
+    sliders: { key: string; min: number; max: number }[],
+    defaults: Record<string, number>,
+    excluded: readonly string[],
+  ) => {
+    for (const s of sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(defaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(defaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...excluded]);
+    for (const key of Object.keys(defaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  };
+
+  it('list every pistol value or exclude it on purpose', () => {
+    check(pistolFolders.flatMap((f) => f.sliders), pistolConfigDefaults, pistolKeysNotOnPanel);
+  });
+
+  it('list every knife value', () => {
+    check(knifeFolder.sliders, knifeConfigDefaults, []);
   });
 });
 

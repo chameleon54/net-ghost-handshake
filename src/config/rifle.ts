@@ -4,13 +4,15 @@ export const rifleConfigDefaults = {
   fireRateRpm: 700,
   /** Time from pressing R to the new magazine being in. */
   reloadTimeSec: 1.8,
+  /** Time after switching to the rifle before it can fire or reload (weapons.md). */
+  drawTimeSec: 0.4,
   /** Rounds in a full magazine. Read once at start, so it is not on the tuning panel. */
   magazineRounds: 30,
   /** Magazines carried at the start, including the loaded one (the Squad Waves loadout). Read once at start. */
   startingMagazines: 4,
   /** Damage of a body hit. A headshot has no number: it always kills. Starting value, the same class as the enemy rifle (enemies.md). */
   bodyDamagePerHit: 15,
-  /** Longest a bullet travels. */
+  /** Longest a bullet travels. Shared by every gun. */
   maxRangeM: 100,
 
   // Recoil: the camera kicks up and a little sideways per shot, and settles back when the shooting stops.

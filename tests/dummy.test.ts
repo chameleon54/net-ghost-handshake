@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PerspectiveCamera, Ray, Vector3 } from 'three';
 import { dummyConfigDefaults as d } from '../src/config/dummy';
+import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
 import { EventBus } from '../src/core/events';
 import { Dummy } from '../src/enemies/dummy';
@@ -50,6 +51,26 @@ describe('Dummy', () => {
   });
 });
 
+describe('Dummy facing', () => {
+  it('knows when an attacker is behind it', () => {
+    const north = new Dummy(0, 0, 0); // faces -z
+    expect(north.isBehind(0, 2)).toBe(true);
+    expect(north.isBehind(0, -2)).toBe(false);
+    const south = new Dummy(0, 0, Math.PI); // faces +z
+    expect(south.isBehind(0, -2)).toBe(true);
+    expect(south.isBehind(0, 2)).toBe(false);
+    const east = new Dummy(0, 0, -Math.PI / 2); // faces +x
+    expect(east.isBehind(-2, 0)).toBe(true);
+    expect(east.isBehind(2, 0)).toBe(false);
+  });
+
+  it('kill() kills a standing dummy at once and does nothing to one that is down', () => {
+    const dummy = new Dummy(0, 0);
+    expect(dummy.kill()).toBe(true);
+    expect(dummy.kill()).toBe(false);
+  });
+});
+
 describe('rayHitDummy', () => {
   const dummy = new Dummy(0, -5);
   const headHeightM = d.heightM - d.headRadiusM;
@@ -92,7 +113,8 @@ describe('Shooter with dummies', () => {
     camera.position.set(0, 1.0, 0);
     const events = new EventBus<WeaponEvents>();
     const dummy = new Dummy(0, -5);
-    new Shooter(events, collision, camera, new Vector3(), [dummy]);
+    const muzzle = new Vector3();
+    new Shooter(events, collision, camera, { rifle: muzzle, pistol: muzzle }, [dummy], { rifle: rifleConfigDefaults, pistol: pistolConfigDefaults });
     const hits: { zone: string; killed: boolean }[] = [];
     events.on('target:hit', (hit) => hits.push(hit));
     return { events, dummy, hits };
@@ -100,14 +122,14 @@ describe('Shooter with dummies', () => {
 
   it('a bullet that hits the dummy damages it', () => {
     const { events, dummy, hits } = setup(false);
-    events.emit('weapon:fired', undefined);
+    events.emit('weapon:fired', { weapon: 'rifle' });
     expect(hits).toEqual([{ zone: 'body', killed: false }]);
     expect(dummy.health.current).toBe(d.healthPoints - rifleConfigDefaults.bodyDamagePerHit);
   });
 
   it('a wall in front of the dummy takes the bullet instead', () => {
     const { events, dummy, hits } = setup(true);
-    events.emit('weapon:fired', undefined);
+    events.emit('weapon:fired', { weapon: 'rifle' });
     expect(hits).toEqual([]);
     expect(dummy.health.current).toBe(d.healthPoints);
   });

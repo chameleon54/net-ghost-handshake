@@ -1,6 +1,9 @@
 import type { Vector3 } from 'three';
 import type { HitZone } from '../enemies/dummy';
 
+export type GunId = 'rifle' | 'pistol';
+export type WeaponId = GunId | 'knife';
+
 /** Where a shot went, for effects (and later sound and enemy hearing). The vectors are reused: read them straight away. */
 export interface ShotLanded {
   /** Where the tracer starts: the gun's muzzle. */
@@ -13,13 +16,17 @@ export interface ShotLanded {
 }
 
 export type WeaponEvents = {
-  /** A round left the gun. The shooter works out where it went. */
-  'weapon:fired': undefined;
+  /** A round left a gun. The shooter works out where it went. The P9 is suppressed: the noise system will know from `weapon`. */
+  'weapon:fired': { weapon: GunId };
+  /** The knife was swung. The strike works out what it hit. */
+  'weapon:swing': undefined;
   /** The trigger was pulled on an empty gun. Enemies will hear this later. */
   'weapon:empty-click': undefined;
   'weapon:reload-started': undefined;
   'weapon:reloaded': undefined;
+  /** A different weapon was taken out. */
+  'weapon:switched': { weapon: WeaponId };
   'shot:landed': ShotLanded;
-  /** A bullet hit a target. Hit markers (and later sound) listen. */
+  /** A weapon hit a target. Hit markers (and later sound) listen. */
   'target:hit': { zone: HitZone; killed: boolean };
 };

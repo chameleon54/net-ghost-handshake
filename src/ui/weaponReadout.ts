@@ -1,8 +1,9 @@
 import type { EventBus } from '../core/events';
+import { uiText } from '../data/uiText';
 import type { WeaponEvents } from '../weapons/events';
-import type { Rifle } from '../weapons/rifle';
+import type { WeaponSet } from '../weapons/weaponSet';
 
-// TEMPORARY (milestone 2.1): a crosshair dot and a line of ammo text so reloading can be checked.
+// TEMPORARY (milestones 2.1 to 2.3): a crosshair dot, hit marker and a line of ammo text so weapons can be checked.
 // The real HUD comes in milestone 3 and never shows a bullet count; this one does, for testing only.
 const crosshairSizePx = 4;
 const hitMarkerFadeMs = 150;
@@ -10,7 +11,7 @@ const hitColour = '#ffffff';
 const killColour = '#ff4444';
 
 export interface WeaponReadout {
-  update(rifle: Rifle): void;
+  update(weapons: WeaponSet): void;
 }
 
 export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReadout {
@@ -22,7 +23,7 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
 
   // The hit marker: an X around the crosshair that fades fast. White for a hit, red for a kill.
   const marker = document.createElement('div');
-  marker.textContent = '\u2715';
+  marker.textContent = '✕';
   marker.style.cssText =
     'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font:22px system-ui,sans-serif;' +
     'text-shadow:0 0 3px #000;pointer-events:none;opacity:0';
@@ -40,10 +41,14 @@ export function createWeaponReadout(events: EventBus<WeaponEvents>): WeaponReado
 
   let shown = '';
   return {
-    update(rifle) {
-      const { loadedRounds, spareCount, capacityRounds } = rifle.magazines;
-      const state = rifle.reloading ? ' RELOADING' : loadedRounds === 0 ? ' EMPTY' : '';
-      const next = `Mags: ${spareCount}  (${loadedRounds}/${capacityRounds})${state}`;
+    update(weapons) {
+      const gun = weapons.gun;
+      let next = uiText.weaponNames[weapons.current];
+      if (gun) {
+        const { loadedRounds, spareCount, capacityRounds } = gun.magazines;
+        const state = gun.reloading ? ' RELOADING' : loadedRounds === 0 ? ' EMPTY' : '';
+        next += `   Mags: ${spareCount}  (${loadedRounds}/${capacityRounds})${state}`;
+      }
       if (next === shown) return; // only touch the page when the text changes
       shown = next;
       text.textContent = next;

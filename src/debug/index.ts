@@ -3,11 +3,13 @@ import GUI from 'lil-gui';
 import { inputConfig, inputConfigDefaults } from '../config/input';
 import { playerConfig, playerConfigDefaults } from '../config/player';
 import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
+import { knifeConfig, knifeConfigDefaults } from '../config/knife';
+import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import { FreeCamera } from './freeCamera';
-import { changedValues, dummyFolder, inputFolder, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { changedValues, dummyFolder, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -83,6 +85,8 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
       resetToDefaults(inputConfig, inputConfigDefaults);
       resetToDefaults(rifleConfig, rifleConfigDefaults);
       resetToDefaults(dummyConfig, dummyConfigDefaults);
+      resetToDefaults(pistolConfig, pistolConfigDefaults);
+      resetToDefaults(knifeConfig, knifeConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -92,6 +96,10 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
         changedValues(inputConfig, inputConfigDefaults),
         changedValues(rifleConfig, rifleConfigDefaults),
         changedValues(dummyConfig, dummyConfigDefaults),
+        {
+          'src/config/pistol.ts': changedValues(pistolConfig, pistolConfigDefaults),
+          'src/config/knife.ts': changedValues(knifeConfig, knifeConfigDefaults),
+        },
       );
       navigator.clipboard.writeText(snippet).then(
         () => (readouts.status = 'Copied to the clipboard'),
@@ -119,6 +127,15 @@ export function installDebugTools({ scene, input, player }: Parts): DebugTools {
     f.close();
     for (const s of folder.sliders) f.add(rifleConfig, s.key, s.min, s.max, s.step).name(s.label);
   }
+
+  for (const folder of pistolFolders) {
+    const f = gui.addFolder(folder.title);
+    f.close();
+    for (const s of folder.sliders) f.add(pistolConfig, s.key, s.min, s.max, s.step).name(s.label);
+  }
+  const knifePanel = gui.addFolder(knifeFolder.title);
+  knifePanel.close();
+  for (const s of knifeFolder.sliders) knifePanel.add(knifeConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const dummyPanel = gui.addFolder(dummyFolder.title);
   dummyPanel.close();

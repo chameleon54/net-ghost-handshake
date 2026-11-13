@@ -11,10 +11,11 @@ export class Dummy {
   state: DummyState = 'standing';
   private stateSec = 0;
 
-  /** `xM`, `zM`: where its feet are. */
+  /** `xM`, `zM`: where its feet are. `yawRad`: which way it faces; 0 faces north (-z), like the player's yaw. */
   constructor(
     readonly xM: number,
     readonly zM: number,
+    readonly yawRad = 0,
   ) {}
 
   /** Only a standing dummy can be hit; a falling or lying one is out of the fight. */
@@ -32,9 +33,25 @@ export class Dummy {
   /** A head hit always kills, whatever the damage. Returns true if this hit killed the dummy. */
   hit(zone: HitZone, bodyDamage: number): boolean {
     if (!this.hittable) return false;
-    const killed = zone === 'head' ? this.health.kill() : this.health.damage(bodyDamage);
+    if (zone === 'head') return this.kill();
+    const killed = this.health.damage(bodyDamage);
     if (killed) this.setState('falling');
     return killed;
+  }
+
+  /** Kills at once (a knife from behind). Returns true if it killed. */
+  kill(): boolean {
+    if (!this.hittable) return false;
+    const killed = this.health.kill();
+    if (killed) this.setState('falling');
+    return killed;
+  }
+
+  /** True if a point (an attacker) is in the dummy's rear half: more than 90 degrees from the way it faces. */
+  isBehind(xM: number, zM: number): boolean {
+    const facingX = -Math.sin(this.yawRad);
+    const facingZ = -Math.cos(this.yawRad);
+    return facingX * (xM - this.xM) + facingZ * (zM - this.zM) < 0;
   }
 
   update(dtSec: number): void {

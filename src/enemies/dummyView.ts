@@ -24,10 +24,12 @@ export class DummyView {
     head.position.y = bodyHeightM + headRadiusM;
     this.group.add(body, head);
     this.group.position.set(dummy.xM, 0, dummy.zM);
+    this.group.rotation.order = 'YXZ'; // turn to face first, then tip over relative to that facing
+    this.group.rotation.y = dummy.yawRad;
   }
 
-  /** Tip over backwards as it dies. Called every update. */
+  /** Tip over backwards (away from the way it faces) as it dies. Called every update. */
   update(): void {
-    this.group.rotation.x = -(Math.PI / 2) * this.dummy.fallProgress;
+    this.group.rotation.x = (Math.PI / 2) * this.dummy.fallProgress;
   }
 }

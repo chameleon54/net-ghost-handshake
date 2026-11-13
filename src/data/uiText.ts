@@ -3,5 +3,7 @@
 export const uiText = {
   clickToPlay: 'Click to play',
   paused: 'Paused. Click to resume',
+  /** Temporary names for the readout. Real names: P9 and M4-A, never the real-world gun names (weapons.md). */
+  weaponNames: { rifle: 'M4-A', pistol: 'P9', knife: 'Knife' },
   captureRefused: 'The browser did not allow that yet. Click again',
 } as const;

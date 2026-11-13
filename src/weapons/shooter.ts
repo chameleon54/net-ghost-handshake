@@ -1,10 +1,11 @@
 import * as THREE from 'three';
+import type { GunConfig } from '../config/gun';
 import { rifleConfig } from '../config/rifle';
 import type { EventBus } from '../core/events';
 import type { Dummy, HitZone } from '../enemies/dummy';
 import { createDummyHit, rayHitDummy } from '../enemies/dummyHit';
 import { createRayHit, type LevelCollision } from '../level/collision';
-import type { WeaponEvents } from './events';
+import type { GunId, WeaponEvents } from './events';
 import { Recoil } from './recoil';
 
 // Turns "a round left the gun" into "the bullet landed there". The bullet flies where the camera looks
@@ -25,22 +26,23 @@ export class Shooter {
     events: EventBus<WeaponEvents>,
     private readonly collision: LevelCollision,
     private readonly camera: THREE.PerspectiveCamera,
-    /** The muzzle, in the camera's own space (right, up, forward is -z). */
-    private readonly muzzleInCamera: THREE.Vector3,
-    private readonly dummies: readonly Dummy[] = [],
+    /** Each gun's muzzle, in the camera's own space (right, up, forward is -z). */
+    private readonly muzzlesInCamera: Record<GunId, THREE.Vector3>,
+    private readonly dummies: readonly Dummy[],
+    private readonly configs: Record<GunId, GunConfig>,
   ) {
-    events.on('weapon:fired', () => {
-      this.recoil.kick(Math.random() * 2 - 1);
-      this.shoot(events);
+    events.on('weapon:fired', ({ weapon }) => {
+      this.recoil.kick(Math.random() * 2 - 1, configs[weapon]);
+      this.shoot(events, weapon);
     });
   }
 
-  private shoot(events: EventBus<WeaponEvents>): void {
+  private shoot(events: EventBus<WeaponEvents>, weapon: GunId): void {
     // The camera was placed on the last screen frame; make sure its world matrix matches.
     this.camera.updateMatrixWorld();
     this.camera.getWorldPosition(this.origin);
     this.camera.getWorldDirection(this.direction);
-    this.muzzle.copy(this.muzzleInCamera);
+    this.muzzle.copy(this.muzzlesInCamera[weapon]);
     this.camera.localToWorld(this.muzzle);
 
     const hit = this.collision.raycast(this.origin, this.direction, rifleConfig.maxRangeM, this.hit);
@@ -60,7 +62,7 @@ export class Shooter {
 
     let onSurface = false;
     if (target) {
-      const killed = target.hit(this.zone, rifleConfig.bodyDamagePerHit);
+      const killed = target.hit(this.zone, this.configs[weapon].bodyDamagePerHit);
       events.emit('target:hit', { zone: this.zone, killed });
     } else if (hit) {
       onSurface = true;

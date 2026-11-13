@@ -17,12 +17,18 @@ import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
-import { addPlaceholderGun } from './weapons/placeholderGun';
-import { Rifle } from './weapons/rifle';
+import { pistolConfig } from './config/pistol';
+import { rifleConfig } from './config/rifle';
+import type { WeaponEvents, WeaponId } from './weapons/events';
+import { Gun } from './weapons/gun';
+import { Knife } from './weapons/knife';
+import { KnifeStrike } from './weapons/knifeStrike';
+import { PlaceholderViewmodels } from './weapons/placeholderGun';
 import { Shooter } from './weapons/shooter';
-import type { WeaponEvents } from './weapons/events';
+import { WeaponSet } from './weapons/weaponSet';
 
 const fireButton = 0; // left mouse
+const weaponKeys: Record<string, WeaponId> = { Digit1: 'rifle', Digit2: 'pistol', Digit3: 'knife' };
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -42,14 +48,23 @@ const level = buildGreybox();
 scene.add(level.group);
 const player = new Player(level.collision);
 
-// Weapons. The rifle decides when a shot happens; the shooter finds where it lands; the effects listen.
+// Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
 const weaponEvents = new EventBus<WeaponEvents>();
-scene.add(camera); // the placeholder gun is a child of the camera, so the camera must be in the scene
-const rifle = new Rifle(weaponEvents);
-const dummies = greyboxDummies.map(({ xM, zM }) => new Dummy(xM, zM));
+scene.add(camera); // the placeholder weapons are children of the camera, so the camera must be in the scene
+const weapons = new WeaponSet(
+  weaponEvents,
+  new Gun(weaponEvents, 'rifle', rifleConfig, true),
+  new Gun(weaponEvents, 'pistol', pistolConfig, false),
+  new Knife(weaponEvents),
+);
+const viewmodels = new PlaceholderViewmodels(camera);
+weaponEvents.on('weapon:switched', ({ weapon }) => viewmodels.show(weapon));
+weaponEvents.on('weapon:swing', () => viewmodels.jab());
+const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
-const shooter = new Shooter(weaponEvents, level.collision, camera, addPlaceholderGun(camera), dummies);
+const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodels.muzzles, dummies, { rifle: rifleConfig, pistol: pistolConfig });
+new KnifeStrike(weaponEvents, level.collision, camera, dummies);
 const tracers = new Tracers(scene, weaponEvents);
 new BulletMarks(scene, weaponEvents);
 const weaponReadout = createWeaponReadout(weaponEvents); // made before the overlay so the overlay covers it
@@ -92,18 +107,25 @@ const loop = new Loop(
   (stepSec) => {
     if (debug?.freeCameraActive) return; // the player is frozen while the free camera flies
     player.fixedUpdate(stepSec, input);
-    rifle.update(stepSec, {
+    // Every press is consumed each update, so a click that could not be used is not remembered for later.
+    let select: WeaponId | null = null;
+    for (const [code, weapon] of Object.entries(weaponKeys)) if (input.consumePress(code)) select = weapon;
+    weapons.update(stepSec, {
+      select,
+      wheelSteps: input.consumeWheelSteps(),
       triggerHeld: input.isButtonDown(fireButton),
+      triggerPressed: input.consumeButtonPress(fireButton),
       reloadPressed: input.consumePress('KeyR'),
       canFire: !player.isSprinting && !player.mantle.active,
     });
+    viewmodels.update(stepSec);
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
     dummies.forEach((dummy, i) => {
       dummy.update(stepSec);
       dummyViews[i].update();
     });
-    weaponReadout.update(rifle);
+    weaponReadout.update(weapons);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.

@@ -1,5 +1,15 @@
 import type { Input } from '../core/input';
 
+// Browsers report the wheel in pixels (about 100 per notch), lines (about 3) or pages. Convert to notches.
+const pixelsPerNotch = 100;
+const linesPerNotch = 3;
+
+function wheelNotches(event: WheelEvent): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY / linesPerNotch;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return Math.sign(event.deltaY);
+  return event.deltaY / pixelsPerNotch;
+}
+
 // Connects browser keyboard and mouse events to the Input state.
 export function attachInputListeners(input: Input): void {
   window.addEventListener('keydown', (event) => {
@@ -14,4 +24,5 @@ export function attachInputListeners(input: Input): void {
   document.addEventListener('mousemove', (event) => input.addMouseMove(event.movementX, event.movementY));
   window.addEventListener('mousedown', (event) => input.buttonDown(event.button));
   window.addEventListener('mouseup', (event) => input.buttonUp(event.button));
+  window.addEventListener('wheel', (event) => input.addWheel(wheelNotches(event)));
 }

@@ -1,6 +1,8 @@
 import type { InputConfig } from '../config/input';
 import type { PlayerConfig } from '../config/player';
 import type { DummyConfig } from '../config/dummy';
+import type { KnifeConfig } from '../config/knife';
+import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -23,6 +25,8 @@ type PlayerKey = keyof PlayerConfig;
 type InputKey = keyof InputConfig;
 type RifleKey = keyof RifleConfig;
 type DummyKey = keyof DummyConfig;
+type PistolKey = keyof PistolConfig;
+type KnifeKey = keyof KnifeConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -119,6 +123,7 @@ export const rifleFolders: Folder<RifleKey>[] = [
     sliders: [
       { key: 'fireRateRpm', label: 'Fire rate (rounds/min)', min: 100, max: 1500, step: 10 },
       { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
       { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
       { key: 'maxRangeM', label: 'Bullet range (m)', min: 10, max: 300, step: 5 },
     ],
@@ -143,6 +148,42 @@ export const rifleFolders: Folder<RifleKey>[] = [
     ],
   },
 ];
+
+export const pistolFolders: Folder<PistolKey>[] = [
+  {
+    title: 'Pistol',
+    sliders: [
+      { key: 'fireRateRpm', label: 'Fastest clicking (rounds/min)', min: 100, max: 1500, step: 10 },
+      { key: 'reloadTimeSec', label: 'Reload time (s)', min: 0.3, max: 5, step: 0.05 },
+      { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
+      { key: 'bodyDamagePerHit', label: 'Body damage per hit', min: 1, max: 200, step: 1 },
+    ],
+  },
+  {
+    title: 'Pistol recoil',
+    sliders: [
+      { key: 'recoilPitchPerShotRad', label: 'Kick up per shot (rad)', min: 0, max: 0.1, step: 0.001 },
+      { key: 'recoilMaxPitchRad', label: 'Most kick up (rad)', min: 0, max: 0.5, step: 0.005 },
+      { key: 'recoilYawPerShotRad', label: 'Sideways kick per shot (rad)', min: 0, max: 0.02, step: 0.0005 },
+      { key: 'recoilMaxYawRad', label: 'Most sideways kick (rad)', min: 0, max: 0.2, step: 0.005 },
+      { key: 'recoilRecoveryDelaySec', label: 'Settle delay after last shot (s)', min: 0, max: 0.5, step: 0.01 },
+      { key: 'recoilRecoveryRadPerSec', label: 'Settle speed (rad/s)', min: 0.05, max: 3, step: 0.05 },
+    ],
+  },
+];
+
+/** Pistol config values that are deliberately not on the panel: they are read once when the game starts. */
+export const pistolKeysNotOnPanel: readonly PistolKey[] = ['magazineRounds', 'startingMagazines'];
+
+export const knifeFolder: Folder<KnifeKey> = {
+  title: 'Knife',
+  sliders: [
+    { key: 'reachM', label: 'Reach (m)', min: 0.5, max: 3, step: 0.05 },
+    { key: 'swingCooldownSec', label: 'Time between swings (s)', min: 0.1, max: 2, step: 0.05 },
+    { key: 'drawTimeSec', label: 'Draw time (s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'frontDamagePerHit', label: 'Damage from the front', min: 1, max: 200, step: 1 },
+  ],
+};
 
 export const dummyFolder: Folder<DummyKey> = {
   title: 'Target dummies',
@@ -185,6 +226,7 @@ export function resetToDefaults(current: Record<string, number>, defaults: Recor
 /** Text to paste into the config files: only the changed values, in the files' own format. */
 export function toCodeSnippet(player: Record<string, number>, input: Record<string, number>, rifle: Record<string, number> = {},
   dummy: Record<string, number> = {},
+  more: Record<string, Record<string, number>> = {},
 ): string {
   const lines: string[] = [];
   const add = (file: string, values: Record<string, number>): void => {
@@ -197,5 +239,6 @@ export function toCodeSnippet(player: Record<string, number>, input: Record<stri
   add('src/config/input.ts', input);
   add('src/config/rifle.ts', rifle);
   add('src/config/dummy.ts', dummy);
+  for (const [file, values] of Object.entries(more)) add(file, values);
   return lines.length > 0 ? lines.join('\n') : '// Nothing changed from the defaults.';
 }
