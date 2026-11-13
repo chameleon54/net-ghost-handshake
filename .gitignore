@@ -1,0 +1,9 @@
+.ai-docs/
+node_modules/
+dist/
+.serena/
+graphify-out/
+*.log
+CLAUDE.md
+.mcp.json
+CLAUDE.md
