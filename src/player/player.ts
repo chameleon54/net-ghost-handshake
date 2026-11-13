@@ -3,6 +3,7 @@ import { inputConfig } from '../config/input';
 import { playerConfig } from '../config/player';
 import type { Input } from '../core/input';
 import type { LevelCollision } from '../level/collision';
+import { HeadPlacer } from './head';
 import { easeToward, limitLean, rollForLean, wantedLean } from './lean';
 import { accelerate, steerToward, wishDirection, type Vec2 } from './movement';
 import { StanceMachine, type Stance } from './stance';
@@ -32,10 +33,14 @@ export class Player {
   /** Sideways camera shift from leaning: positive is right. Only the head moves; the body stays put. */
   private leanOffsetM = 0;
   private previousLeanOffsetM = 0;
+  private readonly head: HeadPlacer;
+  private readonly headPosition = new THREE.Vector3();
   private readonly leanOrigin = new THREE.Vector3();
   private readonly leanDirection = new THREE.Vector3();
 
-  constructor(private readonly collision: LevelCollision) {}
+  constructor(private readonly collision: LevelCollision) {
+    this.head = new HeadPlacer(collision);
+  }
 
   get isSprinting(): boolean {
     return this.stance.sprinting;
@@ -111,11 +116,11 @@ export class Player {
     if (side !== 0) {
       this.leanOrigin.set(this.position.x, this.eyeHeightM, this.position.z);
       this.leanDirection.set(Math.cos(this.yawRad) * side, 0, -Math.sin(this.yawRad) * side);
-      const reachM = playerConfig.leanDistanceM + playerConfig.leanHeadClearanceM;
+      const reachM = playerConfig.leanDistanceM + playerConfig.cameraClearanceM;
       wallDistanceM = this.collision.rayDistance(this.leanOrigin, this.leanDirection, reachM);
     }
 
-    const clearanceM = playerConfig.leanHeadClearanceM;
+    const clearanceM = playerConfig.cameraClearanceM;
     const targetM = limitLean(wanted * playerConfig.leanDistanceM, side, wallDistanceM, clearanceM);
     const easedM = easeToward(this.leanOffsetM, targetM, dtSec, playerConfig.leanSmoothingTimeSec);
     // Walking toward a wall while leaned cuts the lean back at once; it is never allowed through.
@@ -132,12 +137,17 @@ export class Player {
 
   /** Place the camera. `alpha` blends between the last two updates so motion is smooth on fast screens. */
   applyToCamera(camera: THREE.PerspectiveCamera, alpha: number): void {
-    const leanM = this.previousLeanOffsetM + (this.leanOffsetM - this.previousLeanOffsetM) * alpha;
-    camera.position.set(
-      this.previousPosition.x + (this.position.x - this.previousPosition.x) * alpha + Math.cos(this.yawRad) * leanM,
+    const wantedLeanM = this.previousLeanOffsetM + (this.leanOffsetM - this.previousLeanOffsetM) * alpha;
+    // The head position is checked against walls every frame with this frame's facing, so turning cannot clip it into one.
+    const leanM = this.head.place(
+      this.previousPosition.x + (this.position.x - this.previousPosition.x) * alpha,
+      this.previousPosition.z + (this.position.z - this.previousPosition.z) * alpha,
       this.previousEyeHeightM + (this.eyeHeightM - this.previousEyeHeightM) * alpha,
-      this.previousPosition.z + (this.position.z - this.previousPosition.z) * alpha - Math.sin(this.yawRad) * leanM,
+      this.yawRad,
+      wantedLeanM,
+      this.headPosition,
     );
+    camera.position.copy(this.headPosition);
     camera.rotation.set(
       this.pitchRad,
       this.yawRad,

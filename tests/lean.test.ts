@@ -90,7 +90,7 @@ describe('a lean ray against a wall', () => {
     const origin = new Vector3(-7.8, playerConfig.eyeHeightM, 0);
     const distanceM = collision.rayDistance(origin, new Vector3(-1, 0, 0), 1);
     expect(distanceM).toBeCloseTo(0.2, 2);
-    expect(limitLean(-0.45, -1, distanceM, playerConfig.leanHeadClearanceM)).toBeCloseTo(-0.08, 2);
+    expect(limitLean(-0.45, -1, distanceM, playerConfig.cameraClearanceM)).toBeCloseTo(-0.05, 2);
   });
 
   it('reports no wall when nothing is in range', () => {

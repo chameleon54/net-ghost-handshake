@@ -49,8 +49,11 @@ export const playerConfig = {
   leanRollRad: 0.175,
   /** Lean eases toward its target with this time constant. It settles in about three times this. */
   leanSmoothingTimeSec: 0.05,
-  /** Gap kept between the camera and a wall, so a lean never puts the camera inside it. */
-  leanHeadClearanceM: 0.12,
+  /**
+   * Radius of the sphere the camera keeps clear of walls. It must be larger than how far the near plane reaches
+   * sideways (about 0.09 m on a 16:9 screen, 0.11 m on 21:9, 0.15 m on 32:9), or you can see through a wall.
+   */
+  cameraClearanceM: 0.15,
 
   // Collision and spawn
   /** How many times per update the player is pushed out of walls. More resolves tight corners. */
