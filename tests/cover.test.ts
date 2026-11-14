@@ -1,0 +1,199 @@
+import { beforeAll, describe, expect, it } from 'vitest';
+import { Vector3 } from 'three';
+import { roleConfig } from '../src/config/roles';
+import { standInConfig } from '../src/config/standInEnemy';
+import { greyboxCover } from '../src/data/greyboxCover';
+import { greyboxRoom } from '../src/data/greyboxRoom';
+import { CoverPoints, type CoverPoint } from '../src/level/cover';
+import { buildGreybox } from '../src/level/greybox';
+import { Navigation } from '../src/level/navigation';
+
+// These run on the real test room and its real cover points.
+const level = buildGreybox();
+const cover = new CoverPoints(greyboxCover, level.collision);
+let navigation: Navigation;
+beforeAll(async () => {
+  navigation = await Navigation.create(level.navigationGeometry);
+});
+
+const eyesAt = (x: number, z: number) => new Vector3(x, 1.6, z);
+const spot = (x: number, z: number): CoverPoint => {
+  const found = greyboxCover.find((p) => p.xM === x && p.zM === z);
+  if (!found) throw new Error(`no cover point at ${x}, ${z}`);
+  return found;
+};
+const straightLine = (from: Vector3) => (p: CoverPoint) => Math.hypot(p.xM - from.x, p.zM - from.z);
+
+describe('the cover points in the test room', () => {
+  it('are all on the navigation mesh, clear of every prop', () => {
+    const onMesh = new Vector3();
+    for (const p of greyboxCover) {
+      expect(navigation.closestPoint(new Vector3(p.xM, 0, p.zM), onMesh)).toBe(true);
+      expect(Math.hypot(onMesh.x - p.xM, onMesh.z - p.zM), `${p.xM}, ${p.zM}`).toBeLessThan(0.05);
+    }
+  });
+
+  it('a high spot has open sides; a peek to each one is on the navigation mesh and sees past the cover', () => {
+    const { peekStepM, eyeHeightM } = standInConfig;
+    const onMesh = new Vector3();
+    const direction = new Vector3();
+    const clear = (from: Vector3, to: Vector3) => {
+      const d = from.distanceTo(to);
+      direction.subVectors(to, from).divideScalar(d);
+      return level.collision.rayDistance(from, direction, d) === Infinity;
+    };
+    for (const p of greyboxCover.filter((c) => c.height === 'high')) {
+      expect(p.lean, `${p.xM}, ${p.zM} has no open side`).toBeDefined();
+      const fX = -Math.sin(p.facingYawRad);
+      const fZ = -Math.cos(p.facingYawRad);
+      const rightX = Math.cos(p.facingYawRad);
+      const rightZ = -Math.sin(p.facingYawRad);
+      const ahead = 1.5; // past the cover's thickness
+      // From the spot itself, straight ahead is blocked: that is the cover.
+      expect(clear(new Vector3(p.xM, eyeHeightM, p.zM), new Vector3(p.xM + fX * ahead, eyeHeightM, p.zM + fZ * ahead))).toBe(false);
+      for (const sign of p.lean === 'left' ? [-1] : p.lean === 'right' ? [1] : [1, -1]) {
+        const x = p.xM + sign * rightX * peekStepM;
+        const z = p.zM + sign * rightZ * peekStepM;
+        expect(navigation.closestPoint(new Vector3(x, 0, z), onMesh)).toBe(true);
+        expect(Math.hypot(onMesh.x - x, onMesh.z - z), `peek from ${p.xM}, ${p.zM} lands off the mesh`).toBeLessThan(0.05);
+        expect(clear(new Vector3(x, eyeHeightM, z), new Vector3(x + fX * ahead, eyeHeightM, z + fZ * ahead)), `peek from ${p.xM}, ${p.zM} does not clear the edge`).toBe(true);
+      }
+    }
+  });
+
+  it('a low spot with open sides: a crouched peek to each is on the navigation mesh and sees past the end', () => {
+    const { crouchPeekStepM, crouchEyeHeightM } = standInConfig;
+    const onMesh = new Vector3();
+    const direction = new Vector3();
+    const clear = (from: Vector3, to: Vector3) => {
+      const d = from.distanceTo(to);
+      direction.subVectors(to, from).divideScalar(d);
+      return level.collision.rayDistance(from, direction, d) === Infinity;
+    };
+    for (const p of greyboxCover.filter((c) => c.height === 'low' && c.lean)) {
+      const fX = -Math.sin(p.facingYawRad);
+      const fZ = -Math.cos(p.facingYawRad);
+      const rightX = Math.cos(p.facingYawRad);
+      const rightZ = -Math.sin(p.facingYawRad);
+      const ahead = 1.5;
+      expect(clear(new Vector3(p.xM, crouchEyeHeightM, p.zM), new Vector3(p.xM + fX * ahead, crouchEyeHeightM, p.zM + fZ * ahead))).toBe(false);
+      for (const sign of p.lean === 'left' ? [-1] : p.lean === 'right' ? [1] : [1, -1]) {
+        const x = p.xM + sign * rightX * crouchPeekStepM;
+        const z = p.zM + sign * rightZ * crouchPeekStepM;
+        expect(navigation.closestPoint(new Vector3(x, 0, z), onMesh)).toBe(true);
+        expect(Math.hypot(onMesh.x - x, onMesh.z - z), `crouched peek from ${p.xM}, ${p.zM} lands off the mesh`).toBeLessThan(0.05);
+        expect(clear(new Vector3(x, crouchEyeHeightM, z), new Vector3(x + fX * ahead, crouchEyeHeightM, z + fZ * ahead)), `crouched peek from ${p.xM}, ${p.zM} does not clear the end`).toBe(true);
+      }
+    }
+  });
+
+  it('each point toward a prop within a metre in the direction they face', () => {
+    for (const p of greyboxCover) {
+      const x = p.xM - Math.sin(p.facingYawRad) * 0.6;
+      const z = p.zM - Math.cos(p.facingYawRad) * 0.6;
+      const inside = greyboxRoom.some((b) => b.kind === 'prop' && Math.abs(x - b.xM) <= b.widthM / 2 && Math.abs(z - b.zM) <= b.depthM / 2);
+      expect(inside, `${p.xM}, ${p.zM} faces nothing`).toBe(true);
+    }
+  });
+});
+
+describe('CoverPoints.hides', () => {
+  it('a spot behind the pillar hides from the far side, not from the near side', () => {
+    const northOfPillar = spot(0, -0.75); // high cover, the pillar to its south
+    expect(cover.hides(northOfPillar, eyesAt(0, 5))).toBe(true); // Rook to the south, behind the pillar
+    expect(cover.hides(northOfPillar, eyesAt(0, -5))).toBe(false); // Rook to the north sees it
+  });
+
+  it('low cover hides a crouched body from a distance, but not from up close and above', () => {
+    const behindCrate = spot(-4, -1.05); // south of the low crate, the crate to its north
+    expect(cover.hides(behindCrate, eyesAt(-4, -8))).toBe(true); // 7 m north of it
+    expect(cover.hides(behindCrate, new Vector3(-4, 1.6, -3.2))).toBe(false); // right over the crate, looking down
+  });
+
+  it('only its own prop counts: a spot hidden by a wall in front of Rook is in front of its cover, not behind it', () => {
+    // A low crate at the origin, a spot on its north side (the crate to its south), and a tall wall close in front of Rook.
+    const room = buildGreybox([
+      { kind: 'prop', xM: 0, zM: 0, widthM: 1, depthM: 1, heightM: 1 },
+      { kind: 'wall', xM: 0, zM: -5, widthM: 4, depthM: 0.3, heightM: 3 },
+    ]);
+    const own = new CoverPoints([], room.collision);
+    const northOfCrate: CoverPoint = { xM: 0, zM: -0.95, height: 'low', facingYawRad: Math.PI };
+    expect(own.hides(northOfCrate, eyesAt(0, 6))).toBe(true); // Rook to the south: the crate hides it
+    expect(own.hides(northOfCrate, eyesAt(0, -6))).toBe(false); // Rook to the north, behind his wall: only his wall is in the way
+  });
+
+  it('follows the eyes: moved far enough to the side, they see past the cover', () => {
+    const behindPillar = spot(0, -0.75);
+    expect(cover.hides(behindPillar, eyesAt(0, 3))).toBe(true);
+    expect(cover.hides(behindPillar, eyesAt(1.2, 3))).toBe(true); // still behind the pillar from here
+    expect(cover.hides(behindPillar, eyesAt(3, 3))).toBe(false); // far enough round to see past it
+  });
+});
+
+describe('CoverPoints.best', () => {
+  it('picks a spot that hides, in the liked range if one exists, and claims it', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const owner = {};
+    const chosen = cover.best(owner, rookEyes, rookFeet, straightLine(new Vector3(1.5, 0, -5)));
+    expect(chosen).not.toBeNull();
+    expect(cover.hides(chosen!, rookEyes)).toBe(true);
+    const fromRookM = Math.hypot(chosen!.xM - rookFeet.x, chosen!.zM - rookFeet.z);
+    expect(fromRookM).toBeGreaterThanOrEqual(roleConfig.trooper.preferMinM);
+    expect(fromRookM).toBeLessThanOrEqual(roleConfig.trooper.preferMaxM);
+    expect(cover.claimedBy(chosen!)).toBe(owner);
+    cover.clearClaims();
+  });
+
+  it('skips a spot someone else holds, and lets go of the old spot when picking a new one', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const first = {};
+    const second = {};
+    const walk = straightLine(new Vector3(1.5, 0, -5));
+    const a = cover.best(first, rookEyes, rookFeet, walk);
+    const b = cover.best(second, rookEyes, rookFeet, walk);
+    expect(b).not.toBe(a);
+    const again = cover.best(first, eyesAt(0, -5.5), new Vector3(0, 0, -5.5), walk); // Rook moved to the north
+    expect(cover.claimedBy(a!)).toBe(again === a ? first : null);
+    cover.clearClaims();
+  });
+
+  it('takes the liked range of the role: a heavy (close) picks cover nearer Rook than a trooper (mid range)', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const walk = straightLine(new Vector3(1.5, 0, -5));
+    const distance = (p: CoverPoint | null) => (p ? Math.hypot(p.xM - rookFeet.x, p.zM - rookFeet.z) : NaN);
+    const trooper = distance(cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper));
+    cover.clearClaims();
+    const heavy = distance(cover.best({}, rookEyes, rookFeet, walk, roleConfig.heavy));
+    cover.clearClaims();
+    expect(heavy).toBeLessThanOrEqual(roleConfig.heavy.preferMaxM);
+    expect(heavy).toBeLessThan(trooper);
+  });
+
+  it('prefers a spot it can shoot from (a fighting spot), and takes a blind one only if nothing else is free (decision 237)', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const walk = straightLine(new Vector3(1.5, 0, -5));
+    const nearest = cover.best({}, rookEyes, rookFeet, walk);
+    cover.clearClaims();
+    expect(nearest).not.toBeNull();
+    // Say the nearest spot is blind: another hiding spot wins.
+    const other = cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper, (p) => p !== nearest);
+    cover.clearClaims();
+    expect(other).not.toBeNull();
+    expect(other).not.toBe(nearest);
+    // Every spot blind: it still takes the best of them.
+    expect(cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper, () => false)).toBe(nearest);
+    cover.clearClaims();
+  });
+
+  it('skips spots it cannot walk to, and gives null when nothing hides', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    expect(cover.best({}, eyesAt(0, 4.5), rookFeet, () => Infinity)).toBeNull();
+    // From high above the middle of the room every spot can be seen.
+    expect(cover.best({}, new Vector3(0, 30, 0), rookFeet, () => 1)).toBeNull();
+    cover.clearClaims();
+  });
+});

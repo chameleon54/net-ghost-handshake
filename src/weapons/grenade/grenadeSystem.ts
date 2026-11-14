@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { audioConfig } from '../../config/audio';
 import { grenadeConfig } from '../../config/grenade';
 import type { EventBus } from '../../core/events';
-import type { Dummy } from '../../enemies/dummy';
+import type { Target } from '../../enemies/target';
 import { createRayHit, type LevelCollision } from '../../level/collision';
 import type { WeaponEvents } from '../events';
 import { resolveBlast, type BlastTarget } from './blast';
@@ -14,10 +14,11 @@ const grenadeColour = 0x3d4a2c;
 const handForwardM = 0.4; // where the grenade leaves the hand: this far in front of the eyes
 const wallGapM = 0.1; // against a wall it starts this far from it
 
-/** A dummy as something a blast can hurt. */
-export function dummyBlastTarget(dummy: Dummy, events: EventBus<WeaponEvents>): BlastTarget {
+/** A dummy (or the stand-in enemy) as something a blast can hurt. */
+export function dummyBlastTarget(dummy: Target, events: EventBus<WeaponEvents>): BlastTarget {
   return {
-    chest: (out) => out.set(dummy.xM, grenadeConfig.targetChestHeightM, dummy.zM),
+    // A crouched target's chest is lower, so cover it crouches behind also shields it from a blast.
+    chest: (out) => out.set(dummy.xM, Math.min(grenadeConfig.targetChestHeightM, dummy.heightM * grenadeConfig.targetChestShareOfHeight), dummy.zM),
     vulnerable: () => dummy.hittable,
     hurt: (damage) => {
       const killed = dummy.hit('body', damage);
@@ -39,6 +40,7 @@ export class GrenadeSystem implements GrenadeHooks {
   private readonly tilt = new THREE.Quaternion();
   private readonly chest = new THREE.Vector3();
   private readonly hit = createRayHit();
+  private readonly livePoints: THREE.Vector3[] = [];
 
   constructor(
     scene: THREE.Scene,
@@ -64,6 +66,13 @@ export class GrenadeSystem implements GrenadeHooks {
   /** How many grenades are in the air or waiting to go off. */
   get live(): number {
     return this.pool.filter((p) => p.grenade.active).length;
+  }
+
+  /** Where every live grenade is right now, for enemies to react to. The array and its vectors are reused: read them straight away. */
+  livePositions(): readonly THREE.Vector3[] {
+    this.livePoints.length = 0;
+    for (const { grenade } of this.pool) if (grenade.active) this.livePoints.push(grenade.position);
+    return this.livePoints;
   }
 
   /** Removes every grenade in the air without a blast (instant restart). */

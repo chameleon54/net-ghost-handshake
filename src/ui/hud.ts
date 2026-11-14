@@ -1,3 +1,4 @@
+import { Vector3, type Camera } from 'three';
 import { healthFx } from '../config/healthFx';
 import type { EventBus } from '../core/events';
 import { uiText } from '../data/uiText';
@@ -7,8 +8,9 @@ import type { WeaponEvents } from '../weapons/events';
 import type { WeaponSet } from '../weapons/weaponSet';
 
 // The minimal HUD (ui.md): a crosshair dot and hit marker, and a few quiet items that appear only when they matter and
-// then fade: the weapon name on switching, the grenade and heal counts, the jam prompt, and the magazine pictures. It
-// never shows a bullet count and never shows health (the screen does, see healthScreen.ts).
+// then fade: the weapon name on switching, the grenade and heal counts, the jam prompt, the magazine pictures, and the
+// damage direction arc after an enemy's hit. It never shows a bullet count and never shows health (the screen does, see
+// healthScreen.ts).
 const crosshairSizePx = 4;
 const hitMarkerFadeMs = 150;
 const hitColour = '#ffffff';
@@ -19,6 +21,9 @@ const marginPx = 16;
 const pictureWidthPx = 12;
 const pictureHeightPx = 32;
 const msPerSec = 1000;
+const arcSizePx = 180; // the damage direction arc is a quarter of a ring this wide, around the crosshair
+const arcWidthPx = 4;
+const arcColour = '#ff4444';
 
 /** Where the magazine in the gun is on screen, as a point from -1 to 1 on each axis. The viewmodel knows. */
 export interface MagazineLocator {
@@ -33,6 +38,8 @@ export interface HudState {
   heals: number;
   /** True while a heal item is being used. */
   healing: boolean;
+  /** The game camera: where Rook is and looks, for the damage direction arc. */
+  camera: Camera;
 }
 
 export interface Hud {
@@ -78,6 +85,23 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
   events.on('target:hit', ({ killed }) => {
     marker.style.color = killed ? killColour : hitColour;
     marker.animate([{ opacity: 1 }, { opacity: 0 }], { duration: hitMarkerFadeMs });
+  });
+
+  // The damage direction arc (ui.md, decision 201): after an enemy's hit, a red quarter ring around the crosshair points
+  // toward where the shot came from (top is ahead), follows as Rook turns, and fades.
+  const arc = document.createElement('div');
+  arc.style.cssText =
+    `position:fixed;left:50%;top:50%;width:${arcSizePx}px;height:${arcSizePx}px;margin:${-arcSizePx / 2}px 0 0 ${-arcSizePx / 2}px;` +
+    `border-radius:50%;border:${arcWidthPx}px solid transparent;border-top-color:${arcColour};box-sizing:border-box;` +
+    'filter:drop-shadow(0 0 2px #000);pointer-events:none;opacity:0';
+  document.body.appendChild(arc);
+  const arcFrom = { x: 0, z: 0, atMs: -Infinity };
+  const look = new Vector3();
+  events.on('player:damaged', ({ from }) => {
+    if (!from) return;
+    arcFrom.x = from.x;
+    arcFrom.z = from.z;
+    arcFrom.atMs = performance.now();
   });
 
   // Bottom right: the magazine pictures above a column of quiet text lines.
@@ -140,9 +164,20 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
   };
 
   return {
-    update({ weapons, aimBlend, grenades, heals, healing }) {
+    update({ weapons, aimBlend, grenades, heals, healing, camera }) {
       const nowMs = performance.now();
       dot.style.opacity = String(1 - aimBlend);
+
+      const arcOpacity = Math.max(1 - (nowMs - arcFrom.atMs) / Math.max(healthFx.damageArcSec * msPerSec, 1), 0);
+      if (arcOpacity > 0) {
+        camera.getWorldDirection(look);
+        const toX = arcFrom.x - camera.position.x;
+        const toZ = arcFrom.z - camera.position.z;
+        // Right of where he looks is (-look.z, look.x); the angle is 0 ahead and grows clockwise, like CSS rotate.
+        const angleRad = Math.atan2(toX * -look.z + toZ * look.x, toX * look.x + toZ * look.z);
+        arc.style.transform = `rotate(${angleRad}rad)`;
+      }
+      if (arc.style.opacity !== String(arcOpacity)) arc.style.opacity = String(arcOpacity);
 
       // Heals stay up while one is being used.
       if (healing) showFor(healLine, healthFx.hudShowSec);

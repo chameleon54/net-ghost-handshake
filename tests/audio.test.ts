@@ -226,8 +226,8 @@ describe('WeaponSounds', () => {
   it('a bullet landing in a wall makes an impact at that spot, and one that hit a target does not', () => {
     const { events, player } = setup();
     const end = new Vector3(3, 1, -4);
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1) });
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3() });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1), shooter: 'player' });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3(), shooter: 'player' });
     expect(player.names).toEqual(['impact']);
     expect(player.played[0].options.position?.toArray()).toEqual([3, 1, -4]);
   });

@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { knifeConfig } from '../config/knife';
 import type { EventBus } from '../core/events';
-import type { Dummy } from '../enemies/dummy';
 import { createDummyHit, rayHitDummy } from '../enemies/dummyHit';
+import type { Target } from '../enemies/target';
 import { createRayHit, type LevelCollision } from '../level/collision';
 import type { WeaponEvents } from './events';
 
-// Works out what a knife swing hits: the nearest standing dummy within reach, in front of the camera, with no wall
+// Works out what a knife swing hits: the nearest standing target (dummy or enemy) within reach, in front of the camera, with no wall
 // between. From behind it kills at once; from the front it does the knife's damage.
 export class KnifeStrike {
   private readonly ray = new THREE.Ray();
@@ -19,7 +19,7 @@ export class KnifeStrike {
     events: EventBus<WeaponEvents>,
     private readonly collision: LevelCollision,
     private readonly camera: THREE.PerspectiveCamera,
-    private readonly dummies: readonly Dummy[],
+    private readonly targets: readonly Target[],
   ) {
     events.on('weapon:swing', () => this.strike(events));
   }
@@ -35,11 +35,11 @@ export class KnifeStrike {
       ? this.wallHit.distanceM
       : knifeConfig.reachM;
 
-    let target: Dummy | null = null;
+    let target: Target | null = null;
     let targetM = wallM;
-    for (const dummy of this.dummies) {
-      if (rayHitDummy(this.ray, dummy, targetM, this.dummyHit)) {
-        target = dummy;
+    for (const candidate of this.targets) {
+      if (rayHitDummy(this.ray, candidate, targetM, this.dummyHit)) {
+        target = candidate;
         targetM = this.dummyHit.distanceM;
       }
     }

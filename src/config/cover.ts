@@ -1,0 +1,24 @@
+// Cover tuning (milestone 4.3, decision 206): how a cover point is judged and chosen. Starting values. Units are in the names.
+export const coverConfigDefaults = {
+  // The liked distance from Rook is per role since 4.8 (src/config/roles.ts): troopers mid range, heavies closer.
+  /** Score lost for each metre a spot is outside that range. */
+  rangePenaltyPerM: 1,
+  /** Score lost for each metre of walking to reach a spot, so a near spot wins over an equal far one. */
+  walkPenaltyPerM: 0.3,
+  /** Where the "is it hidden" rays aim on a body at a spot: its head centre, and its chest at this share of its height. */
+  chestShareOfHeight: 0.6,
+  /**
+   * Only the spot's own prop hides it: the first thing hit going from the body toward Rook must be this close to the body.
+   * Spots sit 0.45 m from their prop, so this allows Rook up to about 65 degrees to the side. Decision 222.
+   */
+  ownCoverReachM: 1.2,
+  /**
+   * Score lost by a spot from which no peek can see Rook (a blind spot), so a fighting spot is preferred; a blind spot is
+   * taken only if no fighting spot is free (decision 237). The same scale as the penalties above.
+   */
+  blindSpotPenalty: 10,
+} as const;
+
+/** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */
+export type CoverConfig = { -readonly [K in keyof typeof coverConfigDefaults]: number };
+export const coverConfig: CoverConfig = { ...coverConfigDefaults };

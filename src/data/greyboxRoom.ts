@@ -52,6 +52,16 @@ export const greyboxFloors: readonly FloorZone[] = [
 
 export const greyboxHazards: readonly HazardPad[] = [{ xM: 6, zM: -0.5, widthM: 2, depthM: 2 }];
 
+/** A room's floor: its size (centred on 0,0), its surface patches and its hazard pads. */
+export interface RoomLayout {
+  size: { readonly widthM: number; readonly depthM: number };
+  floors: readonly FloorZone[];
+  hazards: readonly HazardPad[];
+}
+
+/** The old test room's floor. Since decision 236 the game loads the test arena; this room stays for the tests. */
+export const greyboxLayout: RoomLayout = { size: greyboxRoomSize, floors: greyboxFloors, hazards: greyboxHazards };
+
 export const greyboxRoom: readonly RoomBox[] = [
   // Outer walls, 0.3 m thick and 3 m tall, just outside the interior.
   { kind: 'wall', xM: 0, zM: -6.15, widthM: 16.6, depthM: 0.3, heightM: 3 },

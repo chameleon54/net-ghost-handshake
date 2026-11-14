@@ -37,6 +37,8 @@ export const healthFxDefaults = {
   hudShowSec: 2.5,
   hudFadeSec: 0.5,
   /** The magazine pictures stay this long after a check or a reload. */
+  /** The damage direction arc (4.5) fades out over this long after a hit from an enemy. */
+  damageArcSec: 1,
   magazinePictureShowSec: 3,
 } as const;
 

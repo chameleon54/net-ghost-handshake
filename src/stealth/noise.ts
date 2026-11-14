@@ -1,4 +1,5 @@
 import type { Vector3 } from 'three';
+import { noiseConfig } from '../config/noise';
 
 /** What made a noise. Enemy perception can treat kinds differently (a jam is not the same as a gunshot). */
 export type NoiseKind =
@@ -31,9 +32,12 @@ export interface Noise {
 }
 
 /**
- * True if a listener at `point` hears the noise: it is within the noise's radius.
- * shortcut: distance only, walls do not muffle it. Upgrade in 4.10 so a wall makes a noise carry less far.
+ * True if a listener at `point` hears the noise: it is within the noise's radius, or, if something solid is in the way,
+ * within the muffled share of it (4.10). `blocked` is asked only when it matters (it casts a ray).
  */
-export function hearsNoise(noise: Noise, point: Vector3): boolean {
-  return noise.position.distanceTo(point) <= noise.radiusM;
+export function hearsNoise(noise: Noise, point: Vector3, blocked: () => boolean = () => false): boolean {
+  const distanceM = noise.position.distanceTo(point);
+  if (distanceM > noise.radiusM) return false;
+  if (distanceM <= noise.radiusM * noiseConfig.wallMuffleShare) return true;
+  return !blocked();
 }

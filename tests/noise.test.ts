@@ -16,6 +16,14 @@ const dtSec = 1 / 60;
 describe('hearsNoise', () => {
   const noise: Noise = { kind: 'rifle-shot', position: new Vector3(0, 0, 0), radiusM: 10 };
 
+  it('through a wall it carries only the muffled share of its range (4.10)', () => {
+    const wall = () => true;
+    const share = noiseConfig.wallMuffleShare;
+    expect(hearsNoise(noise, new Vector3(10 * share - 0.1, 0, 0), wall)).toBe(true); // close enough even through it
+    expect(hearsNoise(noise, new Vector3(10 * share + 0.1, 0, 0), wall)).toBe(false);
+    expect(hearsNoise(noise, new Vector3(10 * share + 0.1, 0, 0), () => false)).toBe(true); // nothing in the way
+  });
+
   it('is heard inside the radius, at the edge, and not beyond it', () => {
     expect(hearsNoise(noise, new Vector3(3, 0, 4))).toBe(true); // 5 m
     expect(hearsNoise(noise, new Vector3(10, 0, 0))).toBe(true); // exactly at the edge
@@ -62,18 +70,24 @@ describe('NoiseReporter', () => {
   it('a bullet hitting a surface is loud, wherever it lands, and one that hit a target is not', () => {
     const { events, noises } = setup();
     const end = new Vector3(5, 1, -12);
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1) });
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3() });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1), shooter: 'player' });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3(), shooter: 'player' });
     expect(noises).toHaveLength(1);
     expect(noises[0].kind).toBe('impact');
     expect(noises[0].radiusM).toBe(noiseConfig.impactM);
     expect(noises[0].position.toArray()).toEqual([5, 1, -12]);
   });
 
+  it("an enemy's bullet hitting a surface is not a noise the player made", () => {
+    const { events, noises } = setup();
+    events.emit('shot:landed', { muzzle: new Vector3(), end: new Vector3(5, 1, -12), hit: true, normal: new Vector3(0, 0, 1), shooter: 'enemy' });
+    expect(noises).toHaveLength(0);
+  });
+
   it('keeps the position as a copy, so a vector that is reused later cannot change an old noise', () => {
     const { events, noises } = setup();
     const end = new Vector3(5, 1, -12);
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1) });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1), shooter: 'player' });
     end.set(99, 99, 99);
     expect(noises[0].position.toArray()).toEqual([5, 1, -12]);
   });

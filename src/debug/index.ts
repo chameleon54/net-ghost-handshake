@@ -7,6 +7,21 @@ import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
 import { knifeConfig, knifeConfigDefaults } from '../config/knife';
 import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
+import { standInConfig, standInConfigDefaults } from '../config/standInEnemy';
+import type { StandInEnemy } from '../enemies/standInEnemy';
+import type { Navigation } from '../level/navigation';
+import { NavOverlay } from './navOverlay';
+import { CoverOverlay } from './coverOverlay';
+import type { CoverPoints } from '../level/cover';
+import { coverConfig, coverConfigDefaults } from '../config/cover';
+import { exposureConfig, exposureConfigDefaults } from '../config/exposure';
+import type { Exposure } from '../player/exposure';
+import { squadConfig, squadConfigDefaults } from '../config/squad';
+import { roleConfig, roleConfigDefaults, roles } from '../config/roles';
+import { aggressionConfig, aggressionConfigDefaults, aggressionSetting, tiers } from '../config/aggression';
+import type { SquadCoordinator } from '../squad/squadCoordinator';
+import { EnemyLabels } from './enemyLabels';
+import { ReadoutBox } from './readoutBox';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -27,7 +42,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -51,6 +66,21 @@ interface Parts {
   heals: HealItems;
   /** Every sound the game plays goes through it, so the captions can list them. */
   soundTap: SoundTap;
+  /** Every stand-in (A to D), and the ones in the room now (a list the game changes in place). */
+  standIns: readonly StandInEnemy[];
+  activeStandIns: readonly StandInEnemy[];
+  squad: SquadCoordinator;
+  /** Puts the squad back at its spawns, with the count from the Squad folder. */
+  respawnSquad: () => void;
+  /** Why the last flank attempt found nothing, or null (4.7 follow-up). */
+  flankFailure: () => string | null;
+  navigation: Navigation;
+  coverPoints: CoverPoints;
+  /** The game camera: Rook's eyes, for the cover overlay's colours. */
+  camera: THREE.PerspectiveCamera;
+  /** Rook's hidden exposure meter (4.5), and the hit chance it gives an enemy round right now. */
+  exposure: Exposure;
+  hitChance: () => number;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -61,7 +91,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -98,12 +128,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', freeCamera: 'off (press ` to toggle)', status: '' };
-  const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'freeCamera', 'status'] as const) {
-    readoutFolder.add(readouts, key).listen().disable();
-  }
-  readoutFolder.open();
+  // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', hunt: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  let enemyLines: string[] = [];
+  const readoutBox = new ReadoutBox();
+  gui.add(readoutBox, 'shown').name('Show readouts (top left)');
 
   const actions = {
     resetAll: () => {
@@ -121,6 +150,12 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(healthConfig, healthConfigDefaults);
       resetToDefaults(healthFx, healthFxDefaults);
       resetToDefaults(movementConfig, movementConfigDefaults);
+      resetToDefaults(standInConfig, standInConfigDefaults);
+      resetToDefaults(coverConfig, coverConfigDefaults);
+      resetToDefaults(exposureConfig, exposureConfigDefaults);
+      resetToDefaults(squadConfig, squadConfigDefaults);
+      for (const role of roles) resetToDefaults(roleConfig[role], roleConfigDefaults[role]);
+      for (const tier of tiers) resetToDefaults(aggressionConfig[tier], aggressionConfigDefaults[tier]);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -141,6 +176,12 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/health.ts': changedValues(healthConfig, healthConfigDefaults),
           'src/config/healthFx.ts': changedValues(healthFx, healthFxDefaults),
           'src/config/movement.ts': changedValues(movementConfig, movementConfigDefaults),
+          'src/config/standInEnemy.ts': changedValues(standInConfig, standInConfigDefaults),
+          'src/config/cover.ts': changedValues(coverConfig, coverConfigDefaults),
+          'src/config/exposure.ts': changedValues(exposureConfig, exposureConfigDefaults),
+          'src/config/squad.ts': changedValues(squadConfig, squadConfigDefaults),
+          ...Object.fromEntries(roles.map((role) => [`src/config/roles.ts, ${role}`, changedValues(roleConfig[role], roleConfigDefaults[role])])),
+          ...Object.fromEntries(tiers.map((tier) => [`src/config/aggression.ts, ${tier}`, changedValues(aggressionConfig[tier], aggressionConfigDefaults[tier])])),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -205,6 +246,52 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const dummyPanel = gui.addFolder(dummyFolder.title);
   dummyPanel.close();
   for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
+
+  // The stand-in enemy (4.1): its starting values, and two testing aids.
+  const standInPanel = gui.addFolder(standInFolder.title);
+  standInPanel.close();
+  const freeze = { frozen: false };
+  standInPanel.add(freeze, 'frozen').name('Freeze all (stand still, hold fire)').onChange((on: boolean) => {
+    for (const standIn of standIns) standIn.frozen = on;
+  });
+  standInPanel.add({ respawn: respawnSquad }, 'respawn').name('Respawn all (idle, at their spots)');
+  const navOverlay = new NavOverlay(scene, navigation, activeStandIns);
+  standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
+  standInPanel.add(navOverlay, 'pathShown').name('Show stand-in routes');
+  const coverOverlay = new CoverOverlay(scene, coverPoints, activeStandIns, camera.position);
+  standInPanel.add(coverOverlay, 'shown').name('Show cover points');
+  const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
+  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning, green: hunting)');
+  const squadPanel = standInPanel.addFolder(squadFolder.title);
+  // The aggression tier (4.11): the game starts on Assertive; switch between the four here, even mid-fight.
+  squadPanel
+    .add(aggressionSetting, 'current', { '1 Cautious': 'cautious', '2 Assertive': 'assertive', '3 Aggressive': 'aggressive', '4 Relentless': 'relentless' })
+    .name('Aggression tier');
+  squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
+  squadPanel.add({ play: () => squad.forcePlay() }, 'play').name('Suppress and advance now (while you hide)');
+  squadPanel.add({ hunt: () => squad.forceHunt() }, 'hunt').name('Hunt now (once they have lost you)');
+  for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const tiersPanel = standInPanel.addFolder('Aggression tiers (4.11)');
+  tiersPanel.close();
+  for (const tier of tiers) {
+    const tierPanel = tiersPanel.addFolder(tier);
+    tierPanel.close();
+    for (const s of tierSliders) tierPanel.add(aggressionConfig[tier], s.key, s.min, s.max, s.step).name(s.label);
+  }
+  const rolesPanel = standInPanel.addFolder('Roles (4.8)');
+  rolesPanel.close();
+  for (const role of roles) {
+    const rolePanel = rolesPanel.addFolder(role);
+    rolePanel.close();
+    for (const s of roleSliders) rolePanel.add(roleConfig[role], s.key, s.min, s.max, s.step).name(s.label);
+  }
+  for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const coverPanel = standInPanel.addFolder(coverFolder.title);
+  coverPanel.close();
+  for (const s of coverFolder.sliders) coverPanel.add(coverConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const exposurePanel = standInPanel.addFolder(exposureFolder.title);
+  exposurePanel.close();
+  for (const s of exposureFolder.sliders) exposurePanel.add(exposureConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const grenadePanel = gui.addFolder(grenadeFolder.title);
   grenadePanel.close();
@@ -291,7 +378,82 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
+    const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
+    enemyLines = activeStandIns.map(
+      (s, i) =>
+        `${letter(i)} ${s.role.padEnd(8)}${s.state}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
+    );
+    const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
+    const flankLetters = activeStandIns.flatMap((s, i) => (squad.flankers.includes(s) ? [letter(i)] : []));
+    readouts.squad =
+      `tier ${aggressionSetting.current}, slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}` +
+      `${squad.disorganised ? ', DISORGANISED (leader down)' : ''}`;
+    // Why a flank is or is not under way, in the order the rules are checked.
+    const held = `held your spot ${squad.heldSec.toFixed(1)} of ${squad.tier.holdBeforeFlankSec} s`;
+    readouts.flank =
+      flankLetters.length > 1 ? `${flankLetters.join(' and ')} flanking: PINCER`
+      : flankLetters.length > 0 ? `${flankLetters[0]} flanking`
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : squad.heldSec < squad.tier.holdBeforeFlankSec ? `none yet: ${held}`
+      : flankFailure() !== null ? `${flankFailure()}, tries again in ${squad.flankWaitSec.toFixed(1)} s`
+      : `next one in ${squad.flankWaitSec.toFixed(1)} s`;
+    readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round${exposure.pinned ? ', a side of your cover is PINNED' : ''}`;
+    // Suppress and advance (4.9): who pins, who moves up, or why none is on.
+    const suppressorIndex = activeStandIns.findIndex((s) => s === squad.suppressor);
+    const movingLetters = activeStandIns.flatMap((s, i) => (squad.advancers.includes(s) || squad.repositioner === s ? [letter(i)] : []));
+    const pinning = suppressorIndex >= 0 ? `${letter(suppressorIndex)} pins your cover` : '';
+    const moving = movingLetters.length > 0 ? `${movingLetters.join(', ')} move${movingLetters.length > 1 ? '' : 's'} up` : '';
+    // Hearing his gun (4.10): what the squad heard, and when it pushes.
+    const heardNames = { dry: 'your gun run dry', reload: 'you reload', jam: 'your gun jam' } as const;
+    const heard = squad.heardKind;
+    readouts.heard = !heard ? 'nothing'
+      : squad.pushIgnored ? `${heardNames[heard]}: ignored (this tier reacts ${(squad.tier.hearChance * 100).toFixed(0)}% of the time)`
+      : squad.pushedAlready ? `${heardNames[heard]}: pushed`
+      : `${heardNames[heard]}: push in ${squad.pushInSec.toFixed(1)} s`;
+    readouts.play =
+      pinning || moving ? [pinning, moving].filter(Boolean).join(', ')
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : !squad.suppressionAllowed ? 'none at this tier (no suppressing fire)'
+      : squad.playFailure ? `${squad.playFailure}, tries again in ${squad.playWaitSec.toFixed(1)} s`
+      : `next chance in ${squad.playWaitSec.toFixed(1)} s (only while you hide)`;
+    // The hunt (decision 235): who leads, follows and watches, or how long until one starts, or how the last one ended.
+    const huntLetter = (member: object | null) => {
+      const i = activeStandIns.findIndex((s) => s === member);
+      return i >= 0 ? letter(i) : null;
+    };
+    const huntFollowing = squad.huntFollowers.map(huntLetter).filter(Boolean);
+    const huntWatching = huntLetter(squad.huntWatcher);
+    const looking = squad.huntLookingSec;
+    readouts.hunt = squad.hunting
+      ? [
+          `${huntLetter(squad.huntLeader) ?? '?'} ${looking === null ? 'leading' : `looking (${looking.toFixed(1)} s left)`}`,
+          huntFollowing.length > 0 ? `${huntFollowing.join(', ')} following` : '',
+          huntWatching ? `${huntWatching} watching` : '',
+        ].filter(Boolean).join(', ')
+      : squad.searching ? 'over, nothing found: holding carefully until they see or hear you'
+      : squad.tier.hunt <= 0 ? 'never at this tier'
+      : squad.staleForSec <= 0 ? (squad.huntResult === 'found' ? 'found you: they fight' : 'none (they know where you are, or are not awake)')
+      : squad.huntFailure ? `${squad.huntFailure}, tries again soon`
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : `knowledge old ${squad.staleForSec.toFixed(1)} s, starts at ${squad.tier.huntAfterSec} s`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
+    readoutBox.show([
+      `health    ${readouts.health}`,
+      `position  ${readouts.position}`,
+      `speed     ${readouts.speed}`,
+      `state     ${readouts.state}`,
+      `weapon    ${readouts.weapon}`,
+      `exposure  ${readouts.exposure}`,
+      `squad     ${readouts.squad}`,
+      `flank     ${readouts.flank}`,
+      `advance   ${readouts.play}`,
+      `heard     ${readouts.heard}`,
+      `hunt      ${readouts.hunt}`,
+      ...enemyLines,
+      `camera    ${readouts.freeCamera}`,
+      ...(readouts.status ? [`status    ${readouts.status}`] : []),
+    ]);
   }
 
   return {
@@ -305,6 +467,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
 
       if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
       updateReadouts(dtSec);
+      navOverlay.update();
+      coverOverlay.update(dtSec);
+      labels.update();
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);

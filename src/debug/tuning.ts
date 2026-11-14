@@ -11,6 +11,12 @@ import type { MovementConfig } from '../config/movement';
 import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
+import type { StandInConfig } from '../config/standInEnemy';
+import type { CoverConfig } from '../config/cover';
+import type { ExposureConfig } from '../config/exposure';
+import type { SquadConfig } from '../config/squad';
+import type { RoleValues } from '../config/roles';
+import type { TierValues } from '../config/aggression';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -43,6 +49,12 @@ type NoiseKey = keyof NoiseConfig;
 type HealthKey = keyof HealthConfig;
 type MovementKey = keyof MovementConfig;
 type HealthFxKey = keyof HealthFxConfig;
+type StandInKey = keyof StandInConfig;
+type CoverKey = keyof CoverConfig;
+type ExposureKey = keyof ExposureConfig;
+type SquadKey = keyof SquadConfig;
+type RoleKey = keyof RoleValues;
+type TierKey = keyof TierValues;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -191,6 +203,9 @@ export const rifleFolders: Folder<RifleKey>[] = [
       { key: 'tracerSpeedMps', label: 'Tracer speed (m/s)', min: 50, max: 1000, step: 10 },
       { key: 'tracerLengthM', label: 'Tracer length (m)', min: 0.5, max: 20, step: 0.5 },
       { key: 'markRadiusM', label: 'Bullet mark radius (m)', min: 0.01, max: 0.2, step: 0.005 },
+      { key: 'sparkSpeedMps', label: 'Impact sparks: speed (m/s)', min: 0, max: 15, step: 0.5 },
+      { key: 'sparkLifeSec', label: 'Impact sparks: last (s)', min: 0.05, max: 1.5, step: 0.05 },
+      { key: 'sparkSizeM', label: 'Impact sparks: size (m)', min: 0.005, max: 0.15, step: 0.005 },
     ],
   },
 ];
@@ -358,6 +373,7 @@ export const movementFolder: Folder<MovementKey> = {
 export const noiseFolder: Folder<NoiseKey> = {
   title: 'Noise (how far enemies hear)',
   sliders: [
+    { key: 'wallMuffleShare', label: 'Through a wall or prop: carries (share)', min: 0, max: 1, step: 0.05 },
     { key: 'rifleShotM', label: 'M4-A shot (m)', min: 0, max: 100, step: 1 },
     { key: 'pistolShotM', label: 'P9 shot, suppressed (m)', min: 0, max: 50, step: 0.5 },
     { key: 'impactM', label: 'Bullet hitting a surface (m)', min: 0, max: 60, step: 1 },
@@ -397,6 +413,7 @@ export const grenadeFolder: Folder<GrenadeKey> = {
     { key: 'damageAtCentre', label: 'Damage at the centre', min: 1, max: 500, step: 5 },
     { key: 'damageAtEdge', label: 'Damage at the edge', min: 0, max: 500, step: 5 },
     { key: 'targetChestHeightM', label: 'Blast aims this high (m)', min: 0.3, max: 1.6, step: 0.05 },
+    { key: 'targetChestShareOfHeight', label: 'On a crouched target, at most (share of height)', min: 0.2, max: 1, step: 0.05 },
     { key: 'blastLiftM', label: 'Blast starts this far up (m)', min: 0, max: 0.6, step: 0.05 },
     { key: 'shakeMaxRad', label: 'Camera shake, closest (rad)', min: 0, max: 0.2, step: 0.005 },
     { key: 'shakeRadiusM', label: 'Camera shake reaches (m)', min: 1, max: 40, step: 1 },
@@ -457,6 +474,168 @@ export const dummyFolder: Folder<DummyKey> = {
     { key: 'respawnDelaySec', label: 'Time down before standing (s)', min: 0.5, max: 20, step: 0.5 },
   ],
 };
+
+export const standInFolder: Folder<StandInKey> = {
+  title: 'Stand-in enemy',
+  sliders: [
+    { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
+    { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
+    { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
+    { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'walkStuckSec', label: 'Gives up a walk with no progress after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'coverCheckIntervalSec', label: 'Checks its cover every (s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'coverArriveM', label: 'At its cover within (m)', min: 0.05, max: 1, step: 0.05 },
+    { key: 'standGroundM', label: 'Stands and fights within (m)', min: 0, max: 30, step: 0.5 },
+    { key: 'fightSec', label: 'Fights up close for (s)', min: 0, max: 10, step: 0.1 },
+    { key: 'retreatSpeedShare', label: 'Backing off: speed (share of walk)', min: 0.1, max: 1, step: 0.05 },
+    { key: 'retreatHitChanceShare', label: 'Backing off: hit chance (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'flinchWindowSec', label: 'Flinch: damage counts within (s)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'flinchSec', label: 'Flinch: lasts (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'flinchSpeedShare', label: 'Flinch: moves at (share of speed)', min: 0, max: 1, step: 0.05 },
+    { key: 'flinchTiltDeg', label: 'Flinch: tips back (deg)', min: 0, max: 45, step: 1 },
+    { key: 'flinchImmuneSec', label: 'Flinch: none again for (s)', min: 0, max: 10, step: 0.1 },
+    { key: 'panicHitChanceShare', label: 'Panic fire after a flinch: hit chance (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'peekHoldMinSec', label: 'Peek: holds at least (s)', min: 0.2, max: 15, step: 0.1 },
+    { key: 'peekHoldMaxSec', label: 'Peek: holds at most (s)', min: 0.2, max: 20, step: 0.1 },
+    { key: 'tellSec', label: 'Peek: tell lasts (s)', min: 0, max: 2, step: 0.05 },
+    { key: 'tellShare', label: 'Peek: tell moves out (share)', min: 0, max: 0.8, step: 0.05 },
+    { key: 'peekOutSec', label: 'Peek: comes out in (s)', min: 0.05, max: 1.5, step: 0.05 },
+    { key: 'peekBackSec', label: 'Peek: goes back in (s)', min: 0.05, max: 1.5, step: 0.05 },
+    { key: 'peekStepM', label: 'Peek: steps out from high cover (m)', min: 0.2, max: 1.5, step: 0.05 },
+    { key: 'crouchPeekStepM', label: 'Peek: steps out crouched from low cover (m)', min: 0.2, max: 1.5, step: 0.05 },
+    { key: 'memoryFreshSec', label: 'Fires at your cover only if it knew within (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'hiddenFireChance', label: 'Peek: fires at your cover when hidden (0 to 1)', min: 0, max: 1, step: 0.05 },
+    { key: 'woundedHealthShare', label: 'Wounded below (share of health)', min: 0, max: 1, step: 0.05 },
+    { key: 'woundedHoldScale', label: 'Wounded: holds longer between peeks (x)', min: 1, max: 5, step: 0.1 },
+    { key: 'grenadeMarginM', label: 'Grenade: runs within blast radius plus (m)', min: 0, max: 5, step: 0.25 },
+    { key: 'grenadeReactionSec', label: 'Grenade: reacts after (s)', min: 0, max: 2, step: 0.05 },
+    { key: 'grenadeRunSpeedMps', label: 'Grenade: runs at (m/s)', min: 1, max: 10, step: 0.1 },
+    { key: 'grenadeRunMaxM', label: 'Grenade: runs to cover at most (m of walking)', min: 1, max: 30, step: 0.5 },
+    { key: 'sightChecksPerSec', label: 'Sight checks per s', min: 1, max: 30, step: 1 },
+    { key: 'reactionSec', label: 'Reaction before firing (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'aimToleranceDeg', label: 'Fires when facing within (deg)', min: 1, max: 90, step: 1 },
+    { key: 'ownCoverM', label: 'Never fires into cover within (m past its muzzle)', min: 0, max: 3, step: 0.1 },
+    { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
+    { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
+    { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
+  ],
+};
+
+export const coverFolder: Folder<CoverKey> = {
+  title: 'Choosing cover',
+  sliders: [
+    { key: 'rangePenaltyPerM', label: 'Penalty per m outside that', min: 0, max: 5, step: 0.1 },
+    { key: 'walkPenaltyPerM', label: 'Penalty per m of walking', min: 0, max: 5, step: 0.05 },
+    { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
+    { key: 'ownCoverReachM', label: 'Hidden check: own cover within (m of the body)', min: 0.5, max: 3, step: 0.05 },
+    { key: 'blindSpotPenalty', label: 'Penalty for a spot whose peek cannot see you', min: 0, max: 50, step: 0.5 },
+  ],
+};
+
+export const exposureFolder: Folder<ExposureKey> = {
+  title: 'Exposure and misses',
+  sliders: [
+    { key: 'fillPerSec', label: 'Meter fills per s (fully seen, close)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'drainPerSec', label: 'Meter drains per s (in cover)', min: 0.05, max: 5, step: 0.05 },
+    { key: 'holdMaxSec', label: 'Holds unseen at most (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'fullFillRangeM', label: 'Full fill up to (m)', min: 1, max: 50, step: 1 },
+    { key: 'farRangeM', label: 'Slowest fill from (m)', min: 2, max: 100, step: 1 },
+    { key: 'farFillShare', label: 'Fill when far (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'crouchFillShare', label: 'Fill when crouched (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'sideFillScale', label: 'Fill when seen from side or behind (x)', min: 1, max: 4, step: 0.1 },
+    { key: 'hitStartExposure', label: 'Hits start above exposure', min: 0, max: 0.95, step: 0.05 },
+    { key: 'maxHitChance', label: 'Hit chance at full exposure (0 to 1)', min: 0, max: 1, step: 0.05 },
+    { key: 'movingHitShare', label: 'Hit chance sprinting or sliding (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'missFarOffsetM', label: 'Miss passes at exposure 0 (m)', min: 0.1, max: 5, step: 0.05 },
+    { key: 'missNearOffsetM', label: 'Miss passes at full exposure (m)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'missNearSurfaceM', label: 'Misses prefer a surface within (m of you)', min: 0, max: 6, step: 0.25 },
+    { key: 'crackRadiusM', label: 'Bullet crack within (m of your head)', min: 0, max: 6, step: 0.25 },
+    { key: 'crackQuietVolume', label: 'Bullet crack volume at exposure 0', min: 0, max: 1, step: 0.05 },
+    { key: 'checksPerSec', label: 'Exposure checks per s', min: 1, max: 60, step: 1 },
+    { key: 'pinnedExtraSec', label: 'Pinned side lasts after the fire (s)', min: 0, max: 5, step: 0.1 },
+    { key: 'pinnedStartExposure', label: 'Out on a pinned side: meter starts at', min: 0, max: 1, step: 0.05 },
+    { key: 'pinnedSideM', label: 'Out on the pinned side from (m)', min: 0, max: 1, step: 0.05 },
+  ],
+};
+
+/** The sliders for one role's values (4.8); the dev panel shows one folder of these per role. */
+export const roleSliders: Slider<RoleKey>[] = [
+  { key: 'healthPoints', label: 'Health (from next spawn)', min: 1, max: 500, step: 1 },
+  { key: 'walkSpeedMps', label: 'Walk speed (m/s, backing off and the 4.1 walk)', min: 0.2, max: 8, step: 0.1 },
+  { key: 'runSpeedMps', label: 'Run speed between cover (m/s)', min: 0.2, max: 8, step: 0.1 },
+  { key: 'flankSpeedMps', label: 'Flank speed (m/s, 0: never flanks)', min: 0, max: 8, step: 0.1 },
+  { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 12, step: 1 },
+  { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
+  { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
+  { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'flinchDamage', label: 'Flinches at this damage within the window', min: 1, max: 300, step: 1 },
+];
+
+/** The sliders for one aggression tier's values (4.11); the dev panel shows one folder of these per tier. */
+export const tierSliders: Slider<TierKey>[] = [
+  { key: 'suppression', label: 'Suppressing fire at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'playEverySec', label: 'Suppress and advance: at most every (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'playMovers', label: 'Suppress and advance: how many move up (8: everyone)', min: 1, max: 8, step: 1 },
+  { key: 'holdBeforeFlankSec', label: 'Flank: after you hold a spot for (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'flankWaitSec', label: 'Flank: wait before the next (s)', min: 0, max: 60, step: 0.5 },
+  { key: 'pincer', label: 'Pincer: two flank at once (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'hearChance', label: 'Hearing: chance it reacts to your gun', min: 0, max: 1, step: 0.05 },
+  { key: 'pushMoversDry', label: 'Hearing: move up on a dry gun (8: everyone)', min: 0, max: 8, step: 1 },
+  { key: 'pushMoversReload', label: 'Hearing: move up on a reload', min: 0, max: 8, step: 1 },
+  { key: 'pushMoversJam', label: 'Hearing: move up on a jam (plus a flank)', min: 0, max: 8, step: 1 },
+  { key: 'hunt', label: 'Hunt: comes looking at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'huntAfterSec', label: 'Hunt: after its knowledge is old for (s)', min: 0, max: 60, step: 0.5 },
+  { key: 'huntFollowers', label: 'Hunt: followers per step (8: everyone)', min: 0, max: 8, step: 1 },
+  { key: 'huntStepEverySec', label: 'Hunt: a follow step every (s)', min: 0.5, max: 30, step: 0.5 },
+];
+
+export const squadFolder: Folder<SquadKey> = {
+  title: 'Squad',
+  sliders: [
+    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 4, step: 1 },
+    { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
+    { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
+    { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'holdRadiusM', label: 'Flank: you hold a spot within (m)', min: 0.5, max: 8, step: 0.25 },
+    { key: 'flankRetrySec', label: 'Flank: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'flankMinAngleDeg', label: 'Flank: spot at least (deg round from your view)', min: 0, max: 180, step: 5 },
+    { key: 'flankMaxExposedM', label: 'Flank: route in your view at most (m)', min: 0, max: 30, step: 0.5 },
+    { key: 'disorderSec', label: 'Leader down: squad disorganised for (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'disorderSlots', label: 'Leader down: firing slots', min: 1, max: 4, step: 1 },
+    { key: 'disorderHoldScale', label: 'Leader down: holds longer (x)', min: 1, max: 5, step: 0.1 },
+    { key: 'spottedSec', label: 'Flank: called off when seen for (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'playRetrySec', label: 'Suppress and advance: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'advanceMinGainM', label: 'Advance: at least this much closer (m)', min: 0.5, max: 10, step: 0.25 },
+    { key: 'advanceClosestM', label: 'Advance and reposition: never closer to you than (m)', min: 1, max: 10, step: 0.25 },
+    { key: 'moveMaxExposedM', label: 'Advance and reposition: route in your view at most (m)', min: 0, max: 20, step: 0.5 },
+    { key: 'suppressBurstRounds', label: 'Suppress: rounds per burst', min: 1, max: 20, step: 1 },
+    { key: 'suppressBurstPauseSec', label: 'Suppress: pause between bursts (s)', min: 0.1, max: 3, step: 0.05 },
+    { key: 'suppressEdgeOffsetM', label: 'Suppress: aims beside your cover (m)', min: 0, max: 2, step: 0.05 },
+    { key: 'suppressMaxSec', label: 'Suppress: stays out at most (s)', min: 1, max: 30, step: 0.5 },
+    { key: 'suppressAfterMoveSec', label: 'Suppress: stops after the move by (s)', min: 0, max: 5, step: 0.1 },
+    { key: 'pinnedByFireM', label: 'Your near miss pins an enemy within (m)', min: 0, max: 3, step: 0.1 },
+    { key: 'pinnedHoldScale', label: 'Pinned enemy holds longer (x)', min: 1, max: 5, step: 0.1 },
+    { key: 'pushReactionSec', label: 'Hearing: push after (s)', min: 0, max: 5, step: 0.1 },
+    { key: 'pushMaxWindowSec', label: 'Hearing: dry or jam window at most (s)', min: 0.5, max: 30, step: 0.5 },
+    { key: 'repositionPeeksMin', label: 'Reposition: after at least (peeks)', min: 1, max: 10, step: 1 },
+    { key: 'repositionPeeksMax', label: 'Reposition: after at most (peeks)', min: 1, max: 10, step: 1 },
+    { key: 'repositionBlindPeeks', label: 'Reposition: after blind peeks in a row', min: 1, max: 10, step: 1 },
+    { key: 'repositionMinM', label: 'Reposition: new spot at least (m away)', min: 0.5, max: 15, step: 0.5 },
+    { key: 'repositionMaxExposedM', label: 'Reposition: uncovered, route in your view at most (m)', min: 0, max: 20, step: 0.5 },
+    { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
+    { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'huntNearM', label: 'Hunt: leader goes to cover within (m) of your last spot', min: 1, max: 20, step: 0.5 },
+    { key: 'huntLookSec', label: 'Hunt: leader looks from there for (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'huntRetrySec', label: 'Hunt: nobody can lead, try again after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'huntWatchHoldScale', label: 'Hunt: watcher holds (times as long)', min: 0.1, max: 2, step: 0.05 },
+    { key: 'huntCarefulHoldScale', label: 'Hunt found nothing: holds (times as long)', min: 1, max: 4, step: 0.1 },
+  ],
+};
+
+/** Exposure values that are not on the panel: where on Rook's body the third sight point is. */
+export const exposureKeysNotOnPanel: readonly ExposureKey[] = ['hipHeightShareOfEyes'];
 
 export const healthFolder: Folder<HealthKey> = {
   title: 'Health and falls',
@@ -520,6 +699,7 @@ export const healthFxFolders: Folder<HealthFxKey>[] = [
       { key: 'hudShowSec', label: 'A pop-up stays (s)', min: 0.5, max: 10, step: 0.5 },
       { key: 'hudFadeSec', label: 'Then fades over (s)', min: 0.1, max: 2, step: 0.1 },
       { key: 'magazinePictureShowSec', label: 'Magazine pictures stay (s)', min: 1, max: 10, step: 0.5 },
+      { key: 'damageArcSec', label: 'Damage direction arc fades over (s)', min: 0.2, max: 5, step: 0.1 },
     ],
   },
 ];
@@ -529,6 +709,18 @@ export const healthKeysNotOnPanel: readonly HealthKey[] = ['healCarryLimit', 'st
 
 /** Dummy config values that are not on the panel: the shape is built once when the game starts. */
 export const dummyKeysNotOnPanel: readonly DummyKey[] = ['heightM', 'bodyWidthM', 'bodyDepthM', 'headRadiusM'];
+
+/** Stand-in values that are not on the panel: its shape, gun position and collision, built or read as they are. */
+export const standInKeysNotOnPanel: readonly StandInKey[] = [
+  'eyeHeightM',
+  'muzzleHeightM',
+  'muzzleForwardM',
+  'capsuleRadiusM',
+  'aimHeightShareOfEyes',
+  'crouchHeightM',
+  'crouchEyeHeightM',
+  'crouchMuzzleHeightM',
+];
 
 /** Rifle config values that are deliberately not on the panel: they are read once when the game starts. */
 export const rifleKeysNotOnPanel: readonly RifleKey[] = ['magazineRounds', 'startingMagazines'];

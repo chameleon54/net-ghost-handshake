@@ -20,8 +20,9 @@ export class NoiseReporter {
       weapon === 'rifle' ? this.fromPlayer('rifle-shot', noiseConfig.rifleShotM) : this.fromPlayer('pistol-shot', noiseConfig.pistolShotM),
     );
     // The bullet hitting a wall or the floor is loud whichever gun it came from: the suppressor only quiets the shot itself.
-    events.on('shot:landed', ({ hit, end }) => {
-      if (hit) this.at('impact', end, noiseConfig.impactM);
+    // An enemy's bullets are not a noise the player made.
+    events.on('shot:landed', ({ hit, end, shooter }) => {
+      if (hit && shooter === 'player') this.at('impact', end, noiseConfig.impactM);
     });
     events.on('weapon:empty-click', () => this.fromPlayer('empty-click', noiseConfig.emptyClickM));
     events.on('weapon:reload-started', () => this.fromPlayer('reload', noiseConfig.reloadM));

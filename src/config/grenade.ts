@@ -30,6 +30,8 @@ export const grenadeConfigDefaults = {
   damageAtEdge: 20,
   /** How high above a target's feet the blast aims (its chest), and how far above the ground the blast is taken to start. */
   targetChestHeightM: 1,
+  /** For a crouched target the blast aims at most this share of its height (its chest). */
+  targetChestShareOfHeight: 0.6,
   blastLiftM: 0.15,
 
   // What the player feels: the camera shakes, less with distance.
