@@ -2,8 +2,9 @@ import * as THREE from 'three';
 import type { GunConfig } from '../config/gun';
 import { rifleConfig } from '../config/rifle';
 import type { EventBus } from '../core/events';
-import type { Dummy, HitZone } from '../enemies/dummy';
+import type { HitZone } from '../enemies/dummy';
 import { createDummyHit, rayHitDummy } from '../enemies/dummyHit';
+import type { Target } from '../enemies/target';
 import { createRayHit, type LevelCollision } from '../level/collision';
 import type { GunId, WeaponEvents } from './events';
 import { applySpread } from './spread';
@@ -31,7 +32,8 @@ export class Shooter {
     private readonly camera: THREE.PerspectiveCamera,
     /** Each gun's muzzle, in the camera's own space (right, up, forward is -z). */
     private readonly muzzlesInCamera: Record<GunId, THREE.Vector3>,
-    private readonly dummies: readonly Dummy[],
+    /** The dummies and the stand-in enemy. */
+    private readonly targets: readonly Target[],
     private readonly configs: Record<GunId, GunConfig>,
   ) {
     events.on('weapon:fired', ({ weapon }) => {
@@ -53,13 +55,13 @@ export class Shooter {
 
     const hit = this.collision.raycast(this.origin, this.direction, rifleConfig.maxRangeM, this.hit);
 
-    // The nearest standing dummy in front of any wall takes the bullet.
+    // The nearest standing target in front of any wall takes the bullet.
     this.ray.set(this.origin, this.direction);
-    let target: Dummy | null = null;
+    let target: Target | null = null;
     let targetM = hit ? this.hit.distanceM : rifleConfig.maxRangeM;
-    for (const dummy of this.dummies) {
-      if (rayHitDummy(this.ray, dummy, targetM, this.dummyHit)) {
-        target = dummy;
+    for (const candidate of this.targets) {
+      if (rayHitDummy(this.ray, candidate, targetM, this.dummyHit)) {
+        target = candidate;
         targetM = this.dummyHit.distanceM;
         this.end.copy(this.dummyHit.point);
         this.zone = this.dummyHit.zone;
@@ -77,6 +79,6 @@ export class Shooter {
     } else {
       this.end.copy(this.direction).multiplyScalar(rifleConfig.maxRangeM).add(this.origin);
     }
-    events.emit('shot:landed', { muzzle: this.muzzle, end: this.end, hit: onSurface, normal: this.normal });
+    events.emit('shot:landed', { muzzle: this.muzzle, end: this.end, hit: onSurface, normal: this.normal, shooter: 'player' });
   }
 }

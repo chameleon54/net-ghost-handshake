@@ -17,6 +17,8 @@ export interface ShotLanded {
   /** True if it hit a wall, prop or the floor (a bullet mark goes there); `normal` is then the surface direction. */
   hit: boolean;
   normal: Vector3;
+  /** Who fired it. Only the player's bullets make a noise enemies hear. */
+  shooter: 'player' | 'enemy';
 }
 
 export type WeaponEvents = {
@@ -50,6 +52,8 @@ export type WeaponEvents = {
   /** A different weapon was taken out. */
   'weapon:switched': { weapon: WeaponId };
   'shot:landed': ShotLanded;
+  /** An enemy fired a round from its muzzle at `position` (a reused vector). For its gunshot sound. */
+  'enemy:fired': { position: Vector3 };
   /** A weapon hit a target. Hit markers (and later sound) listen. */
   'target:hit': { zone: HitZone; killed: boolean; weapon: WeaponId | 'grenade' };
   /** The player made a sound enemies could hear, at `position`, carrying `radiusM`. Enemy hearing (4.10) listens to this. */

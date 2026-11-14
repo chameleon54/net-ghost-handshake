@@ -62,18 +62,24 @@ describe('NoiseReporter', () => {
   it('a bullet hitting a surface is loud, wherever it lands, and one that hit a target is not', () => {
     const { events, noises } = setup();
     const end = new Vector3(5, 1, -12);
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1) });
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3() });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1), shooter: 'player' });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: false, normal: new Vector3(), shooter: 'player' });
     expect(noises).toHaveLength(1);
     expect(noises[0].kind).toBe('impact');
     expect(noises[0].radiusM).toBe(noiseConfig.impactM);
     expect(noises[0].position.toArray()).toEqual([5, 1, -12]);
   });
 
+  it("an enemy's bullet hitting a surface is not a noise the player made", () => {
+    const { events, noises } = setup();
+    events.emit('shot:landed', { muzzle: new Vector3(), end: new Vector3(5, 1, -12), hit: true, normal: new Vector3(0, 0, 1), shooter: 'enemy' });
+    expect(noises).toHaveLength(0);
+  });
+
   it('keeps the position as a copy, so a vector that is reused later cannot change an old noise', () => {
     const { events, noises } = setup();
     const end = new Vector3(5, 1, -12);
-    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1) });
+    events.emit('shot:landed', { muzzle: new Vector3(), end, hit: true, normal: new Vector3(0, 0, 1), shooter: 'player' });
     end.set(99, 99, 99);
     expect(noises[0].position.toArray()).toEqual([5, 1, -12]);
   });

@@ -7,6 +7,8 @@ import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
 import { knifeConfig, knifeConfigDefaults } from '../config/knife';
 import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
+import { standInConfig, standInConfigDefaults } from '../config/standInEnemy';
+import type { StandInEnemy } from '../enemies/standInEnemy';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -27,7 +29,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -51,6 +53,7 @@ interface Parts {
   heals: HealItems;
   /** Every sound the game plays goes through it, so the captions can list them. */
   soundTap: SoundTap;
+  standIn: StandInEnemy;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -61,7 +64,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -98,9 +101,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', freeCamera: 'off (press ` to toggle)', status: '' };
   const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'freeCamera', 'status'] as const) {
+  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'freeCamera', 'status'] as const) {
     readoutFolder.add(readouts, key).listen().disable();
   }
   readoutFolder.open();
@@ -121,6 +124,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(healthConfig, healthConfigDefaults);
       resetToDefaults(healthFx, healthFxDefaults);
       resetToDefaults(movementConfig, movementConfigDefaults);
+      resetToDefaults(standInConfig, standInConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -141,6 +145,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/health.ts': changedValues(healthConfig, healthConfigDefaults),
           'src/config/healthFx.ts': changedValues(healthFx, healthFxDefaults),
           'src/config/movement.ts': changedValues(movementConfig, movementConfigDefaults),
+          'src/config/standInEnemy.ts': changedValues(standInConfig, standInConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -205,6 +210,13 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const dummyPanel = gui.addFolder(dummyFolder.title);
   dummyPanel.close();
   for (const s of dummyFolder.sliders) dummyPanel.add(dummyConfig, s.key, s.min, s.max, s.step).name(s.label);
+
+  // The stand-in enemy (4.1): its starting values, and two testing aids.
+  const standInPanel = gui.addFolder(standInFolder.title);
+  standInPanel.close();
+  standInPanel.add(standIn, 'frozen').name('Freeze (stands still, holds fire)');
+  standInPanel.add({ respawn: () => standIn.reset() }, 'respawn').name('Respawn (idle, at its spot)');
+  for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const grenadePanel = gui.addFolder(grenadeFolder.title);
   grenadePanel.close();
@@ -291,6 +303,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
+    readouts.enemy = `${standIn.state}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 

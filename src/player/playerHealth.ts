@@ -4,7 +4,7 @@ import type { EventBus } from '../core/events';
 import { Health } from '../enemies/health';
 import type { WeaponEvents } from '../weapons/events';
 
-export type DamageSource = 'blast' | 'fall' | 'hazard' | 'debug';
+export type DamageSource = 'blast' | 'fall' | 'hazard' | 'enemy' | 'debug';
 
 const regenRateKeys = { easy: 'regenPerSecEasy', normal: 'regenPerSecNormal', hard: 'regenPerSecHard' } as const;
 

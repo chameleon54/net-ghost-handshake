@@ -27,6 +27,11 @@ import { EventBus } from './core/events';
 import { greyboxDummies } from './data/greyboxDummies';
 import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
+import { StandInEnemy } from './enemies/standInEnemy';
+import { StandInView } from './enemies/standInView';
+import { StandInWorld } from './enemies/standInWorld';
+import type { Target } from './enemies/target';
+import { greyboxStandIn } from './data/greyboxEnemies';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { pistolConfig } from './config/pistol';
@@ -94,8 +99,18 @@ const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
 const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
-const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, dummies, gunConfigs);
-new KnifeStrike(weaponEvents, level.collision, camera, dummies);
+// The stand-in enemy (4.1): temporary, it walks at Rook and shoots. Its hits go to his health (made further down).
+const standIn = new StandInEnemy(
+  greyboxStandIn,
+  new StandInWorld(weaponEvents, level.collision, player, (amount) => playerHealth.damage(amount, 'enemy')),
+);
+const standInView = new StandInView(standIn);
+scene.add(standInView.group);
+weaponEvents.on('noise:made', (noise) => standIn.hear(noise));
+// Everything the player's bullets, knife and grenades can hurt.
+const targets: Target[] = [...dummies, standIn];
+const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
+new KnifeStrike(weaponEvents, level.collision, camera, targets);
 const tracers = new Tracers(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
@@ -117,7 +132,7 @@ const inspectKey = new HoldTap();
 const bulletMarks = new BulletMarks(scene, weaponEvents);
 // Grenades: G throws one (the thrower holds the rules), the system flies it and works out the blast, and the effects listen.
 const thrower = new GrenadeThrower(weaponEvents);
-const blastTargets = dummies.map((dummy) => dummyBlastTarget(dummy, weaponEvents));
+const blastTargets = targets.map((target) => dummyBlastTarget(target, weaponEvents));
 const playerHealth = new PlayerHealth(weaponEvents);
 const heals = new HealItems(weaponEvents, playerHealth);
 const playerBlastTarget = {
@@ -184,6 +199,7 @@ function restart(): void {
   heals.reset();
   grenades.clear();
   dummies.forEach((dummy) => dummy.reset());
+  standIn.reset();
   bulletMarks.clear();
   tracers.clear();
   casings.clear();
@@ -212,7 +228,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn });
   });
 }
 
@@ -301,6 +317,8 @@ const loop = new Loop(
       dummy.update(stepSec);
       dummyViews[i].update();
     });
+    standIn.update(stepSec, player.position);
+    standInView.update();
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.

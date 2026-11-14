@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { audioConfig } from '../../config/audio';
 import { grenadeConfig } from '../../config/grenade';
 import type { EventBus } from '../../core/events';
-import type { Dummy } from '../../enemies/dummy';
+import type { Target } from '../../enemies/target';
 import { createRayHit, type LevelCollision } from '../../level/collision';
 import type { WeaponEvents } from '../events';
 import { resolveBlast, type BlastTarget } from './blast';
@@ -14,8 +14,8 @@ const grenadeColour = 0x3d4a2c;
 const handForwardM = 0.4; // where the grenade leaves the hand: this far in front of the eyes
 const wallGapM = 0.1; // against a wall it starts this far from it
 
-/** A dummy as something a blast can hurt. */
-export function dummyBlastTarget(dummy: Dummy, events: EventBus<WeaponEvents>): BlastTarget {
+/** A dummy (or the stand-in enemy) as something a blast can hurt. */
+export function dummyBlastTarget(dummy: Target, events: EventBus<WeaponEvents>): BlastTarget {
   return {
     chest: (out) => out.set(dummy.xM, grenadeConfig.targetChestHeightM, dummy.zM),
     vulnerable: () => dummy.hittable,

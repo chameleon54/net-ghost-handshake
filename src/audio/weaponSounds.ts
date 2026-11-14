@@ -62,6 +62,8 @@ export class WeaponSounds {
         this.play('pistol-fire', audioConfig.pistolLoudness); // suppressed: quieter, never silent
       }
     });
+    // Decision 201: the stand-in enemy reuses the M4-A shot, from where it stands, until enemies get their own sounds (4.14).
+    events.on('enemy:fired', ({ position }) => this.player.play('rifle-fire', { position, rate: this.rate(), note: 'enemy shot' }));
     events.on('weapon:empty-click', () => this.play('dry-click'));
     events.on('weapon:jammed', () => this.play('jam-clunk'));
     events.on('weapon:jam-click', () => this.play('jam-click'));

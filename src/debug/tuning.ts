@@ -11,6 +11,7 @@ import type { MovementConfig } from '../config/movement';
 import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
+import type { StandInConfig } from '../config/standInEnemy';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -43,6 +44,7 @@ type NoiseKey = keyof NoiseConfig;
 type HealthKey = keyof HealthConfig;
 type MovementKey = keyof MovementConfig;
 type HealthFxKey = keyof HealthFxConfig;
+type StandInKey = keyof StandInConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -458,6 +460,30 @@ export const dummyFolder: Folder<DummyKey> = {
   ],
 };
 
+export const standInFolder: Folder<StandInKey> = {
+  title: 'Stand-in enemy',
+  sliders: [
+    { key: 'healthPoints', label: 'Health (from next spawn)', min: 1, max: 500, step: 1 },
+    { key: 'walkSpeedMps', label: 'Walk speed (m/s)', min: 0, max: 8, step: 0.1 },
+    { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
+    { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
+    { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
+    { key: 'sightChecksPerSec', label: 'Sight checks per s', min: 1, max: 30, step: 1 },
+    { key: 'reactionSec', label: 'Reaction before firing (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'aimToleranceDeg', label: 'Fires when facing within (deg)', min: 1, max: 90, step: 1 },
+    { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 10, step: 1 },
+    { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
+    { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'hitChance', label: 'Hit chance per round (0 to 1)', min: 0, max: 1, step: 0.05 },
+    { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
+    { key: 'hitGapSec', label: 'Hit budget: one hit per (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'missMinOffsetM', label: 'Miss passes at least (m)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'missMaxOffsetM', label: 'Miss passes at most (m)', min: 0.1, max: 5, step: 0.05 },
+    { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
+  ],
+};
+
 export const healthFolder: Folder<HealthKey> = {
   title: 'Health and falls',
   sliders: [
@@ -529,6 +555,9 @@ export const healthKeysNotOnPanel: readonly HealthKey[] = ['healCarryLimit', 'st
 
 /** Dummy config values that are not on the panel: the shape is built once when the game starts. */
 export const dummyKeysNotOnPanel: readonly DummyKey[] = ['heightM', 'bodyWidthM', 'bodyDepthM', 'headRadiusM'];
+
+/** Stand-in values that are not on the panel: its shape, gun position and collision, built or read as they are. */
+export const standInKeysNotOnPanel: readonly StandInKey[] = ['eyeHeightM', 'muzzleHeightM', 'muzzleForwardM', 'capsuleRadiusM', 'aimHeightShareOfEyes'];
 
 /** Rifle config values that are deliberately not on the panel: they are read once when the game starts. */
 export const rifleKeysNotOnPanel: readonly RifleKey[] = ['magazineRounds', 'startingMagazines'];
