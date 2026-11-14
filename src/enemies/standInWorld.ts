@@ -14,7 +14,7 @@ import { squadConfig } from '../config/squad';
 import { coverConfig } from '../config/cover';
 import { SquadCoordinator } from '../squad/squadCoordinator';
 import type { WeaponEvents } from '../weapons/events';
-import { peekEyesAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot } from './standInEnemy';
+import { peekEyesAt, peekGunAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot } from './standInEnemy';
 
 /** What the stand-in needs to know about Rook. */
 export interface StandInQuarry {
@@ -176,30 +176,31 @@ export class StandInWorld implements StandInHooks {
 
   /**
    * Where to move on to from a spot it has used enough (decision 237), or null: a free hiding spot (not its own) at least
-   * the reposition distance from where it is, scored like choosing cover (its liked range, the walk, and a spot it cannot
-   * shoot from as a last resort). Also how much of the route is in Rook's view, to know if it may go without cover.
+   * the reposition distance from where it is and not too close to Rook, with at most the allowed metres of route in his
+   * view (decision 239). Scored like choosing cover (its liked range, the walk, and a spot it cannot shoot from as a last
+   * resort), plus the metres in view. Also how much of the route is in his view, to know if it may go without cover.
    */
   planReposition(enemy: StandInEnemy): (FlankPlan & { readonly exposedM: number }) | null {
     const { position, eyes } = this.quarry;
     const { preferMinM, preferMaxM } = enemy.values;
-    let best: FlankPlan | null = null;
+    let best: (FlankPlan & { readonly exposedM: number }) | null = null;
     for (const point of this.coverPoints.points) {
       const holder = this.coverPoints.claimedBy(point);
       if (point === enemy.cover || (holder && holder !== enemy)) continue;
       if (Math.hypot(point.xM - enemy.xM, point.zM - enemy.zM) < squadConfig.repositionMinM) continue;
+      const fromRookM = Math.hypot(point.xM - position.x, point.zM - position.z);
+      if (fromRookM < squadConfig.advanceClosestM) continue;
       if (!this.coverPoints.hides(point, eyes)) continue;
       const walk = this.walkM(enemy, point);
       if (!Number.isFinite(walk)) continue;
-      const fromRookM = Math.hypot(point.xM - position.x, point.zM - position.z);
+      const exposedM = this.exposedRouteM(this.routeToCover); // walkM left its route there
+      if (exposedM > squadConfig.moveMaxExposedM) continue;
       const outOfRangeM = Math.max(preferMinM - fromRookM, fromRookM - preferMaxM, 0);
       const blind = this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty;
-      const cost = outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM + blind;
-      if (!best || cost < best.cost) best = { point, cost };
+      const cost = exposedM * exposedCostPerM + outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM + blind;
+      if (!best || cost < best.cost) best = { point, cost, exposedM };
     }
-    if (!best) return null;
-    this.spot.set(best.point.xM, 0, best.point.zM);
-    this.navigation.findPath(enemy.feet, this.spot, this.routeToCover);
-    return { ...best, exposedM: this.exposedRouteM(this.routeToCover) };
+    return best;
   }
 
   /**
@@ -217,7 +218,9 @@ export class StandInWorld implements StandInHooks {
   /**
    * The best spot to move up to (4.9), or null: a free cover point, not its own, that hides it from Rook (by its own
    * prop), at least the advance gain closer to him than where it is but not too close, out of a live grenade's blast, and
-   * reachable. The shortest walk wins. The move is covered by a squadmate's fire, so the route may be in his view.
+   * reachable. The move is covered by a squadmate's fire, but covering fire buys a short dash, not a long walk in the open:
+   * at most the allowed metres of the route may be in his view, and the least exposed route wins, then the shortest walk
+   * (decision 239).
    */
   planAdvance(enemy: StandInEnemy): FlankPlan | null {
     const { position, eyes } = this.quarry;
@@ -231,30 +234,59 @@ export class StandInWorld implements StandInHooks {
       if (!this.coverPoints.hides(point, eyes)) continue;
       const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
       if (!Number.isFinite(walk)) continue;
-      const cost = walk * coverConfig.walkPenaltyPerM + (this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty);
+      const exposedM = this.exposedRouteM(this.routeToCover); // walkM left its route there
+      if (exposedM > squadConfig.moveMaxExposedM) continue;
+      const blind = this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty;
+      const cost = exposedM * exposedCostPerM + walk * coverConfig.walkPenaltyPerM + blind;
       if (!best || cost < best.cost) best = { point, cost };
     }
     return best;
   }
 
-  /**
-   * True if it could pin Rook's cover from its spot: from one of its peek positions, a round aimed at either edge of his
-   * cover would land near it (within the near-surface distance) or reach it.
-   */
+  /** True if it could pin Rook's cover from its spot: from one of its peeks, a round at either edge of his cover gets there. */
   canSuppressFrom(enemy: StandInEnemy): boolean {
     const point = enemy.cover;
-    if (!point || !enemy.knowsWhere) return false;
-    for (const way of peekWays(point)) {
-      peekEyesAt(point, way, this.peekEyes);
-      for (const side of [1, -1]) {
-        this.edgeAim(this.peekEyes, enemy.lastKnown, side, this.aim);
-        const distanceM = this.peekEyes.distanceTo(this.aim);
-        this.direction.subVectors(this.aim, this.peekEyes).divideScalar(distanceM);
-        const hitM = this.collision.rayDistance(this.peekEyes, this.direction, distanceM);
-        if (hitM === Infinity || distanceM - hitM <= exposureConfig.missNearSurfaceM) return true;
-      }
-    }
-    return false;
+    if (!point) return false;
+    return peekWays(point).some((way) => this.coverShotClear(enemy, point, way, 1) || this.coverShotClear(enemy, point, way, -1));
+  }
+
+  /**
+   * True if a round fired from the gun (not the eyes) of a peek from `point` going `way` would land near Rook's cover or
+   * reach it: aimed at edge `side` (1 or -1) of where it last knew he was, or straight at it (0). Decision 239.
+   */
+  coverShotClear(enemy: StandInEnemy, point: CoverPoint, way: number, side: number): boolean {
+    if (!enemy.knowsWhere) return false;
+    peekGunAt(point, way, this.peekEyes);
+    this.edgeAim(this.peekEyes, enemy.lastKnown, side, this.aim);
+    return this.lineHitM(this.peekEyes, this.aim) >= this.peekEyes.distanceTo(this.aim) - exposureConfig.missNearSurfaceM;
+  }
+
+  /**
+   * False if the round it is about to fire (aimed as `shot` aims) would strike its own cover: something within the
+   * own-cover distance past its muzzle and not near where it aims (decision 239). Checked from its body, so a gun poking
+   * into the cover counts too.
+   */
+  muzzleClear(enemy: StandInEnemy, shot: StandInShot): boolean {
+    this.muzzle.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.aimAt(enemy, shot, this.muzzle, this.aim);
+    const hitM = this.lineHitM(this.muzzle, this.aim);
+    const nearGun = hitM <= standInConfig.muzzleForwardM + standInConfig.ownCoverM;
+    return !nearGun || hitM >= this.muzzle.distanceTo(this.aim) - exposureConfig.missNearSurfaceM;
+  }
+
+  /** How far along the line from `from` to `to` it first strikes something, or Infinity if nothing is in the way. */
+  private lineHitM(from: Vector3, to: Vector3): number {
+    const distanceM = from.distanceTo(to);
+    this.direction.subVectors(to, from).divideScalar(distanceM);
+    return this.collision.rayDistance(from, this.direction, distanceM);
+  }
+
+  /** Where a round of this kind aims from `from`, into `out`: Rook's chest, his cover, or the edge of it (suppressing). */
+  private aimAt(enemy: StandInEnemy, shot: StandInShot, from: Vector3, out: Vector3): Vector3 {
+    if (shot === 'suppress') return this.edgeAim(from, enemy.lastKnown, enemy.suppressSideSign, out);
+    this.chest(out);
+    if (shot === 'cover' && enemy.knowsWhere) out.set(enemy.lastKnown.x, out.y - this.quarry.position.y, enemy.lastKnown.z);
+    return out;
   }
 
   /**
@@ -562,13 +594,9 @@ export class StandInWorld implements StandInHooks {
       enemy.muzzleHeightNowM,
       enemy.zM + facingZ * standInConfig.muzzleForwardM,
     );
-    this.chest(this.aim);
-    if (shot === 'cover' && enemy.knowsWhere) this.aim.set(enemy.lastKnown.x, this.aim.y - this.quarry.position.y, enemy.lastKnown.z);
-    if (shot === 'suppress') {
-      // Suppressing fire at one edge of his cover; that side is pinned for a moment (the exposure meter hears of it).
-      this.edgeAim(this.muzzle, enemy.lastKnown, enemy.suppressSideSign, this.aim);
-      this.events.emit('cover:pinned', { anchor: enemy.lastKnown, side: this.pinSide });
-    }
+    this.aimAt(enemy, shot, this.muzzle, this.aim);
+    // Suppressing fire at one edge of his cover pins that side for a moment (the exposure meter hears of it).
+    if (shot === 'suppress') this.events.emit('cover:pinned', { anchor: enemy.lastKnown, side: this.pinSide });
     let onSurface = false;
     if (shot === 'hit') {
       this.end.copy(this.aim);

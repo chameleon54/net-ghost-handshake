@@ -87,6 +87,13 @@ export interface StandInHooks {
   advanceOver(enemy: StandInEnemy): void;
   /** True if something solid is between a noise at `from` and its ears at `to` (the noise is muffled, 4.10). */
   noiseBlocked(from: Vector3, to: Vector3): boolean;
+  /**
+   * True if a round from the gun of a peek from `point` going `way` would get to Rook's cover: at edge `side` (1 or -1) of
+   * where it last knew he was, or straight at it (0). Decision 239.
+   */
+  coverShotClear(enemy: StandInEnemy, point: CoverPoint, way: number, side: number): boolean;
+  /** False if the round it is about to fire (aimed as `shot` aims) would strike its own cover near its muzzle. */
+  muzzleClear(enemy: StandInEnemy, shot: StandInShot): boolean;
 }
 
 /** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
@@ -107,6 +114,13 @@ export function peekEyesAt(point: CoverPoint, way: number, out: Vector3): Vector
   const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
   const rightZ = -Math.sin(point.facingYawRad);
   return out.set(point.xM + way * rightX * stepM, eyeM, point.zM + way * rightZ * stepM);
+}
+
+/** Where its gun is (over its feet, at gun height) when fully out of a peek from `point` going `way`. */
+export function peekGunAt(point: CoverPoint, way: number, out: Vector3): Vector3 {
+  peekEyesAt(point, way, out);
+  out.y = point.height === 'low' && way !== 0 ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM;
+  return out;
 }
 
 const degToRad = Math.PI / 180;
@@ -645,8 +659,8 @@ export class StandInEnemy implements Target {
   /**
    * On a flank or an advance: it walks to its spot, facing the way it goes, without firing. A flank goes at the flank
    * speed and is called off if Rook sees it for a moment (it takes cover as usual from where it is); on arrival it comes
-   * out firing (the flank attack). An advance goes at its walking speed under covering fire and does not turn back; on
-   * arrival it holds and peeks as usual.
+   * out firing (the flank attack). An advance goes at its walking speed under covering fire and does not turn back unless
+   * its spot stops hiding it; on arrival it holds and peeks as usual.
    */
   private move(dtSec: number, player: Vector3): void {
     const flanking = this.state === 'flank';
@@ -667,6 +681,17 @@ export class StandInEnemy implements Target {
       this.pressSec = 0;
       this.pressUnseenSec = 0;
       return;
+    }
+    if (!flanking) {
+      // An advance re-checks its spot as it goes: if Rook moved and it no longer hides it, it takes cover from here (decision 239).
+      this.coverTimerSec -= dtSec;
+      if (this.coverTimerSec <= 0) {
+        this.coverTimerSec = standInConfig.coverCheckIntervalSec;
+        if (this.coverPoint && !this.hooks.coverHides(this.coverPoint)) {
+          this.giveUpWalk();
+          return;
+        }
+      }
     }
     const speedMps = flanking ? this.values.flankSpeedMps : this.values.walkSpeedMps;
     if (!this.walkRoute(dtSec, this.coverSpot, speedMps, !firing)) {
@@ -698,6 +723,10 @@ export class StandInEnemy implements Target {
     if (this.faceLastKnown(dtSec) > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
+    if (!this.hooks.muzzleClear(this, 'suppress')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // something close is in the way: try again a step on (decision 239)
+      return;
+    }
     if (!this.takeSlot()) {
       this.cooldownSec = 0;
       return;
@@ -787,7 +816,8 @@ export class StandInEnemy implements Target {
    */
   private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
     if (this.peekPhase === 'hold') {
-      if (this.seesPlayer) {
+      // It fires from where it holds if it sees Rook and its own cover is not in the way; else it peeks (decision 239).
+      if (this.seesPlayer && this.hooks.muzzleClear(this, 'hit')) {
         this.engage(dtSec, dx, dz);
         return;
       }
@@ -830,12 +860,25 @@ export class StandInEnemy implements Target {
   /**
    * The tell: picks how to come out, warns with a sound, and starts to move. Low cover offers rising over the top (0) and
    * its open sides; high cover its open sides only (1 is right, -1 left, as seen facing the cover). It picks at random
-   * among the ways that let it see Rook, or among all of them if none does (decision 216).
+   * among the ways that let it see Rook; if none does, among those whose gun can reach his cover (decision 239), or else
+   * among all of them (decision 216).
    */
   private startTell(point: CoverPoint): void {
     const ways = peekWays(point);
-    const seeing = ways.filter((way) => this.hooks.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
-    const choices = seeing.length > 0 ? seeing : ways;
+    const shotClear = (side: number) => ways.filter((way) => this.hooks.coverShotClear(this, point, way, side));
+    let choices = ways.filter((way) => this.hooks.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
+    // Not seeing him, it comes out where its gun can reach his cover (decision 239): a suppressor at the edge it pins (or
+    // the other edge if none can), anyone else straight at it, in case this peek fires at his cover.
+    if (choices.length === 0 && this.suppressing) {
+      choices = shotClear(this.suppressSide);
+      if (choices.length === 0) {
+        this.suppressSide = -this.suppressSide;
+        choices = shotClear(this.suppressSide);
+      }
+    } else if (choices.length === 0 && this.knowsFresh) {
+      choices = shotClear(0);
+    }
+    if (choices.length === 0) choices = ways;
     const way = choices[Math.min(Math.floor(this.random() * choices.length), choices.length - 1)];
     this.peekSide.set(way * Math.cos(point.facingYawRad), 0, way * -Math.sin(point.facingYawRad)); // 0 rises: no step
     this.hooks.peekTell(this);
@@ -883,12 +926,17 @@ export class StandInEnemy implements Target {
     if (facingErrorRad > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
+    const suppressFire = this.peekMode === 'suppress';
+    const aimedAs: StandInShot = this.peekMode === 'cover' ? 'cover' : suppressFire ? 'suppress' : 'hit';
+    if (!this.hooks.muzzleClear(this, aimedAs)) {
+      this.startPeekBack(); // its own cover is in the way: no clear shot from this peek (decision 239)
+      return;
+    }
     if (this.peekRounds === 0 && !this.takeSlot()) {
       this.cooldownSec = 0; // every burst needs a firing slot: keep aiming and fire as soon as one is free
       return;
     }
-    const suppressFire = this.peekMode === 'suppress';
-    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : suppressFire ? 'suppress' : this.aimedShot(1));
+    this.hooks.fire(this, aimedAs === 'hit' ? this.aimedShot(1) : aimedAs);
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
     if (this.peekRounds < (suppressFire ? squadConfig.suppressBurstRounds : this.values.burstRounds)) return;
@@ -1071,6 +1119,10 @@ export class StandInEnemy implements Target {
   private shoot(dtSec: number, hitShare: number): void {
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
+    if (!this.hooks.muzzleClear(this, 'hit')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // its own cover is in the way: keep aiming, try again (decision 239)
+      return;
+    }
     if (!this.takeSlot()) {
       this.cooldownSec = 0; // all firing slots are busy: keep aiming and fire as soon as one is free
       return;

@@ -60,6 +60,8 @@ export const standInConfigDefaults = {
   reactionSec: 0.5,
   /** It only fires when facing Rook within this angle. */
   aimToleranceDeg: 10,
+  /** It never fires a round that would strike something this close past its muzzle: its own cover (decision 239). */
+  ownCoverM: 1.2,
   roundIntervalSec: 0.1,
   burstPauseSec: 1.2,
   /** The trooper's rifle (enemies.md). */

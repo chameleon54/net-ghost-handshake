@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
-import { squadConfig } from '../src/config/squad';
+import { squadConfig, squadConfigDefaults } from '../src/config/squad';
 import { noiseConfig } from '../src/config/noise';
 import { roleConfig, roles, type Role } from '../src/config/roles';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
@@ -66,6 +66,9 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     advanceOvers: 0,
     /** Whether a wall is between any noise and its ears. */
     wallBetween: false,
+    /** Which peeks' guns can reach Rook's cover (way, side); all by default. And whether its own cover blocks its gun. */
+    coverShotFrom: null as ((way: number, side: number) => boolean) | null,
+    muzzleClear: true,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -116,6 +119,8 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     suppressOver: () => world.suppressOvers++,
     advanceOver: () => world.advanceOvers++,
     noiseBlocked: () => world.wallBetween,
+    coverShotClear: (_e, _point, way, side) => (world.coverShotFrom ? world.coverShotFrom(way, side) : true),
+    muzzleClear: () => world.muzzleClear,
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -703,6 +708,69 @@ describe('StandInEnemy repositioning and the heavy on the move (decision 237)', 
     trooper.enemy.beginAdvance(next);
     trooper.run(far, 1.5);
     expect(trooper.shots).toHaveLength(0); // the others do not fire while they move
+  });
+});
+
+describe('StandInEnemy: no walk in the open, no rounds into its own cover (decision 239)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const next: CoverPoint = { xM: 5, zM: -3, height: 'low', facingYawRad: Math.PI };
+  const far = new Vector3(0, 0, 10);
+  const outSec = standInConfig.tellSec + standInConfig.peekOutSec;
+  /** A stand-in holding `spot` (roll 0.99: a random pick takes the last choice), Rook hidden from it. */
+  const holding = () => {
+    const s = setup();
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(far, 1.5);
+    expect(s.enemy.state).toBe('cover');
+    s.shots.length = 0;
+    return s;
+  };
+
+  it('an advance whose spot stops hiding it is dropped, and it takes cover from where it is', () => {
+    const { enemy, world, run } = holding();
+    enemy.beginAdvance(next);
+    run(far, 0.2);
+    expect(enemy.state).toBe('advance');
+    world.coverHides = false; // Rook moved
+    run(far, standInConfig.coverCheckIntervalSec + 0.05);
+    expect(enemy.state).not.toBe('advance');
+    expect(world.advanceOvers).toBe(1);
+  });
+
+  it('a suppressor comes out where its gun reaches the edge of his cover, or pins the other edge', () => {
+    const rising = holding();
+    rising.world.coverShotFrom = (way) => way === 0; // only rising over the cover reaches it
+    const before = rising.enemy.feet.clone();
+    rising.enemy.beginSuppress();
+    rising.run(far, outSec + 0.1);
+    expect(rising.enemy.peekOut).toBe(1);
+    expect(rising.enemy.feet.distanceTo(before)).toBeLessThan(0.01); // rose, no side step
+
+    const other = holding();
+    other.world.coverShotFrom = (way, side) => way === 1 && side === -1;
+    other.enemy.beginSuppress(); // roll 0.99: it meant to pin edge 1
+    other.run(far, outSec + 0.1);
+    expect(other.enemy.suppressSideSign).toBe(-1);
+    expect(other.enemy.feet.x).toBeLessThan(spot.xM - 0.5); // stepped out its right (west, facing south)
+  });
+
+  it('with its own cover in the way it never fires: a peek goes back in, and seeing Rook from cover it peeks instead', () => {
+    const peek = holding();
+    peek.world.muzzleClear = false;
+    peek.enemy.beginSuppress();
+    peek.run(far, outSec + 0.5);
+    expect(peek.shots).toHaveLength(0);
+    expect(peek.enemy.isSuppressing).toBe(false);
+
+    const seeing = holding();
+    seeing.world.muzzleClear = false;
+    seeing.world.sees = true;
+    seeing.world.tells.length = 0;
+    seeing.run(far, standInConfig.peekHoldMaxSec + 0.5);
+    expect(seeing.shots).toHaveLength(0);
+    expect(seeing.world.tells.length).toBeGreaterThan(0);
   });
 });
 
@@ -1557,10 +1625,10 @@ describe('StandInWorld', () => {
 });
 
 describe('StandInWorld choosing where to move up to (4.9)', () => {
-  // Rook at (0, 4). The stand-in starts 8 m north of him, at (0, -4). A crate 3.5 m north of him has a spot on its far
-  // side (4.45 m from him: closer, and hidden); a crate beside him has a spot too close to him.
-  const nearCrate: RoomBox = { kind: 'prop', xM: 0, zM: 0.5, widthM: 1, depthM: 1, heightM: 1 };
-  const nearSpot: CoverPoint = { xM: 0, zM: -0.45, height: 'low', facingYawRad: Math.PI };
+  // Rook at (0, 4). The stand-in starts 8 m north of him, at (0, -4). A crate 5 m north of him has a spot on its far
+  // side (5.95 m from him: closer, and hidden); a crate beside him has a spot too close to him.
+  const nearCrate: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 1, depthM: 1, heightM: 1 };
+  const nearSpot: CoverPoint = { xM: 0, zM: -1.95, height: 'low', facingYawRad: Math.PI };
   const tooCloseCrate: RoomBox = { kind: 'prop', xM: 2, zM: 3, widthM: 1, depthM: 1, heightM: 1 };
   const tooCloseSpot: CoverPoint = { xM: 2, zM: 2.05, height: 'low', facingYawRad: Math.PI };
 
@@ -1574,6 +1642,51 @@ describe('StandInWorld choosing where to move up to (4.9)', () => {
   it('picks a hiding spot at least the gain closer to Rook, but not one too close to him', async () => {
     expect((await plan([nearSpot, tooCloseSpot]))?.point).toBe(nearSpot);
     expect(await plan([tooCloseSpot])).toBeNull();
+  });
+
+  it('not a spot whose route is too long in his view, even under covering fire (decision 239)', async () => {
+    // Rook at (0, 5); the stand-in far off to the side at (7.5, -5.5) walks about 8 m across open floor to the spot.
+    const level = buildGreybox([nearCrate]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([nearSpot], level.collision), rookAt(0, 5), () => {});
+    const enemy = new StandInEnemy({ xM: 7.5, zM: -5.5, yawRad: Math.PI }, world);
+    expect(world.planAdvance(enemy)).toBeNull();
+    squadConfig.moveMaxExposedM = 30;
+    try {
+      expect(world.planAdvance(enemy)?.point).toBe(nearSpot);
+    } finally {
+      squadConfig.moveMaxExposedM = squadConfigDefaults.moveMaxExposedM;
+    }
+  });
+});
+
+describe('StandInWorld: shots from the gun, not the eyes (decision 239)', () => {
+  // A long 1 m bench between the stand-in and Rook at (0, 5). Its spot is behind the bench; both side steps stay behind it.
+  const bench: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 4, depthM: 1, heightM: 1 };
+  const spot: CoverPoint = { xM: 1, zM: -1.95, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const setupBench = async () => {
+    const level = buildGreybox([bench]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([spot], level.collision), rookAt(0, 5), () => {});
+    const enemy = new StandInEnemy({ xM: spot.xM, zM: spot.zM, yawRad: Math.PI }, world);
+    enemy.knowsWhere = true;
+    enemy.lastKnown.set(0, 0, 5);
+    return { world, enemy };
+  };
+
+  it('rising over the bench reaches his cover; a crouched side step would fire into the bench', async () => {
+    const { world, enemy } = await setupBench();
+    expect(world.coverShotClear(enemy, spot, 0, 1)).toBe(true);
+    expect(world.coverShotClear(enemy, spot, 1, 1)).toBe(false);
+    expect(world.coverShotClear(enemy, spot, -1, -1)).toBe(false);
+  });
+
+  it('crouched behind the bench its muzzle is blocked; standing, it is clear', async () => {
+    const { world, enemy } = await setupBench();
+    enemy.crouched = true;
+    expect(world.muzzleClear(enemy, 'hit')).toBe(false);
+    enemy.crouched = false;
+    expect(world.muzzleClear(enemy, 'hit')).toBe(true);
   });
 });
 

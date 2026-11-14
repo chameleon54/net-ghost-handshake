@@ -38,8 +38,10 @@ export const squadConfigDefaults = {
   playRetrySec: 2,
   /** An advance spot is at least this much closer to Rook than where the advancer is... */
   advanceMinGainM: 2,
-  /** ...and no closer to him than this. */
-  advanceClosestM: 3,
+  /** ...and no closer to him than this (a reposition spot too, decision 239). */
+  advanceClosestM: 5,
+  /** An advance or reposition route may have at most this much in Rook's view, even under covering fire (decision 239). */
+  moveMaxExposedM: 6,
   /** Suppressing fire: rounds per burst, and the pause between bursts. */
   suppressBurstRounds: 8,
   suppressBurstPauseSec: 0.6,
