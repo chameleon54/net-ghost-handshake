@@ -46,6 +46,7 @@ export const soundNames = [
   'climb',
   'land-soft',
   'land-hard',
+  'enemy-peek-tell',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -389,6 +390,18 @@ export const recipes: Record<SoundName, Recipe> = {
       addTone(s, sr, { duration: 3, freq: 4200, decay: 1.2, gain: 0.5, attack: 0.05 });
       addTone(s, sr, { duration: 3, freq: 6100, decay: 0.8, gain: 0.15, attack: 0.05 });
       return finish(s, sr, { peak: 0.3 });
+    },
+  },
+  // An enemy about to peek out of cover (4.4): a quick rattle of gear and a scuff of cloth, the warning before it fires.
+  'enemy-peek-tell': {
+    group: 'handling',
+    variants: 2,
+    make: (sr, rng, variant) => {
+      const s = createSamples(sr, 0.35);
+      addNoise(s, sr, { duration: 0.22, decay: 0.1, gain: 0.45, highpass: 1200, lowpass: 5000, attack: 0.02, rng });
+      metalClick(s, sr, rng, 0.04, 0.5, 2600 + variant * 300);
+      metalClick(s, sr, rng, 0.11, 0.35, 3100 - variant * 200);
+      return finish(s, sr, { peak: 0.5 });
     },
   },
   // A heal item opened: a snap of the cap, then a soft hiss of the dose going in.

@@ -24,6 +24,20 @@ export const standInConfigDefaults = {
   retreatSpeedShare: 0.6,
   /** And its hit chance is this share of the usual while it moves. */
   retreatHitChanceShare: 0.5,
+  /** Peeks (4.4): in cover it holds between these many seconds (random each time) before peeking out. */
+  peekHoldMinSec: 2.5,
+  peekHoldMaxSec: 4.5,
+  /** The tell before it comes out: a short wind-up movement and a sound, so the player can react. */
+  tellSec: 0.5,
+  /** How far out it moves during the tell, as a share of the whole peek. */
+  tellShare: 0.2,
+  /** Time to come out (rise over low cover, step past an edge of high cover), and to go back in. */
+  peekOutSec: 0.25,
+  peekBackSec: 0.25,
+  /** How far it steps sideways out of high cover. */
+  peekStepM: 0.6,
+  /** Chance that a peek which finds Rook hidden fires its burst at his cover anyway, for pressure (decision 207). */
+  hiddenFireChance: 0.5,
   /** How often it checks whether it can see Rook (perception does not run every update). */
   sightChecksPerSec: 5,
   /** Pause after it first gets sight before the first burst. */

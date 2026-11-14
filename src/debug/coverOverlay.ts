@@ -5,25 +5,29 @@ import type { CoverPoints } from '../level/cover';
 const hidesColour = 0x2fd06a;
 const exposedColour = 0xe0453a;
 const chosenColour = 0xffe14a;
+const sideColour = 0xffffff;
 const postRadiusM = 0.05;
 const lowPostM = 0.5;
 const highPostM = 1.2;
 const arrowLengthM = 0.25;
 const arrowRadiusM = 0.08;
+const sideTickM = { length: 0.3, thickness: 0.04 } as const; // a bar toward each open side of high cover (4.4)
 const ringInnerM = 0.3;
 const ringOuterM = 0.38;
 const liftM = 0.03; // above the floor and its grid, so the ring does not flicker
 const checksPerSec = 5; // the "hides from you" colours are rays, so they are not redone every frame
 
-// Dev-only overlay for 4.3 (architecture.md, "debug overlays"): a post at each cover point, short for low cover and tall for
-// high, with an arrow toward the cover. Green: it hides a body from you right now. Red: it does not. A yellow ring marks
-// the spot the stand-in has chosen. Hidden until the dev panel tick shows it.
+// Dev-only overlay for 4.3 and 4.4 (architecture.md, "debug overlays"): a post at each cover point, short for low cover and
+// tall for high, with an arrow toward the cover and, on high cover, a white bar toward each side a peek can step out to.
+// Green: it hides a body from you right now. Red: it does not. A yellow ring marks the spot the stand-in has chosen.
+// Hidden until the dev panel tick shows it.
 export class CoverOverlay {
   private readonly group = new THREE.Group();
   private readonly posts: THREE.Mesh[] = [];
   private readonly ring: THREE.Mesh;
   private readonly hidesMaterial = new THREE.MeshBasicMaterial({ color: hidesColour });
   private readonly exposedMaterial = new THREE.MeshBasicMaterial({ color: exposedColour });
+  private readonly sideMaterial = new THREE.MeshBasicMaterial({ color: sideColour });
   private timerSec = 0;
 
   constructor(
@@ -37,12 +41,19 @@ export class CoverOverlay {
     const highPost = new THREE.CylinderGeometry(postRadiusM, postRadiusM, highPostM).translate(0, highPostM / 2, 0);
     // The arrow points along -z in its own space (yaw 0 = north), so turning the marker by the spot's yaw aims it at the cover.
     const arrow = new THREE.ConeGeometry(arrowRadiusM, arrowLengthM).rotateX(-Math.PI / 2);
+    const sideBar = new THREE.BoxGeometry(sideTickM.length, sideTickM.thickness, sideTickM.thickness);
     for (const point of cover.points) {
       const postHeightM = point.height === 'low' ? lowPostM : highPostM;
       const post = new THREE.Mesh(point.height === 'low' ? lowPost : highPost, this.exposedMaterial);
       const tip = new THREE.Mesh(arrow, this.exposedMaterial);
       tip.position.set(0, postHeightM, -arrowLengthM / 2);
       post.add(tip);
+      // In the marker's own space +x is the right-hand side when facing the cover.
+      for (const sign of point.lean === 'left' ? [-1] : point.lean === 'right' ? [1] : point.lean === 'both' ? [1, -1] : []) {
+        const bar = new THREE.Mesh(sideBar, this.sideMaterial);
+        bar.position.set((sign * sideTickM.length) / 2, postHeightM, 0);
+        post.add(bar);
+      }
       post.position.set(point.xM, 0, point.zM);
       post.rotation.y = point.facingYawRad;
       this.posts.push(post);

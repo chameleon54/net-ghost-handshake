@@ -13,6 +13,8 @@ export interface CoverPoint {
   readonly height: 'low' | 'high';
   /** Points from the spot toward the cover: the direction it protects from. 0 = north (-z), like the player's yaw. */
   readonly facingYawRad: number;
+  /** High cover only: which sides a peek can step out from, as seen facing the cover (4.4). */
+  readonly lean?: 'left' | 'right' | 'both';
 }
 
 /** Something that can claim a spot (an enemy). */

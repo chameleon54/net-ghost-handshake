@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
 import { EventBus } from '../src/core/events';
-import { StandInEnemy, type StandInHooks } from '../src/enemies/standInEnemy';
+import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
 import { StandInWorld } from '../src/enemies/standInWorld';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { buildGreybox } from '../src/level/greybox';
@@ -23,12 +23,26 @@ function setup(roll = 0.99) {
    * `route` (if set) replaces the straight line the fake navigation gives: the points after the start. `cover` is what
    * the fake cover service offers (none by default, so it behaves as in 4.1), and `coverHides` whether that spot still hides it.
    */
-  const world = { sees: true, clockSec: 0, route: null as Vector3[] | null, cover: null as CoverPoint | null, coverHides: true, releases: 0 };
-  const shots: { atSec: number; hits: boolean }[] = [];
+  const world = {
+    sees: true,
+    clockSec: 0,
+    route: null as Vector3[] | null,
+    cover: null as CoverPoint | null,
+    coverHides: true,
+    releases: 0,
+    /** Rook can be seen once the stand-in is fully out of its cover (a peek), even while `sees` is false. */
+    seenWhenOut: false,
+    /** Which peek positions see Rook (for choosing a side); by default the same as `sees`. */
+    seesFrom: null as ((eyes: Vector3) => boolean) | null,
+    tells: [] as number[],
+  };
+  const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
-    canSeePlayer: () => world.sees,
+    canSeePlayer: (e) => world.sees || (world.seenWhenOut && e.peekOut >= 1),
     pushOut: () => {},
-    fire: (_enemy, hits) => shots.push({ atSec: world.clockSec, hits }),
+    fire: (_enemy, shot) => shots.push({ atSec: world.clockSec, hits: shot === 'hit', shot }),
+    seesPlayerFrom: (eyes) => (world.seesFrom ? world.seesFrom(eyes) : world.sees),
+    peekTell: () => world.tells.push(world.clockSec),
     findPath: (from, to, out) => {
       out.length = 0;
       out.push(from.clone(), ...(world.route ?? [to]).map((p) => p.clone()));
@@ -404,6 +418,94 @@ describe('StandInEnemy fighting back (4.3 follow-up)', () => {
   });
 });
 
+describe('StandInEnemy peeking from cover (4.4)', () => {
+  const lowSpot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI }; // the cover is to its south, toward Rook
+  const highSpot: CoverPoint = { xM: 0, zM: -3, height: 'high', facingYawRad: Math.PI, lean: 'both' };
+  const rook = new Vector3(0, 0, 10); // 13 m south: beyond the stand-ground range
+
+  /** A stand-in that has walked to `spot` and is holding there, hidden. `roll` is every random number it draws. */
+  function holding(spot: CoverPoint, roll = 0.99) {
+    const s = setup(roll);
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(rook, 1.5);
+    expect(s.enemy.state).toBe('cover');
+    s.world.tells.length = 0;
+    s.shots.length = 0;
+    s.world.clockSec = 0;
+    return s;
+  }
+  const holdSec = (roll: number) => standInConfig.peekHoldMinSec + roll * (standInConfig.peekHoldMaxSec - standInConfig.peekHoldMinSec);
+  /** Runs one update at a time until `done` is true (or 10 s pass). */
+  const runUntil = (run: (p: Vector3, s: number) => void, player: Vector3, done: () => boolean) => {
+    for (let i = 0; i < 10 / dtSec && !done(); i++) run(player, dtSec);
+  };
+
+  it('holds, gives a tell, comes out, fires one burst at Rook, and goes back in', () => {
+    const { enemy, world, shots, run } = holding(lowSpot);
+    world.seenWhenOut = true;
+    const { tellSec, peekOutSec, peekBackSec, burstRounds, roundIntervalSec } = standInConfig;
+    run(rook, holdSec(0.99) + tellSec + peekOutSec + burstRounds * roundIntervalSec + peekBackSec + 0.2);
+    expect(world.tells).toHaveLength(1);
+    expect(world.tells[0]).toBeGreaterThan(holdSec(0.99) - 1.6); // after the hold (it arrived during the first 1.5 s)
+    expect(shots).toHaveLength(burstRounds);
+    expect(shots.every((s) => s.shot !== 'cover')).toBe(true); // aimed at Rook, who could be seen
+    expect(shots[0].atSec - world.tells[0]).toBeGreaterThanOrEqual(tellSec + peekOutSec - 2 * dtSec); // the tell comes first
+    expect(enemy.peekOut).toBe(0); // back in
+    expect(enemy.state).toBe('cover');
+  });
+
+  it('rises over low cover while out, and is crouched again when back', () => {
+    const { enemy, world, run } = holding(lowSpot);
+    world.seenWhenOut = true;
+    expect(enemy.heightM).toBe(standInConfig.crouchHeightM);
+    runUntil(run, rook, () => enemy.peekOut >= 1);
+    expect(enemy.peekOut).toBe(1);
+    expect(enemy.heightM).toBeCloseTo(dummyConfig.heightM, 5);
+    expect(enemy.feet.x).toBeCloseTo(0, 5); // it rises in place
+    run(rook, 2);
+    expect(enemy.heightM).toBe(standInConfig.crouchHeightM);
+  });
+
+  it('steps out of high cover to the open side that lets it see Rook, and back to its spot', () => {
+    const { enemy, world, run } = holding(highSpot);
+    world.seesFrom = (eyes) => eyes.x > 0; // only the east side sees him
+    runUntil(run, rook, () => enemy.peekOut >= 1);
+    expect(enemy.peekOut).toBe(1);
+    expect(enemy.feet.x).toBeCloseTo(standInConfig.peekStepM, 5); // facing south, east is its left: it chose the side that sees
+    expect(enemy.feet.z).toBeCloseTo(-3, 5);
+    run(rook, 2);
+    expect(enemy.feet.x).toBeCloseTo(0, 5);
+  });
+
+  it('a peek that finds Rook hidden fires at his cover when the chance comes up, and only looks when it does not', () => {
+    const lucky = holding(lowSpot, standInConfig.hiddenFireChance / 2); // every roll below the chance
+    lucky.run(rook, holdSec(standInConfig.hiddenFireChance / 2) + 2);
+    expect(lucky.shots.length).toBe(standInConfig.burstRounds);
+    expect(lucky.shots.every((s) => s.shot === 'cover')).toBe(true);
+    const unlucky = holding(lowSpot, 0.99); // every roll above it
+    unlucky.run(rook, holdSec(0.99) + 2);
+    expect(unlucky.world.tells).toHaveLength(1); // it did peek
+    expect(unlucky.shots).toHaveLength(0);
+  });
+
+  it('peeks again after another hold', () => {
+    const { world, run } = holding(lowSpot);
+    run(rook, 2 * (holdSec(0.99) + 1.5));
+    expect(world.tells).toHaveLength(2);
+  });
+
+  it('up close the fight rule still wins: a peek that sees Rook within range turns into a fight', () => {
+    const { enemy, world, run } = holding(lowSpot);
+    world.seenWhenOut = true;
+    const near = new Vector3(0, 0, 2); // 5 m south
+    runUntil(run, near, () => enemy.peekOut >= 1);
+    run(near, 2 * dtSec);
+    expect(enemy.state).toBe('fight');
+  });
+});
+
 describe('StandInWorld', () => {
   let navigation: Navigation;
   beforeAll(async () => {
@@ -434,7 +536,7 @@ describe('StandInWorld', () => {
 
   it('a hit hurts the player and lands on his chest; the shot is marked as an enemy shot', () => {
     const { world, enemy, damage, landed, fired } = setupWorld([backWall]);
-    world.fire(enemy, true);
+    world.fire(enemy, 'hit');
     expect(damage).toEqual([standInConfig.damagePerHit]);
     expect(landed[0].shooter).toBe('enemy');
     expect(landed[0].hit).toBe(false); // no bullet mark on the player
@@ -442,12 +544,21 @@ describe('StandInWorld', () => {
     expect(fired[0].z).toBeCloseTo(-8 + standInConfig.muzzleForwardM, 5); // the muzzle is in front of it, toward him
   });
 
+  it('a shot at his cover aims straight at his chest and strikes what hides him, without hurting him', () => {
+    const { world, enemy, damage, landed } = setupWorld([{ kind: 'wall', xM: 0, zM: -1, widthM: 4, depthM: 0.3, heightM: 3 }]);
+    world.fire(enemy, 'cover');
+    expect(damage).toHaveLength(0);
+    expect(landed[0].hit).toBe(true);
+    expect(landed[0].end.z).toBeCloseTo(-1.15, 2); // the face of the wall that hides him
+    expect(Math.abs(landed[0].end.x)).toBeLessThan(0.01); // straight at him, no offset
+  });
+
   it('a miss never hurts, passes 0.3 to 1.5 m from his chest, and ends on what is behind him', () => {
     const { world, enemy, damage, landed } = setupWorld([backWall]);
     const chest = new Vector3(0, 1.6 * standInConfig.aimHeightShareOfEyes, 0);
     const toChest = new Vector3();
     const direction = new Vector3();
-    for (let i = 0; i < 200; i++) world.fire(enemy, false);
+    for (let i = 0; i < 200; i++) world.fire(enemy, 'miss');
     expect(damage).toHaveLength(0);
     for (const shot of landed) {
       direction.subVectors(shot.end, shot.muzzle).normalize();

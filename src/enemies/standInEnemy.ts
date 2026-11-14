@@ -14,6 +14,12 @@ import type { Target } from './target';
  */
 export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'falling' | 'down';
 
+/** A round's outcome, decided when it is fired: it hits Rook, misses near him, or is fired at his cover while he is hidden. */
+export type StandInShot = 'hit' | 'miss' | 'cover';
+
+/** Where a peek from cover is: holding, the tell, coming out, firing, going back in (4.4). */
+type PeekPhase = 'hold' | 'tell' | 'out' | 'fire' | 'back';
+
 /** How the stand-in touches the world. The game gives it real rays, navigation and cover; tests give it fakes. */
 export interface StandInHooks {
   /** True if nothing solid is between its eyes and Rook. */
@@ -22,8 +28,12 @@ export interface StandInHooks {
   pushOut(feet: Vector3): void;
   /** A walkable route from `from` to `to`, written into `out` (the first point is the start). Leaves `out` empty if there is none. */
   findPath(from: Vector3, to: Vector3, out: Vector3[]): boolean;
-  /** One round leaves its gun; `hits` says whether it lands on Rook (decided here, at the moment of firing). */
-  fire(enemy: StandInEnemy, hits: boolean): void;
+  /** One round leaves its gun, with its outcome already decided (at the moment of firing). */
+  fire(enemy: StandInEnemy, shot: StandInShot): void;
+  /** True if Rook can be seen from eyes at `eyes` (used to pick the side a peek steps out to). */
+  seesPlayerFrom(eyes: Vector3): boolean;
+  /** It is about to peek out: the tell's sound plays from where it is. */
+  peekTell(enemy: StandInEnemy): void;
   /** The best free cover spot that hides it from Rook, claimed for it (its old one let go), or null if none hides it. */
   pickCover(enemy: StandInEnemy): CoverPoint | null;
   /** True if this spot still hides a body from Rook where he is now. */
@@ -36,10 +46,12 @@ const degToRad = Math.PI / 180;
 
 // A temporary enemy (milestone 4.1, decision 197), growing step by step into the real one. It starts idle, wakes on a
 // noise it hears or a hit, and from then on always knows where Rook is. It follows routes on the navigation mesh (4.2).
-// Since 4.3 it goes to the best cover that hides it from Rook and holds there, crouched behind low cover. It does not run
-// from a fight (decisions 209 and 210): seen up close, it stands and fires, then backs off to new cover still firing; if
-// its cover fails at range it answers with a burst before moving. Peeking out to fire is 4.4. If no cover hides it, it
-// falls back to heading for Rook and firing when it sees him. No drawing code here.
+// Since 4.3 it goes to the best cover that hides it from Rook and holds there, crouched behind low cover. Since 4.4 it
+// peeks from there every few seconds: a tell (a small movement and a sound), then it rises over low cover or steps past
+// the edge of high cover, fires a burst, and goes back in; a peek that finds Rook hidden may fire at his cover anyway. It
+// does not run from a fight (decisions 209 and 210): seen up close, it stands and fires, then backs off to new cover still
+// firing; if its cover fails at range it answers with a burst before moving. If no cover hides it, it falls back to
+// heading for Rook and firing when it sees him. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -71,6 +83,16 @@ export class StandInEnemy implements Target {
   private coverPoint: CoverPoint | null = null;
   private coverTimerSec = 0;
   private readonly coverSpot = new Vector3();
+  private peekPhase: PeekPhase = 'hold';
+  private peekTimerSec = 0;
+  /** How far out it is: 0 hidden at its spot, 1 fully out. */
+  private peekShare = 0;
+  /** The way a peek from high cover steps (a unit vector across the cover), or zero for low cover, which rises instead. */
+  private readonly peekSide = new Vector3();
+  /** What this peek does once out: fire at Rook, fire at his cover, or just look. */
+  private peekMode: 'aimed' | 'cover' | 'look' = 'look';
+  private peekRounds = 0;
+  private readonly peekEyes = new Vector3();
 
   constructor(
     private readonly spawn: { readonly xM: number; readonly zM: number; readonly yawRad: number },
@@ -89,15 +111,26 @@ export class StandInEnemy implements Target {
   }
 
   get heightM(): number {
-    return this.crouched ? standInConfig.crouchHeightM : dummyConfig.heightM;
+    return this.crouchedOr(standInConfig.crouchHeightM, dummyConfig.heightM);
   }
 
   get eyeHeightNowM(): number {
-    return this.crouched ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
+    return this.crouchedOr(standInConfig.crouchEyeHeightM, standInConfig.eyeHeightM);
   }
 
   get muzzleHeightNowM(): number {
-    return this.crouched ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM;
+    return this.crouchedOr(standInConfig.crouchMuzzleHeightM, standInConfig.muzzleHeightM);
+  }
+
+  /** How far out of its cover it is during a peek: 0 hidden, 1 fully out. */
+  get peekOut(): number {
+    return this.peekShare;
+  }
+
+  /** A crouched value, or the standing one; crouched behind low cover, a peek rises from one to the other. */
+  private crouchedOr(crouchedValue: number, standingValue: number): number {
+    if (!this.crouched) return standingValue;
+    return crouchedValue + (standingValue - crouchedValue) * this.peekShare;
   }
 
   /** The cover spot it holds or is walking to, or null. */
@@ -207,20 +240,17 @@ export class StandInEnemy implements Target {
     }
 
     if (this.coverPoint) {
+      // Once it holds a spot it stays holding (a peek moves it off the spot and back) until it picks another.
       const toCoverM = Math.hypot(this.coverSpot.x - this.feet.x, this.coverSpot.z - this.feet.z);
-      if (toCoverM > standInConfig.coverArriveM) {
+      if (this.state !== 'cover' && toCoverM > standInConfig.coverArriveM) {
         this.startWalking();
         this.walkRoute(dtSec, this.coverSpot);
         return;
       }
-      // At its spot: crouch behind low cover, face the cover, and fire only if it can see Rook from here.
+      // At its spot: crouch behind low cover, hold, and peek out every so often.
       this.setState('cover');
       this.crouched = this.coverPoint.height === 'low';
-      if (this.seesPlayer) this.engage(dtSec, dx, dz, standInConfig.hitChance);
-      else {
-        this.engaged = false;
-        this.turnToward(-Math.sin(this.coverPoint.facingYawRad), -Math.cos(this.coverPoint.facingYawRad), dtSec);
-      }
+      this.holdAndPeek(dtSec, this.coverPoint, dx, dz);
       return;
     }
 
@@ -249,7 +279,9 @@ export class StandInEnemy implements Target {
       return;
     }
     const next = this.hooks.pickCover(this);
-    if (next !== this.coverPoint) this.setCover(next);
+    if (next === this.coverPoint) return;
+    this.setCover(next);
+    if (this.state === 'cover') this.startWalking(); // off to the new spot
   }
 
   private setCover(next: CoverPoint | null): void {
@@ -313,6 +345,116 @@ export class StandInEnemy implements Target {
     this.startWalking();
   }
 
+  /**
+   * At its cover spot. It holds, facing the cover (firing if it can see Rook from here), then peeks: the tell, out, a
+   * burst, back in (4.4). Its body moves with the peek, so its hit zones go out and come back with it.
+   */
+  private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
+    if (this.peekPhase === 'hold') {
+      if (this.seesPlayer) {
+        this.engage(dtSec, dx, dz, standInConfig.hitChance);
+        return;
+      }
+      this.engaged = false;
+      this.turnToward(-Math.sin(point.facingYawRad), -Math.cos(point.facingYawRad), dtSec);
+      this.peekTimerSec -= dtSec;
+      if (this.peekTimerSec <= 0) this.startTell(point);
+      return;
+    }
+    this.peekTimerSec -= dtSec;
+    if (this.peekPhase === 'fire') {
+      this.peekFire(dtSec, dx, dz);
+      return;
+    }
+    this.turnToward(dx, dz, dtSec); // it faces Rook as it comes out
+    if (this.peekPhase === 'tell') {
+      this.setPeekShare(point, standInConfig.tellShare * progressOf(this.peekTimerSec, standInConfig.tellSec));
+      if (this.peekTimerSec <= 0) {
+        this.peekPhase = 'out';
+        this.peekTimerSec = standInConfig.peekOutSec;
+      }
+    } else if (this.peekPhase === 'out') {
+      const share = progressOf(this.peekTimerSec, standInConfig.peekOutSec);
+      this.setPeekShare(point, standInConfig.tellShare + (1 - standInConfig.tellShare) * share);
+      if (this.peekTimerSec <= 0) this.startPeekFire();
+    } else {
+      this.setPeekShare(point, 1 - progressOf(this.peekTimerSec, standInConfig.peekBackSec));
+      if (this.peekTimerSec <= 0) this.resetPeek();
+    }
+  }
+
+  /** The tell: picks the side to come out on, warns with a sound, and starts to move. */
+  private startTell(point: CoverPoint): void {
+    this.peekSide.set(0, 0, 0);
+    if (point.height === 'high') {
+      const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
+      const rightZ = -Math.sin(point.facingYawRad);
+      const sides = point.lean === 'left' ? [-1] : point.lean === 'right' ? [1] : [1, -1];
+      // Prefer a side that lets it see Rook; otherwise any open side.
+      let chosen = sides[Math.floor(this.random() * sides.length) % sides.length];
+      for (const sign of sides) {
+        this.peekEyes.set(this.coverSpot.x + sign * rightX * standInConfig.peekStepM, standInConfig.eyeHeightM, this.coverSpot.z + sign * rightZ * standInConfig.peekStepM);
+        if (this.hooks.seesPlayerFrom(this.peekEyes)) {
+          chosen = sign;
+          break;
+        }
+      }
+      this.peekSide.set(chosen * rightX, 0, chosen * rightZ);
+    }
+    this.hooks.peekTell(this);
+    this.peekPhase = 'tell';
+    this.peekTimerSec = standInConfig.tellSec;
+  }
+
+  /** Fully out: it looks once, then fires at Rook if it sees him, at his cover by chance if not, or only looks. */
+  private startPeekFire(): void {
+    this.peekPhase = 'fire';
+    this.seesPlayer = this.hooks.canSeePlayer(this);
+    this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
+    this.peekMode = this.seesPlayer ? 'aimed' : this.random() < standInConfig.hiddenFireChance ? 'cover' : 'look';
+    this.peekRounds = 0;
+    this.cooldownSec = 0; // the tell was the warning: no extra reaction pause
+    this.peekTimerSec = standInConfig.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
+  }
+
+  /** Out of cover: fires one burst (or looks for as long as one would take), then goes back in. */
+  private peekFire(dtSec: number, dx: number, dz: number): void {
+    const facingErrorRad = this.turnToward(dx, dz, dtSec);
+    if (this.peekMode === 'look') {
+      if (this.peekTimerSec <= 0) this.startPeekBack();
+      return;
+    }
+    if (facingErrorRad > standInConfig.aimToleranceDeg * degToRad) return;
+    this.cooldownSec -= dtSec;
+    if (this.cooldownSec > 0) return;
+    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.rollHit(standInConfig.hitChance) ? 'hit' : 'miss');
+    this.peekRounds++;
+    this.cooldownSec += standInConfig.roundIntervalSec;
+    if (this.peekRounds >= standInConfig.burstRounds) this.startPeekBack();
+  }
+
+  private startPeekBack(): void {
+    this.peekPhase = 'back';
+    this.peekTimerSec = standInConfig.peekBackSec;
+  }
+
+  /** Back to holding, for a random while. */
+  private resetPeek(): void {
+    this.peekPhase = 'hold';
+    this.peekShare = 0;
+    const { peekHoldMinSec, peekHoldMaxSec } = standInConfig;
+    this.peekTimerSec = peekHoldMinSec + this.random() * Math.max(peekHoldMaxSec - peekHoldMinSec, 0);
+  }
+
+  /** How far out it is. Low cover: it rises. High cover: its feet move from the spot toward the open side. */
+  private setPeekShare(point: CoverPoint, share: number): void {
+    this.peekShare = share;
+    if (point.height === 'low') return; // rising is read through `crouchedOr`
+    const stepM = standInConfig.peekStepM * share;
+    this.feet.x = this.coverSpot.x + this.peekSide.x * stepM;
+    this.feet.z = this.coverSpot.z + this.peekSide.z * stepM;
+  }
+
   /** Turns to Rook and fires bursts with `hitChance` per round, after the reaction pause the first time it sees him. */
   private engage(dtSec: number, dx: number, dz: number, hitChance: number): void {
     if (!this.engaged) {
@@ -370,13 +512,18 @@ export class StandInEnemy implements Target {
     this.feet.y = 0;
   }
 
-  private shoot(dtSec: number, hitChance: number): void {
-    this.cooldownSec -= dtSec;
-    if (this.cooldownSec > 0) return;
+  /** Whether a round aimed at Rook hits: the chance, and the hit budget. */
+  private rollHit(hitChance: number): boolean {
     // shortcut: the hit budget is kept per enemy; the squad coordinator (4.6) shares it across every enemy.
     const hits = this.random() < hitChance && this.sinceHitSec >= standInConfig.hitGapSec;
     if (hits) this.sinceHitSec = 0;
-    this.hooks.fire(this, hits);
+    return hits;
+  }
+
+  private shoot(dtSec: number, hitChance: number): void {
+    this.cooldownSec -= dtSec;
+    if (this.cooldownSec > 0) return;
+    this.hooks.fire(this, this.rollHit(hitChance) ? 'hit' : 'miss');
     this.roundsInBurst++;
     if (this.roundsInBurst >= standInConfig.burstRounds) {
       this.roundsInBurst = 0;
@@ -433,5 +580,11 @@ export class StandInEnemy implements Target {
     if (this.state === state) return;
     this.state = state;
     this.stateSec = 0;
+    this.resetPeek(); // a peek only lives inside one stay in cover
   }
+}
+
+/** How far through a timed step it is, 0 to 1, from the time left. A step of no length is done at once. */
+function progressOf(timeLeftSec: number, totalSec: number): number {
+  return totalSec > 0 ? 1 - Math.max(timeLeftSec, 0) / totalSec : 1;
 }

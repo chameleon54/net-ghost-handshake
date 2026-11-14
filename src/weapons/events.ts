@@ -54,6 +54,8 @@ export type WeaponEvents = {
   'shot:landed': ShotLanded;
   /** An enemy fired a round from its muzzle at `position` (a reused vector). For its gunshot sound. */
   'enemy:fired': { position: Vector3 };
+  /** An enemy is about to peek out of cover (the tell, 4.4): a sound from `position` (a reused vector) warns the player. */
+  'enemy:peek-tell': { position: Vector3 };
   /** A weapon hit a target. Hit markers (and later sound) listen. */
   'target:hit': { zone: HitZone; killed: boolean; weapon: WeaponId | 'grenade' };
   /** The player made a sound enemies could hear, at `position`, carrying `radiusM`. Enemy hearing (4.10) listens to this. */
