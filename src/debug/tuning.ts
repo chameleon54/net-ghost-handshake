@@ -12,6 +12,7 @@ import type { NoiseConfig } from '../config/noise';
 import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
 import type { StandInConfig } from '../config/standInEnemy';
+import type { CoverConfig } from '../config/cover';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -45,6 +46,7 @@ type HealthKey = keyof HealthConfig;
 type MovementKey = keyof MovementConfig;
 type HealthFxKey = keyof HealthFxConfig;
 type StandInKey = keyof StandInConfig;
+type CoverKey = keyof CoverConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -399,6 +401,7 @@ export const grenadeFolder: Folder<GrenadeKey> = {
     { key: 'damageAtCentre', label: 'Damage at the centre', min: 1, max: 500, step: 5 },
     { key: 'damageAtEdge', label: 'Damage at the edge', min: 0, max: 500, step: 5 },
     { key: 'targetChestHeightM', label: 'Blast aims this high (m)', min: 0.3, max: 1.6, step: 0.05 },
+    { key: 'targetChestShareOfHeight', label: 'On a crouched target, at most (share of height)', min: 0.2, max: 1, step: 0.05 },
     { key: 'blastLiftM', label: 'Blast starts this far up (m)', min: 0, max: 0.6, step: 0.05 },
     { key: 'shakeMaxRad', label: 'Camera shake, closest (rad)', min: 0, max: 0.2, step: 0.005 },
     { key: 'shakeRadiusM', label: 'Camera shake reaches (m)', min: 1, max: 40, step: 1 },
@@ -469,6 +472,12 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
     { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'coverCheckIntervalSec', label: 'Checks its cover every (s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'coverArriveM', label: 'At its cover within (m)', min: 0.05, max: 1, step: 0.05 },
+    { key: 'standGroundM', label: 'Stands and fights within (m)', min: 0, max: 30, step: 0.5 },
+    { key: 'fightSec', label: 'Fights up close for (s)', min: 0, max: 10, step: 0.1 },
+    { key: 'retreatSpeedShare', label: 'Backing off: speed (share of walk)', min: 0.1, max: 1, step: 0.05 },
+    { key: 'retreatHitChanceShare', label: 'Backing off: hit chance (share)', min: 0, max: 1, step: 0.05 },
     { key: 'sightChecksPerSec', label: 'Sight checks per s', min: 1, max: 30, step: 1 },
     { key: 'reactionSec', label: 'Reaction before firing (s)', min: 0, max: 3, step: 0.05 },
     { key: 'aimToleranceDeg', label: 'Fires when facing within (deg)', min: 1, max: 90, step: 1 },
@@ -482,6 +491,17 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'missMaxOffsetM', label: 'Miss passes at most (m)', min: 0.1, max: 5, step: 0.05 },
     { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
+  ],
+};
+
+export const coverFolder: Folder<CoverKey> = {
+  title: 'Choosing cover',
+  sliders: [
+    { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
+    { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
+    { key: 'rangePenaltyPerM', label: 'Penalty per m outside that', min: 0, max: 5, step: 0.1 },
+    { key: 'walkPenaltyPerM', label: 'Penalty per m of walking', min: 0, max: 5, step: 0.05 },
+    { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
   ],
 };
 
@@ -558,7 +578,16 @@ export const healthKeysNotOnPanel: readonly HealthKey[] = ['healCarryLimit', 'st
 export const dummyKeysNotOnPanel: readonly DummyKey[] = ['heightM', 'bodyWidthM', 'bodyDepthM', 'headRadiusM'];
 
 /** Stand-in values that are not on the panel: its shape, gun position and collision, built or read as they are. */
-export const standInKeysNotOnPanel: readonly StandInKey[] = ['eyeHeightM', 'muzzleHeightM', 'muzzleForwardM', 'capsuleRadiusM', 'aimHeightShareOfEyes'];
+export const standInKeysNotOnPanel: readonly StandInKey[] = [
+  'eyeHeightM',
+  'muzzleHeightM',
+  'muzzleForwardM',
+  'capsuleRadiusM',
+  'aimHeightShareOfEyes',
+  'crouchHeightM',
+  'crouchEyeHeightM',
+  'crouchMuzzleHeightM',
+];
 
 /** Rifle config values that are deliberately not on the panel: they are read once when the game starts. */
 export const rifleKeysNotOnPanel: readonly RifleKey[] = ['magazineRounds', 'startingMagazines'];

@@ -11,6 +11,9 @@ import { standInConfig, standInConfigDefaults } from '../config/standInEnemy';
 import type { StandInEnemy } from '../enemies/standInEnemy';
 import type { Navigation } from '../level/navigation';
 import { NavOverlay } from './navOverlay';
+import { CoverOverlay } from './coverOverlay';
+import type { CoverPoints } from '../level/cover';
+import { coverConfig, coverConfigDefaults } from '../config/cover';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -31,7 +34,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -57,6 +60,9 @@ interface Parts {
   soundTap: SoundTap;
   standIn: StandInEnemy;
   navigation: Navigation;
+  coverPoints: CoverPoints;
+  /** The game camera: Rook's eyes, for the cover overlay's colours. */
+  camera: THREE.PerspectiveCamera;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -67,7 +73,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation, coverPoints, camera }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -128,6 +134,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(healthFx, healthFxDefaults);
       resetToDefaults(movementConfig, movementConfigDefaults);
       resetToDefaults(standInConfig, standInConfigDefaults);
+      resetToDefaults(coverConfig, coverConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -149,6 +156,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/healthFx.ts': changedValues(healthFx, healthFxDefaults),
           'src/config/movement.ts': changedValues(movementConfig, movementConfigDefaults),
           'src/config/standInEnemy.ts': changedValues(standInConfig, standInConfigDefaults),
+          'src/config/cover.ts': changedValues(coverConfig, coverConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -222,7 +230,12 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const navOverlay = new NavOverlay(scene, navigation, standIn);
   standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
   standInPanel.add(navOverlay, 'pathShown').name('Show stand-in route');
+  const coverOverlay = new CoverOverlay(scene, coverPoints, standIn, camera.position);
+  standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const coverPanel = standInPanel.addFolder(coverFolder.title);
+  coverPanel.close();
+  for (const s of coverFolder.sliders) coverPanel.add(coverConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const grenadePanel = gui.addFolder(grenadeFolder.title);
   grenadePanel.close();
@@ -309,7 +322,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
-    readouts.enemy = `${standIn.state}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
+    readouts.enemy = `${standIn.state}${standIn.crouched ? ' (crouched)' : ''}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 
@@ -325,6 +338,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
       updateReadouts(dtSec);
       navOverlay.update();
+      coverOverlay.update(dtSec);
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);

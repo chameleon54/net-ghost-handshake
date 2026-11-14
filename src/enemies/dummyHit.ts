@@ -25,8 +25,8 @@ const bodyPoint = new Vector3();
  */
 export function rayHitDummy(ray: Ray, dummy: Target, maxDistanceM: number, out: DummyHit): boolean {
   if (!dummy.hittable) return false;
-  const { heightM, bodyWidthM, bodyDepthM, headRadiusM } = dummyConfig;
-  const bodyHeightM = heightM - 2 * headRadiusM;
+  const { bodyWidthM, bodyDepthM, headRadiusM } = dummyConfig;
+  const bodyHeightM = dummy.heightM - 2 * headRadiusM; // a crouched target is shorter, its head lower
   bodyBox.min.set(dummy.xM - bodyWidthM / 2, 0, dummy.zM - bodyDepthM / 2);
   bodyBox.max.set(dummy.xM + bodyWidthM / 2, bodyHeightM, dummy.zM + bodyDepthM / 2);
   headSphere.center.set(dummy.xM, bodyHeightM + headRadiusM, dummy.zM);

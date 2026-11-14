@@ -10,8 +10,20 @@ export const standInConfigDefaults = {
   stopRangeM: 8,
   /** It never walks closer than this, even without sight, so it does not stand inside Rook. */
   closestM: 1,
-  /** How often it plans a fresh route to Rook while walking (4.2). */
+  /** How often it plans a fresh route while walking (4.2). */
   repathIntervalSec: 0.5,
+  /** How often it checks that its cover still hides it, and picks new cover if not (4.3). */
+  coverCheckIntervalSec: 0.5,
+  /** It has reached its cover spot within this distance. */
+  coverArriveM: 0.25,
+  /** Seen within this distance, it stands and fights instead of moving off (decision 209). */
+  standGroundM: 8,
+  /** Up close it fights this long (finishing its burst) before backing off to new cover. */
+  fightSec: 2,
+  /** Backing off to cover while firing, it moves at this share of its walk speed (decision 210). */
+  retreatSpeedShare: 0.6,
+  /** And its hit chance is this share of the usual while it moves. */
+  retreatHitChanceShare: 0.5,
   /** How often it checks whether it can see Rook (perception does not run every update). */
   sightChecksPerSec: 5,
   /** Pause after it first gets sight before the first burst. */
@@ -36,6 +48,10 @@ export const standInConfigDefaults = {
   // Shape. Not on the panel. The body and head are the dummies' (dummyConfig).
   eyeHeightM: 1.6,
   muzzleHeightM: 1.35,
+  /** Crouched behind low cover (4.3): its height (the head sits at the top), eyes and gun. */
+  crouchHeightM: 1,
+  crouchEyeHeightM: 0.85,
+  crouchMuzzleHeightM: 0.7,
   /** How far in front of its body the gun's muzzle is. */
   muzzleForwardM: 0.5,
   /** Its collision capsule against walls and props. */

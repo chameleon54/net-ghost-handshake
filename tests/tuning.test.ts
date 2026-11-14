@@ -7,6 +7,7 @@ import { noiseConfigDefaults } from '../src/config/noise';
 import { casingConfigDefaults } from '../src/config/casing';
 import { dummyConfigDefaults } from '../src/config/dummy';
 import { standInConfigDefaults } from '../src/config/standInEnemy';
+import { coverConfigDefaults } from '../src/config/cover';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
@@ -23,6 +24,7 @@ import {
   dummyFolder,
   dummyKeysNotOnPanel,
   standInFolder,
+  coverFolder,
   standInKeysNotOnPanel,
   knifeFolder,
   pistolFolders,
@@ -159,6 +161,18 @@ describe('the stand-in enemy tuning panel', () => {
     }
     const onPanel = new Set<string>([...standInFolder.sliders.map((s) => s.key), ...standInKeysNotOnPanel]);
     for (const key of Object.keys(standInConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the cover tuning panel', () => {
+  it('has a sensible range around every default and lists every value', () => {
+    for (const s of coverFolder.sliders) {
+      expect(s.min, s.key).toBeLessThan(s.max);
+      expect(coverConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(coverConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>(coverFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(coverConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

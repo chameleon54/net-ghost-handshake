@@ -24,6 +24,11 @@ export class Dummy {
     this.setState('standing');
   }
 
+  /** Dummies never crouch. */
+  get heightM(): number {
+    return dummyConfig.heightM;
+  }
+
   /** Only a standing dummy can be hit; a falling or lying one is out of the fight. */
   get hittable(): boolean {
     return this.state === 'standing';

@@ -5,23 +5,29 @@ import { rifleConfig } from '../config/rifle';
 import { standInConfig } from '../config/standInEnemy';
 import type { EventBus } from '../core/events';
 import { createRayHit, type LevelCollision } from '../level/collision';
+import type { CoverPoint, CoverPoints } from '../level/cover';
 import type { Navigation } from '../level/navigation';
 import type { WeaponEvents } from '../weapons/events';
 import type { StandInEnemy, StandInHooks } from './standInEnemy';
 
-/** What the stand-in needs to know about Rook. The Player fits this. */
+/** What the stand-in needs to know about Rook. */
 export interface StandInQuarry {
   /** His feet. */
   readonly position: Vector3;
   readonly eyeHeightNowM: number;
+  /** Where his eyes really are, lean included (the camera). */
+  readonly eyes: Vector3;
 }
 
-// The stand-in's real senses and gun: rays through the level for sight, the navigation mesh and collision for walking, and the
+// The stand-in's real senses and gun: rays through the level for sight, the navigation mesh and collision for walking,
+// the cover points (4.3), and the
 // bullet itself. A round's hit or miss is already decided; this only places it. A hit lands on Rook's chest and hurts him;
 // a miss flies past him 0.3 to 1.5 m off and ends on whatever is behind (enemies.md, "deliberate misses"). Both send
 // `shot:landed`, so the tracers, bullet marks and impact sounds work as they do for Rook's own shots.
 export class StandInWorld implements StandInHooks {
-  private readonly eyes = new Vector3();
+  private readonly enemyEyes = new Vector3();
+  private readonly routeToCover: Vector3[] = [];
+  private readonly spot = new Vector3();
   private readonly target = new Vector3();
   private readonly direction = new Vector3();
   private readonly muzzle = new Vector3();
@@ -35,20 +41,42 @@ export class StandInWorld implements StandInHooks {
     private readonly events: EventBus<WeaponEvents>,
     private readonly collision: LevelCollision,
     private readonly navigation: Navigation,
+    private readonly coverPoints: CoverPoints,
     private readonly quarry: StandInQuarry,
     /** Hurts Rook. */
     private readonly damagePlayer: (amount: number) => void,
     private readonly random: () => number = Math.random,
   ) {}
 
-  /** It sees Rook if either his head or his chest is in clear view of its eyes. */
+  /** It sees Rook if either his head (lean included) or his chest is in clear view of its eyes. */
   canSeePlayer(enemy: StandInEnemy): boolean {
-    this.eyes.set(enemy.xM, standInConfig.eyeHeightM, enemy.zM);
-    const { position, eyeHeightNowM } = this.quarry;
-    this.target.set(position.x, position.y + eyeHeightNowM, position.z);
-    if (this.clearLine(this.eyes, this.target)) return true;
+    this.enemyEyes.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    if (this.clearLine(this.enemyEyes, this.quarry.eyes)) return true;
     this.chest(this.target);
-    return this.clearLine(this.eyes, this.target);
+    return this.clearLine(this.enemyEyes, this.target);
+  }
+
+  pickCover(enemy: StandInEnemy): CoverPoint | null {
+    return this.coverPoints.best(enemy, this.quarry.eyes, this.quarry.position, (point) => this.walkM(enemy, point));
+  }
+
+  coverHides(point: CoverPoint): boolean {
+    return this.coverPoints.hides(point, this.quarry.eyes);
+  }
+
+  releaseCover(enemy: StandInEnemy): void {
+    this.coverPoints.release(enemy);
+  }
+
+  /** How far it would walk to reach a spot along the navigation mesh, or Infinity if the route does not get there. */
+  private walkM(enemy: StandInEnemy, point: CoverPoint): number {
+    this.spot.set(point.xM, 0, point.zM);
+    if (!this.navigation.findPath(enemy.feet, this.spot, this.routeToCover)) return Infinity;
+    const route = this.routeToCover;
+    if (route[route.length - 1].distanceTo(this.spot) > standInConfig.coverArriveM) return Infinity;
+    let lengthM = 0;
+    for (let i = 1; i < route.length; i++) lengthM += route[i - 1].distanceTo(route[i]);
+    return lengthM;
   }
 
   findPath(from: Vector3, to: Vector3, out: Vector3[]): boolean {
@@ -64,7 +92,7 @@ export class StandInWorld implements StandInHooks {
     const facingZ = -Math.cos(enemy.yawRad);
     this.muzzle.set(
       enemy.xM + facingX * standInConfig.muzzleForwardM,
-      standInConfig.muzzleHeightM,
+      enemy.muzzleHeightNowM,
       enemy.zM + facingZ * standInConfig.muzzleForwardM,
     );
     this.chest(this.aim);

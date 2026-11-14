@@ -17,7 +17,8 @@ const wallGapM = 0.1; // against a wall it starts this far from it
 /** A dummy (or the stand-in enemy) as something a blast can hurt. */
 export function dummyBlastTarget(dummy: Target, events: EventBus<WeaponEvents>): BlastTarget {
   return {
-    chest: (out) => out.set(dummy.xM, grenadeConfig.targetChestHeightM, dummy.zM),
+    // A crouched target's chest is lower, so cover it crouches behind also shields it from a blast.
+    chest: (out) => out.set(dummy.xM, Math.min(grenadeConfig.targetChestHeightM, dummy.heightM * grenadeConfig.targetChestShareOfHeight), dummy.zM),
     vulnerable: () => dummy.hittable,
     hurt: (damage) => {
       const killed = dummy.hit('body', damage);
