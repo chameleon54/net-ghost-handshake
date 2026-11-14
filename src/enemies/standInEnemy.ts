@@ -77,6 +77,8 @@ export interface StandInHooks {
   flankOver(enemy: StandInEnemy): void;
   /** True while the squad is disorganised (its leader went down, 4.8): it holds longer between peeks. */
   disorganised(): boolean;
+  /** False at an aggression tier with no suppressing fire (Cautious, 4.11): the heavy then fires on the move only when it sees Rook. */
+  suppressionAllowed(): boolean;
   /** It went down (killed): tells the squad (a squad leader's death disorganises it). */
   downed(enemy: StandInEnemy): void;
   /** True while the squad wants it to keep pinning Rook's cover (the move it covers is on). */
@@ -703,14 +705,15 @@ export class StandInEnemy implements Target {
 
   /**
    * The heavy's fire while it moves (decision 237): aimed bursts at Rook when it sees him (at the backing-off share of the
-   * hit chance), suppressing bursts at the edge of his cover when it does not (pinning that side). Each burst needs a slot.
+   * hit chance), suppressing bursts at the edge of his cover when it does not (pinning that side), if the squad's tier has
+   * suppressing fire (4.11). Each burst needs a slot.
    */
   private fireOnTheMove(dtSec: number, dx: number, dz: number): void {
     if (this.seesPlayer) {
       this.engage(dtSec, dx, dz, standInConfig.retreatHitChanceShare);
       return;
     }
-    if (!this.knowsFresh) {
+    if (!this.knowsFresh || !this.hooks.suppressionAllowed()) {
       this.engaged = false;
       return;
     }

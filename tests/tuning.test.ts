@@ -11,6 +11,7 @@ import { coverConfigDefaults } from '../src/config/cover';
 import { exposureConfigDefaults } from '../src/config/exposure';
 import { squadConfigDefaults } from '../src/config/squad';
 import { roleConfigDefaults, roles } from '../src/config/roles';
+import { aggressionConfigDefaults, tiers } from '../src/config/aggression';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
@@ -31,6 +32,7 @@ import {
   exposureFolder,
   squadFolder,
   roleSliders,
+  tierSliders,
   exposureKeysNotOnPanel,
   standInKeysNotOnPanel,
   knifeFolder,
@@ -217,6 +219,20 @@ describe('the role tuning panel (4.8)', () => {
       }
       const onPanel = new Set<string>(roleSliders.map((s) => s.key));
       for (const key of Object.keys(roleConfigDefaults[role])) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+    }
+  });
+});
+
+describe('the aggression tier panel (4.11)', () => {
+  it('has a sensible range around every tier default and lists every value', () => {
+    for (const tier of tiers) {
+      for (const s of tierSliders) {
+        expect(s.min, s.key).toBeLessThan(s.max);
+        expect(aggressionConfigDefaults[tier][s.key], `${tier} ${s.key}`).toBeGreaterThanOrEqual(s.min);
+        expect(aggressionConfigDefaults[tier][s.key], `${tier} ${s.key}`).toBeLessThanOrEqual(s.max);
+      }
+      const onPanel = new Set<string>(tierSliders.map((s) => s.key));
+      for (const key of Object.keys(aggressionConfigDefaults[tier])) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
     }
   });
 });

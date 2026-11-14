@@ -16,6 +16,7 @@ import type { CoverConfig } from '../config/cover';
 import type { ExposureConfig } from '../config/exposure';
 import type { SquadConfig } from '../config/squad';
 import type { RoleValues } from '../config/roles';
+import type { TierValues } from '../config/aggression';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -53,6 +54,7 @@ type CoverKey = keyof CoverConfig;
 type ExposureKey = keyof ExposureConfig;
 type SquadKey = keyof SquadConfig;
 type RoleKey = keyof RoleValues;
+type TierKey = keyof TierValues;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -563,6 +565,20 @@ export const roleSliders: Slider<RoleKey>[] = [
   { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
 ];
 
+/** The sliders for one aggression tier's values (4.11); the dev panel shows one folder of these per tier. */
+export const tierSliders: Slider<TierKey>[] = [
+  { key: 'suppression', label: 'Suppressing fire at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'playEverySec', label: 'Suppress and advance: at most every (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'playMovers', label: 'Suppress and advance: how many move up (8: everyone)', min: 1, max: 8, step: 1 },
+  { key: 'holdBeforeFlankSec', label: 'Flank: after you hold a spot for (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'flankWaitSec', label: 'Flank: wait before the next (s)', min: 0, max: 60, step: 0.5 },
+  { key: 'pincer', label: 'Pincer: two flank at once (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'hearChance', label: 'Hearing: chance it reacts to your gun', min: 0, max: 1, step: 0.05 },
+  { key: 'pushMoversDry', label: 'Hearing: move up on a dry gun (8: everyone)', min: 0, max: 8, step: 1 },
+  { key: 'pushMoversReload', label: 'Hearing: move up on a reload', min: 0, max: 8, step: 1 },
+  { key: 'pushMoversJam', label: 'Hearing: move up on a jam (plus a flank)', min: 0, max: 8, step: 1 },
+];
+
 export const squadFolder: Folder<SquadKey> = {
   title: 'Squad',
   sliders: [
@@ -571,8 +587,6 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
     { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },
     { key: 'holdRadiusM', label: 'Flank: you hold a spot within (m)', min: 0.5, max: 8, step: 0.25 },
-    { key: 'holdBeforeFlankSec', label: 'Flank: after holding it (s)', min: 1, max: 60, step: 0.5 },
-    { key: 'flankWaitSec', label: 'Flank: wait before the next (s)', min: 0, max: 60, step: 0.5 },
     { key: 'flankRetrySec', label: 'Flank: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
     { key: 'flankMinAngleDeg', label: 'Flank: spot at least (deg round from your view)', min: 0, max: 180, step: 5 },
     { key: 'flankMaxExposedM', label: 'Flank: route in your view at most (m)', min: 0, max: 30, step: 0.5 },
@@ -580,7 +594,6 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'disorderSlots', label: 'Leader down: firing slots', min: 1, max: 4, step: 1 },
     { key: 'disorderHoldScale', label: 'Leader down: holds longer (x)', min: 1, max: 5, step: 0.1 },
     { key: 'spottedSec', label: 'Flank: called off when seen for (s)', min: 0, max: 3, step: 0.05 },
-    { key: 'advanceEverySec', label: 'Suppress and advance: at most every (s)', min: 1, max: 60, step: 0.5 },
     { key: 'playRetrySec', label: 'Suppress and advance: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
     { key: 'advanceMinGainM', label: 'Advance: at least this much closer (m)', min: 0.5, max: 10, step: 0.25 },
     { key: 'advanceClosestM', label: 'Advance and reposition: never closer to you than (m)', min: 1, max: 10, step: 0.25 },
@@ -594,9 +607,6 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'pinnedHoldScale', label: 'Pinned enemy holds longer (x)', min: 1, max: 5, step: 0.1 },
     { key: 'pushReactionSec', label: 'Hearing: push after (s)', min: 0, max: 5, step: 0.1 },
     { key: 'pushMaxWindowSec', label: 'Hearing: dry or jam window at most (s)', min: 0.5, max: 30, step: 0.5 },
-    { key: 'pushMoversDry', label: 'Hearing: move up on a dry gun', min: 0, max: 4, step: 1 },
-    { key: 'pushMoversReload', label: 'Hearing: move up on a reload', min: 0, max: 4, step: 1 },
-    { key: 'pushMoversJam', label: 'Hearing: move up on a jam (plus a flank)', min: 0, max: 4, step: 1 },
     { key: 'repositionPeeksMin', label: 'Reposition: after at least (peeks)', min: 1, max: 10, step: 1 },
     { key: 'repositionPeeksMax', label: 'Reposition: after at most (peeks)', min: 1, max: 10, step: 1 },
     { key: 'repositionBlindPeeks', label: 'Reposition: after blind peeks in a row', min: 1, max: 10, step: 1 },

@@ -18,6 +18,7 @@ import { exposureConfig, exposureConfigDefaults } from '../config/exposure';
 import type { Exposure } from '../player/exposure';
 import { squadConfig, squadConfigDefaults } from '../config/squad';
 import { roleConfig, roleConfigDefaults, roles } from '../config/roles';
+import { aggressionConfig, aggressionConfigDefaults, aggressionSetting, tiers } from '../config/aggression';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
@@ -41,7 +42,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -154,6 +155,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(exposureConfig, exposureConfigDefaults);
       resetToDefaults(squadConfig, squadConfigDefaults);
       for (const role of roles) resetToDefaults(roleConfig[role], roleConfigDefaults[role]);
+      for (const tier of tiers) resetToDefaults(aggressionConfig[tier], aggressionConfigDefaults[tier]);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -179,6 +181,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/exposure.ts': changedValues(exposureConfig, exposureConfigDefaults),
           'src/config/squad.ts': changedValues(squadConfig, squadConfigDefaults),
           ...Object.fromEntries(roles.map((role) => [`src/config/roles.ts, ${role}`, changedValues(roleConfig[role], roleConfigDefaults[role])])),
+          ...Object.fromEntries(tiers.map((tier) => [`src/config/aggression.ts, ${tier}`, changedValues(aggressionConfig[tier], aggressionConfigDefaults[tier])])),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -260,9 +263,20 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
   standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning)');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
+  // The aggression tier (4.11): the game starts on Assertive; switch between the four here, even mid-fight.
+  squadPanel
+    .add(aggressionSetting, 'current', { '1 Cautious': 'cautious', '2 Assertive': 'assertive', '3 Aggressive': 'aggressive', '4 Relentless': 'relentless' })
+    .name('Aggression tier');
   squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
   squadPanel.add({ play: () => squad.forcePlay() }, 'play').name('Suppress and advance now (while you hide)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const tiersPanel = standInPanel.addFolder('Aggression tiers (4.11)');
+  tiersPanel.close();
+  for (const tier of tiers) {
+    const tierPanel = tiersPanel.addFolder(tier);
+    tierPanel.close();
+    for (const s of tierSliders) tierPanel.add(aggressionConfig[tier], s.key, s.min, s.max, s.step).name(s.label);
+  }
   const rolesPanel = standInPanel.addFolder('Roles (4.8)');
   rolesPanel.close();
   for (const role of roles) {
@@ -370,16 +384,17 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
-    const flankerIndex = activeStandIns.findIndex((s) => s === squad.flanker);
+    const flankLetters = activeStandIns.flatMap((s, i) => (squad.flankers.includes(s) ? [letter(i)] : []));
     readouts.squad =
-      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}` +
+      `tier ${aggressionSetting.current}, slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}` +
       `${squad.disorganised ? ', DISORGANISED (leader down)' : ''}`;
     // Why a flank is or is not under way, in the order the rules are checked.
-    const held = `held your spot ${squad.heldSec.toFixed(1)} of ${squadConfig.holdBeforeFlankSec} s`;
+    const held = `held your spot ${squad.heldSec.toFixed(1)} of ${squad.tier.holdBeforeFlankSec} s`;
     readouts.flank =
-      flankerIndex >= 0 ? `${letter(flankerIndex)} flanking`
+      flankLetters.length > 1 ? `${flankLetters.join(' and ')} flanking: PINCER`
+      : flankLetters.length > 0 ? `${flankLetters[0]} flanking`
       : squad.disorganised ? 'none while the squad is disorganised'
-      : squad.heldSec < squadConfig.holdBeforeFlankSec ? `none yet: ${held}`
+      : squad.heldSec < squad.tier.holdBeforeFlankSec ? `none yet: ${held}`
       : flankFailure() !== null ? `${flankFailure()}, tries again in ${squad.flankWaitSec.toFixed(1)} s`
       : `next one in ${squad.flankWaitSec.toFixed(1)} s`;
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round${exposure.pinned ? ', a side of your cover is PINNED' : ''}`;
@@ -392,11 +407,13 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const heardNames = { dry: 'your gun run dry', reload: 'you reload', jam: 'your gun jam' } as const;
     const heard = squad.heardKind;
     readouts.heard = !heard ? 'nothing'
+      : squad.pushIgnored ? `${heardNames[heard]}: ignored (this tier reacts ${(squad.tier.hearChance * 100).toFixed(0)}% of the time)`
       : squad.pushedAlready ? `${heardNames[heard]}: pushed`
       : `${heardNames[heard]}: push in ${squad.pushInSec.toFixed(1)} s`;
     readouts.play =
       pinning || moving ? [pinning, moving].filter(Boolean).join(', ')
       : squad.disorganised ? 'none while the squad is disorganised'
+      : !squad.suppressionAllowed ? 'none at this tier (no suppressing fire)'
       : squad.playFailure ? `${squad.playFailure}, tries again in ${squad.playWaitSec.toFixed(1)} s`
       : `next chance in ${squad.playWaitSec.toFixed(1)} s (only while you hide)`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;

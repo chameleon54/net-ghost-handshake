@@ -4,6 +4,7 @@ import { standInConfig } from '../src/config/standInEnemy';
 import { squadConfig, squadConfigDefaults } from '../src/config/squad';
 import { noiseConfig } from '../src/config/noise';
 import { roleConfig, roles, type Role } from '../src/config/roles';
+import { aggressionConfig, aggressionSetting } from '../src/config/aggression';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
 import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
@@ -112,6 +113,7 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
       squad.flankOver(e);
     },
     disorganised: () => squad.disorganised,
+    suppressionAllowed: () => squad.suppressionAllowed,
     downed: (e) => {
       if (e.role === 'leader') squad.leaderDown();
     },
@@ -509,7 +511,7 @@ describe('StandInEnemy flanking (4.7)', () => {
         }
       }
     };
-    step(squadConfig.holdBeforeFlankSec - 0.5);
+    step(aggressionConfig.assertive.holdBeforeFlankSec - 0.5);
     expect(members.some((m) => m.enemy.state === 'flank')).toBe(false);
     step(1);
     expect(members[2].enemy.state).toBe('flank');
@@ -517,7 +519,7 @@ describe('StandInEnemy flanking (4.7)', () => {
     step(4); // it arrives (7 m at the flank speed)
     expect(members[2].enemy.state).toBe('cover');
     expect(squad.flanker).toBeNull();
-    step(squadConfig.flankWaitSec - 1);
+    step(aggressionConfig.assertive.flankWaitSec - 1);
     const flanksSent = () => members.reduce((sum, m) => sum + m.world.claimed.length, 0);
     expect(flanksSent()).toBe(1); // nobody sent during the wait
     step(1.5);
@@ -708,6 +710,19 @@ describe('StandInEnemy repositioning and the heavy on the move (decision 237)', 
     trooper.enemy.beginAdvance(next);
     trooper.run(far, 1.5);
     expect(trooper.shots).toHaveLength(0); // the others do not fire while they move
+  });
+
+  it('at Cautious the heavy on the move fires no suppressing rounds (4.11)', () => {
+    aggressionSetting.current = 'cautious';
+    try {
+      const blind = holding(0.99, 'heavy');
+      blind.shots.length = 0;
+      blind.enemy.beginAdvance(next);
+      blind.run(far, 2);
+      expect(blind.shots).toHaveLength(0);
+    } finally {
+      aggressionSetting.current = 'assertive';
+    }
   });
 });
 
@@ -1698,14 +1713,14 @@ describe('StandInWorld choosing a flank spot (4.7)', () => {
   const crate: RoomBox = { kind: 'prop', xM: 5, zM: 4, widthM: 1, depthM: 1, heightM: 1 };
   const eastSpot: CoverPoint = { xM: 5.95, zM: 4, height: 'low', facingYawRad: Math.PI / 2, lean: 'both' };
 
-  const plan = async (boxes: RoomBox[], look = new Vector3(0, 0, -1)) => {
+  const plan = async (boxes: RoomBox[], look = new Vector3(0, 0, -1), side = 0) => {
     const level = buildGreybox(boxes);
     const navigation = await Navigation.create(level.navigationGeometry);
     const rook = rookAt(0, 4);
     rook.forward.copy(look);
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([eastSpot], level.collision), rook, () => {});
     const enemy = new StandInEnemy({ xM: 5, zM: -4, yawRad: Math.PI }, world);
-    const result = world.planFlank(enemy);
+    const result = world.planFlank(enemy, side);
     lastRejects = { ...world.flankRejects };
     return result;
   };
@@ -1726,6 +1741,12 @@ describe('StandInWorld choosing a flank spot (4.7)', () => {
   it('not a spot from which a peek cannot see past his cover', async () => {
     const post: RoomBox = { kind: 'wall', xM: 0.8, zM: 4, widthM: 0.3, depthM: 0.3, heightM: 3 }; // right beside him, east
     expect(await plan([rookCover, screen, crate, post])).toBeNull();
+  });
+
+  it("a pincer's second flank takes only a spot on the other side of him (4.11)", async () => {
+    expect(await plan([rookCover, screen, crate], new Vector3(0, 0, -1), 1)).not.toBeNull(); // the spot is to his right (east)
+    expect(await plan([rookCover, screen, crate], new Vector3(0, 0, -1), -1)).toBeNull();
+    expect(describeFlankRejects(lastRejects!)).toBe("no flank spot (1 on the first flanker's side)");
   });
 
   it('not one whose route is too long in his view', async () => {

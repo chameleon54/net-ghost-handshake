@@ -226,8 +226,9 @@ function reposition(enemy: StandInEnemy): void {
     return;
   }
   const hiddenRoute = plan.exposedM <= squadConfig.repositionMaxExposedM;
-  const cover = enemy.firesOnTheMove || hiddenRoute ? null : squad.assignCover(coverers(enemy), (other) => other.role === 'heavy');
-  if (!enemy.firesOnTheMove && !hiddenRoute && !cover) {
+  const selfCovers = enemy.firesOnTheMove && squad.suppressionAllowed; // at Cautious the heavy suppresses nothing (4.11)
+  const cover = selfCovers || hiddenRoute ? null : squad.assignCover(coverers(enemy), (other) => other.role === 'heavy');
+  if (!selfCovers && !hiddenRoute && !cover) {
     enemy.repositionDeclined();
     return;
   }
@@ -495,7 +496,8 @@ const loop = new Loop(
     if (push) {
       squad.pushStarted(); // one push per window
       if (push === 'jam') squad.forceFlank(); // "flankers commit": the flank below starts this update
-      const movers = { dry: squadConfig.pushMoversDry, reload: squadConfig.pushMoversReload, jam: squadConfig.pushMoversJam }[push];
+      const { pushMoversDry, pushMoversReload, pushMoversJam } = squad.tier; // per aggression tier (4.11)
+      const movers = { dry: pushMoversDry, reload: pushMoversReload, jam: pushMoversJam }[push];
       if (!squad.playRunning && movers > 0) startPlay(Math.round(movers));
     }
     if (squad.flankDue) {
@@ -508,6 +510,14 @@ const loop = new Loop(
       );
       if (job) {
         job.member.beginFlank(job.plan.point);
+        // The pincer (4.11, Aggressive and up): a second flanker round his other side at the same time, if one can go.
+        const side = worldOf.get(job.member)?.flankSide(job.plan.point) ?? 0;
+        const second = squad.assignPincer(
+          candidates.filter((enemy) => enemy !== job.member),
+          (enemy) => worldOf.get(enemy)?.planFlank(enemy, -side) ?? null,
+          (enemy) => enemy.role === 'flanker',
+        );
+        second?.member.beginFlank(second.plan.point);
         // Covering fire for the flank if someone is free (decision 225); the flank does not wait for it.
         squad.assignCover(coverers(job.member), (enemy) => enemy.role === 'heavy')?.beginSuppress();
       }
@@ -516,8 +526,9 @@ const loop = new Loop(
       const rejects = first ? worldOf.get(first)?.flankRejects : undefined;
       flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
     }
-    // Suppress and advance (4.9): while Rook hides, one moves up to closer cover while another pins his cover.
-    if (squad.playDue) startPlay(1);
+    // Suppress and advance (4.9): while Rook hides, one moves up to closer cover while another pins his cover. How many
+    // move is per tier: at Relentless everyone who can, cover by cover (the coordinated push, 4.11).
+    if (squad.playDue) startPlay(Math.round(squad.tier.playMovers));
     // Repositioning (decision 237): one stand-in that has used its spot enough moves on, if the squad allows it.
     const mover = activeEnemies.find((enemy) => enemy.wantsToReposition);
     if (mover) reposition(mover);

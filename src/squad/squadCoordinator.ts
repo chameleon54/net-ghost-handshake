@@ -1,7 +1,21 @@
+import { aggressionConfig, aggressionSetting, type TierValues } from '../config/aggression';
 import { squadConfig } from '../config/squad';
 
 /** Something that can hold a firing slot (an enemy). */
 type Member = object;
+
+/** The member with the cheapest plan (null plans left out), or null if none has one. */
+function cheapestOf<M extends Member, P extends { readonly cost: number }>(
+  group: readonly M[],
+  plan: (member: M) => P | null,
+): { member: M; plan: P } | null {
+  let best: { member: M; plan: P } | null = null;
+  for (const member of group) {
+    const option = plan(member);
+    if (option && (!best || option.cost < best.plan.cost)) best = { member, plan: option };
+  }
+  return best;
+}
 
 /** What the squad heard of Rook's gun (4.10): he ran dry, is reloading, or jammed. */
 export type PushKind = 'dry' | 'reload' | 'jam';
@@ -14,9 +28,12 @@ export type PushKind = 'dry' | 'reload' | 'jam';
 // the squad is disorganised for a while. Since 4.9, while Rook hides, it runs suppress and advance: one enemy pins his
 // cover while another moves up, and nobody moves up without that covering fire; flanks get covering fire when someone is
 // free. Since 4.10 it hears Rook's gun: a dry click, a reload or a jam opens a push window, and a moment later it pushes
-// (a play at once, more movers on a dry gun, a flank at once on a jam). Aggression comes later (4.11). Rules only, no
-// drawing.
+// (a play at once, more movers on a dry gun, a flank at once on a jam). Since 4.11 its aggression tier decides which of
+// these it may use and how often (src/config/aggression.ts): Cautious has no suppressing fire at all, the pincer sends
+// two flankers at once, and the hearing reacts only some of the time at the lower tiers. Rules only, no drawing.
 export class SquadCoordinator {
+  constructor(private readonly random: () => number = Math.random) {}
+
   private readonly holders = new Set<Member>();
   /** Game time since any enemy last landed a damaging hit. */
   private sinceHitSec = Infinity;
@@ -24,8 +41,8 @@ export class SquadCoordinator {
   private readonly holdSpot = { x: 0, z: 0 };
   private hasHoldSpot = false;
   private holdSec = 0;
-  /** The enemy on the flank job, or null. */
-  private flankMember: Member | null = null;
+  /** The enemies on the flank job: one, or two in a pincer (4.11). */
+  private readonly flankMembers = new Set<Member>();
   /** Time left before a flank may start (the wait after one, or the retry when nobody could). */
   private flankWaitLeftSec = 0;
   /** Time left of the disorder after the squad leader went down (4.8). */
@@ -40,7 +57,8 @@ export class SquadCoordinator {
   private pushWindowLeftSec = 0;
   private pushDelayLeftSec = 0;
   private pushedThisWindow = false;
-  private playWaitLeftSec = squadConfig.advanceEverySec;
+  private pushIgnoredThisWindow = false;
+  private playWaitLeftSec = this.tier.playEverySec;
   /** After the covered move ends, the suppressor keeps on this long. */
   private coverGraceLeftSec = 0;
   /** True while Rook is hidden from every awake enemy (set each update). */
@@ -87,15 +105,30 @@ export class SquadCoordinator {
     return this.flankWaitLeftSec;
   }
 
-  /** The enemy on the flank job, or null. */
+  /** The values of the tier it fights at now (4.11). */
+  get tier(): TierValues {
+    return aggressionConfig[aggressionSetting.current];
+  }
+
+  /** False at a tier with no suppressing fire (Cautious): no plays, no covering fire, the heavy fires only aimed rounds. */
+  get suppressionAllowed(): boolean {
+    return this.tier.suppression > 0;
+  }
+
+  /** The first enemy on the flank job, or null. */
   get flanker(): Member | null {
-    return this.flankMember;
+    return this.flankMembers.values().next().value ?? null;
+  }
+
+  /** Every enemy on the flank job (two in a pincer). */
+  get flankers(): readonly Member[] {
+    return [...this.flankMembers];
   }
 
   /** True when Rook has held his spot long enough, nobody is flanking, the wait is over, and the squad is not disorganised. */
   get flankDue(): boolean {
-    if (this.flankMember !== null || this.flankWaitLeftSec > 0 || this.disorganised) return false;
-    return this.holdSec >= squadConfig.holdBeforeFlankSec;
+    if (this.flankMembers.size > 0 || this.flankWaitLeftSec > 0 || this.disorganised) return false;
+    return this.holdSec >= this.tier.holdBeforeFlankSec;
   }
 
   /** True for a while after the squad leader went down: fewer firing slots, longer holds, no new flank. */
@@ -118,25 +151,39 @@ export class SquadCoordinator {
     plan: (member: M) => P | null,
     preferred: (member: M) => boolean = () => true,
   ): { member: M; plan: P } | null {
-    const cheapest = (group: readonly M[]): { member: M; plan: P } | null => {
-      let best: { member: M; plan: P } | null = null;
-      for (const member of group) {
-        const option = plan(member);
-        if (option && (!best || option.cost < best.plan.cost)) best = { member, plan: option };
-      }
-      return best;
-    };
-    const best = cheapest(candidates.filter(preferred)) ?? cheapest(candidates.filter((member) => !preferred(member)));
-    if (best) this.flankMember = best.member;
-    else this.flankWaitLeftSec = squadConfig.flankRetrySec;
+    const best = this.pickFlanker(candidates, plan, preferred);
+    if (!best) this.flankWaitLeftSec = squadConfig.flankRetrySec;
     return best;
   }
 
-  /** The flank by `member` is over (arrived, spotted, or anything else): the wait before the next one starts. */
+  /**
+   * The second flanker of a pincer (4.11), once the first is under way: the cheapest plan among the candidates (who plan a
+   * spot on the other side of Rook), preferred ones first. Null if the tier has no pincer or nobody has a plan; then it
+   * stays a single flank.
+   */
+  assignPincer<M extends Member, P extends { readonly cost: number }>(
+    candidates: readonly M[],
+    plan: (member: M) => P | null,
+    preferred: (member: M) => boolean = () => true,
+  ): { member: M; plan: P } | null {
+    if (this.tier.pincer <= 0 || this.flankMembers.size !== 1) return null;
+    return this.pickFlanker(candidates.filter((member) => !this.flankMembers.has(member)), plan, preferred);
+  }
+
+  private pickFlanker<M extends Member, P extends { readonly cost: number }>(
+    candidates: readonly M[],
+    plan: (member: M) => P | null,
+    preferred: (member: M) => boolean,
+  ): { member: M; plan: P } | null {
+    const best = cheapestOf(candidates.filter(preferred), plan) ?? cheapestOf(candidates.filter((member) => !preferred(member)), plan);
+    if (best) this.flankMembers.add(best.member);
+    return best;
+  }
+
+  /** The flank by `member` is over (arrived, spotted, or anything else). Once every flanker is done, the wait starts. */
   flankOver(member: Member): void {
-    if (this.flankMember !== member) return;
-    this.flankMember = null;
-    this.flankWaitLeftSec = squadConfig.flankWaitSec;
+    if (!this.flankMembers.delete(member) || this.flankMembers.size > 0) return;
+    this.flankWaitLeftSec = this.tier.flankWaitSec;
     this.coverGraceLeftSec = squadConfig.suppressAfterMoveSec;
   }
 
@@ -159,7 +206,9 @@ export class SquadCoordinator {
     if (this.pushWindow !== kind) {
       this.pushWindow = kind;
       this.pushDelayLeftSec = squadConfig.pushReactionSec;
-      this.pushedThisWindow = false;
+      // Whether it reacts is rolled once per window, by the tier (4.11): ignored, the window stays open without a push.
+      this.pushIgnoredThisWindow = this.random() >= this.tier.hearChance;
+      this.pushedThisWindow = this.pushIgnoredThisWindow;
     }
     this.pushWindowLeftSec = squadConfig.pushMaxWindowSec;
   }
@@ -182,6 +231,11 @@ export class SquadCoordinator {
 
   get pushedAlready(): boolean {
     return this.pushedThisWindow;
+  }
+
+  /** True if the squad let this window pass (its tier reacts only some of the time). For the dev readout. */
+  get pushIgnored(): boolean {
+    return this.pushIgnoredThisWindow;
   }
 
   /** The push due now (the window is open, the delay is over, it has not pushed yet, not in disorder), or null. */
@@ -210,9 +264,12 @@ export class SquadCoordinator {
     return this.playWaitLeftSec;
   }
 
-  /** True when a suppress-and-advance play may start: Rook hides where the squad knows he is, and nothing else is on. */
+  /**
+   * True when a suppress-and-advance play may start: the tier has suppressing fire, Rook hides where the squad knows he
+   * is, and nothing else is on.
+   */
   get playDue(): boolean {
-    if (this.playRunning || this.disorganised) return false;
+    if (this.playRunning || this.disorganised || !this.suppressionAllowed) return false;
     return this.rookHidden && this.playWaitLeftSec <= 0;
   }
 
@@ -229,11 +286,12 @@ export class SquadCoordinator {
     /** True for a mover that is its own covering fire (the heavy fires on the move, decision 237). */
     selfCovers: (member: M) => boolean = () => false,
   ): { advancer: { member: M; plan: P }; suppressor: M | null } | null {
-    let best: { member: M; plan: P } | null = null;
-    for (const member of movers) {
-      const option = plan(member);
-      if (option && (!best || option.cost < best.plan.cost)) best = { member, plan: option };
+    if (!this.suppressionAllowed) {
+      this.playFailure = 'no suppressing fire at this tier';
+      this.playWaitLeftSec = squadConfig.playRetrySec;
+      return null;
     }
+    const best = cheapestOf(movers, plan);
     const mover = best?.member;
     const others = coverers.filter((member) => member !== mover);
     const suppressor = mover && selfCovers(mover) ? null : (others.find(preferredCover) ?? others[0] ?? null);
@@ -245,13 +303,16 @@ export class SquadCoordinator {
     this.playFailure = null;
     this.advanceMembers.add(best.member);
     this.suppressMember = suppressor;
-    this.playWaitLeftSec = squadConfig.advanceEverySec;
+    this.playWaitLeftSec = this.tier.playEverySec;
     return { advancer: best, suppressor };
   }
 
-  /** Covering fire for a move already under way (a flank): a free suppressor, preferred ones first, or null if none. */
+  /**
+   * Covering fire for a move already under way (a flank, a reposition): a free suppressor, preferred ones first, or null
+   * if none is free or the tier has no suppressing fire.
+   */
   assignCover<M extends Member>(coverers: readonly M[], preferred: (member: M) => boolean): M | null {
-    if (this.suppressMember !== null) return null;
+    if (this.suppressMember !== null || !this.suppressionAllowed) return null;
     const suppressor = coverers.find(preferred) ?? coverers[0] ?? null;
     this.suppressMember = suppressor;
     return suppressor;
@@ -260,7 +321,7 @@ export class SquadCoordinator {
   /** True while `member` should keep pinning: it is the suppressor and the move it covers is on (or just over). */
   keepSuppressing(member: Member): boolean {
     if (member !== this.suppressMember) return false;
-    const moving = this.advanceMembers.size > 0 || this.flankMember !== null || this.repositionMember !== null;
+    const moving = this.advanceMembers.size > 0 || this.flankMembers.size > 0 || this.repositionMember !== null;
     return moving || this.coverGraceLeftSec > 0;
   }
 
@@ -301,7 +362,7 @@ export class SquadCoordinator {
 
   /** Dev panel testing aid: a flank is due now (if nobody is flanking). */
   forceFlank(): void {
-    this.holdSec = Math.max(this.holdSec, squadConfig.holdBeforeFlankSec);
+    this.holdSec = Math.max(this.holdSec, this.tier.holdBeforeFlankSec);
     this.flankWaitLeftSec = 0;
   }
 
@@ -343,17 +404,18 @@ export class SquadCoordinator {
     this.sinceHitSec = Infinity;
     this.hasHoldSpot = false;
     this.holdSec = 0;
-    this.flankMember = null;
+    this.flankMembers.clear();
     this.flankWaitLeftSec = 0;
     this.disorderLeftSec = 0;
     this.suppressMember = null;
     this.advanceMembers.clear();
     this.repositionMember = null;
-    this.playWaitLeftSec = squadConfig.advanceEverySec;
+    this.playWaitLeftSec = this.tier.playEverySec;
     this.pushWindow = null;
     this.pushWindowLeftSec = 0;
     this.pushDelayLeftSec = 0;
     this.pushedThisWindow = false;
+    this.pushIgnoredThisWindow = false;
     this.coverGraceLeftSec = 0;
     this.rookHidden = false;
     this.playFailure = null;

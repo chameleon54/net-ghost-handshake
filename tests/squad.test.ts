@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { squadConfig } from '../src/config/squad';
+import { aggressionConfig, aggressionSetting } from '../src/config/aggression';
+
+/** The tier the game starts on, and the tests too unless they say otherwise. */
+const assertive = aggressionConfig.assertive;
 import { greyboxStandIns } from '../src/data/greyboxEnemies';
 import { buildGreybox } from '../src/level/greybox';
 import { Navigation } from '../src/level/navigation';
@@ -48,7 +52,7 @@ describe('SquadCoordinator flanking (4.7)', () => {
 
   it('a flank is due once Rook has held his spot long enough, not before', () => {
     const squad = new SquadCoordinator();
-    hold(squad, squadConfig.holdBeforeFlankSec - 0.5);
+    hold(squad, assertive.holdBeforeFlankSec - 0.5);
     expect(squad.flankDue).toBe(false);
     hold(squad, 1);
     expect(squad.flankDue).toBe(true);
@@ -56,12 +60,12 @@ describe('SquadCoordinator flanking (4.7)', () => {
 
   it('small moves keep the clock; moving out of the radius, or the squad losing track of him, starts it again', () => {
     const squad = new SquadCoordinator();
-    hold(squad, squadConfig.holdBeforeFlankSec - 1);
+    hold(squad, assertive.holdBeforeFlankSec - 1);
     hold(squad, 0.5, { x: squadConfig.holdRadiusM * 0.8, z: 0 });
-    expect(squad.heldSec).toBeGreaterThan(squadConfig.holdBeforeFlankSec - 1);
+    expect(squad.heldSec).toBeGreaterThan(assertive.holdBeforeFlankSec - 1);
     hold(squad, 0.5, { x: squadConfig.holdRadiusM * 2, z: 0 });
     expect(squad.heldSec).toBeLessThan(1);
-    hold(squad, squadConfig.holdBeforeFlankSec - 1);
+    hold(squad, assertive.holdBeforeFlankSec - 1);
     squad.update(1 / 60, null);
     expect(squad.heldSec).toBe(0);
   });
@@ -69,7 +73,7 @@ describe('SquadCoordinator flanking (4.7)', () => {
   it('gives the job to the cheapest plan, one at a time, with a wait after; with no plan it tries again later', () => {
     const squad = new SquadCoordinator();
     const [a, b] = [{}, {}];
-    hold(squad, squadConfig.holdBeforeFlankSec + 0.1);
+    hold(squad, assertive.holdBeforeFlankSec + 0.1);
     expect(squad.assignFlank([a, b], () => null)).toBeNull();
     expect(squad.flankDue).toBe(false); // the retry wait
     hold(squad, squadConfig.flankRetrySec + 0.1);
@@ -82,7 +86,7 @@ describe('SquadCoordinator flanking (4.7)', () => {
     expect(squad.flanker).toBe(b);
     squad.flankOver(b);
     expect(squad.flanker).toBeNull();
-    hold(squad, squadConfig.flankWaitSec - 0.5);
+    hold(squad, assertive.flankWaitSec - 0.5);
     expect(squad.flankDue).toBe(false);
     hold(squad, 1);
     expect(squad.flankDue).toBe(true);
@@ -132,7 +136,7 @@ describe('SquadCoordinator suppress and advance (4.9)', () => {
   const rook = { x: 0, z: 0 };
   const due = () => {
     const squad = new SquadCoordinator();
-    squad.update(squadConfig.advanceEverySec + 0.1, rook, true);
+    squad.update(assertive.playEverySec + 0.1, rook, true);
     return squad;
   };
   const heavy = { heavy: true };
@@ -145,10 +149,10 @@ describe('SquadCoordinator suppress and advance (4.9)', () => {
     expect(squad.playDue).toBe(false); // the wait
     expect(due().playDue).toBe(true);
     const seen = new SquadCoordinator();
-    seen.update(squadConfig.advanceEverySec + 0.1, rook, false);
+    seen.update(assertive.playEverySec + 0.1, rook, false);
     expect(seen.playDue).toBe(false);
     const lost = new SquadCoordinator();
-    lost.update(squadConfig.advanceEverySec + 0.1, null, true);
+    lost.update(assertive.playEverySec + 0.1, null, true);
     expect(lost.playDue).toBe(false);
     const leaderless = due();
     leaderless.leaderDown();
@@ -203,7 +207,7 @@ describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
   };
 
   it('pushes once, after the reaction delay, while the window is open', () => {
-    const squad = new SquadCoordinator();
+    const squad = new SquadCoordinator(() => 0); // a roll that always reacts
     squad.heard('dry');
     expect(squad.pushDue).toBeNull();
     step(squad, squadConfig.pushReactionSec - 0.1);
@@ -218,7 +222,7 @@ describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
   });
 
   it('no push if he stops being vulnerable before the delay is over (he fired, reloaded, cleared the jam)', () => {
-    const squad = new SquadCoordinator();
+    const squad = new SquadCoordinator(() => 0); // a roll that always reacts
     squad.heard('jam');
     step(squad, squadConfig.pushReactionSec / 2);
     squad.closeWindow('dry'); // a different window: nothing changes
@@ -229,7 +233,7 @@ describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
   });
 
   it('a new kind of sound opens a new window (a reload after the dry clicks); a window ends after its limit', () => {
-    const squad = new SquadCoordinator();
+    const squad = new SquadCoordinator(() => 0); // a roll that always reacts
     squad.heard('dry');
     step(squad, squadConfig.pushReactionSec + 0.1);
     squad.pushStarted();
@@ -241,7 +245,7 @@ describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
   });
 
   it('no push while the squad is disorganised', () => {
-    const squad = new SquadCoordinator();
+    const squad = new SquadCoordinator(() => 0); // a roll that always reacts
     squad.leaderDown();
     squad.heard('dry');
     step(squad, squadConfig.pushReactionSec + 0.1);
@@ -249,7 +253,7 @@ describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
   });
 
   it('a play with more than one mover: the covering fire goes on until the last one has arrived', () => {
-    const squad = new SquadCoordinator();
+    const squad = new SquadCoordinator(() => 0); // a roll that always reacts
     const [first, second, cover] = [{}, {}, {}];
     squad.assignAdvance([first], () => ({ cost: 1 }), [cover], () => false);
     squad.addAdvancer(second);
@@ -303,5 +307,77 @@ describe('the squad spawns in the test room (4.6)', () => {
         if (other !== spawn) expect(Math.hypot(other.xM - spawn.xM, other.zM - spawn.zM)).toBeGreaterThanOrEqual(2);
       }
     }
+  });
+});
+
+describe('SquadCoordinator aggression tiers (4.11)', () => {
+  afterEach(() => {
+    aggressionSetting.current = 'assertive';
+  });
+  const rook = { x: 0, z: 0 };
+  const hold = (squad: SquadCoordinator, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) squad.update(1 / 60, rook, true);
+  };
+
+  it('Cautious: no suppressing fire at all (no plays, no covering fire) and it never reacts to his gun', () => {
+    aggressionSetting.current = 'cautious';
+    const squad = new SquadCoordinator(() => 0);
+    hold(squad, aggressionConfig.cautious.playEverySec + 0.1);
+    expect(squad.suppressionAllowed).toBe(false);
+    expect(squad.playDue).toBe(false);
+    expect(squad.assignAdvance([{}], () => ({ cost: 1 }), [{}], () => false)).toBeNull();
+    expect(squad.assignCover([{}], () => false)).toBeNull();
+    squad.heard('dry');
+    hold(squad, squadConfig.pushReactionSec + 0.1);
+    expect(squad.pushDue).toBeNull();
+    expect(squad.pushIgnored).toBe(true);
+  });
+
+  it('Assertive reacts to his gun only some of the time: rolled once per window', () => {
+    const reacts = new SquadCoordinator(() => assertive.hearChance - 0.01);
+    reacts.heard('reload');
+    hold(reacts, squadConfig.pushReactionSec + 0.1);
+    expect(reacts.pushDue).toBe('reload');
+    const ignores = new SquadCoordinator(() => assertive.hearChance + 0.01);
+    ignores.heard('reload');
+    hold(ignores, squadConfig.pushReactionSec + 0.1);
+    expect(ignores.pushDue).toBeNull();
+  });
+
+  it('the flank comes sooner at a higher tier', () => {
+    aggressionSetting.current = 'aggressive';
+    const squad = new SquadCoordinator();
+    hold(squad, aggressionConfig.aggressive.holdBeforeFlankSec + 0.1);
+    expect(squad.flankDue).toBe(true);
+    aggressionSetting.current = 'cautious';
+    expect(squad.flankDue).toBe(false); // the new tier counts from the next decision
+  });
+
+  it('pincer: a second flanker at Aggressive, not at Assertive; the wait starts when both are over', () => {
+    const plan = () => ({ cost: 1 });
+    const [a, b, c] = [{}, {}, {}];
+    const single = new SquadCoordinator();
+    single.assignFlank([a, b], plan);
+    expect(single.assignPincer([a, b], plan)).toBeNull();
+
+    aggressionSetting.current = 'aggressive';
+    const squad = new SquadCoordinator();
+    expect(squad.assignPincer([a, b], plan)).toBeNull(); // no first flank yet
+    expect(squad.assignFlank([a, b, c], plan)?.member).toBe(a);
+    expect(squad.assignPincer([a, b, c], plan)?.member).toBe(b); // never the first one again
+    expect(squad.flankers).toEqual([a, b]);
+    expect(squad.assignPincer([a, b, c], plan)).toBeNull(); // two at most
+    squad.flankOver(a);
+    expect(squad.flanker).toBe(b);
+    expect(squad.flankWaitSec).toBe(0);
+    squad.flankOver(b);
+    expect(squad.flankWaitSec).toBe(aggressionConfig.aggressive.flankWaitSec);
+  });
+
+  it('Relentless: plays come at its own, shorter interval', () => {
+    aggressionSetting.current = 'relentless';
+    const squad = new SquadCoordinator();
+    squad.assignAdvance([{}], () => ({ cost: 1 }), [{}], () => false);
+    expect(squad.playWaitSec).toBe(aggressionConfig.relentless.playEverySec);
   });
 });

@@ -59,6 +59,8 @@ export interface FlankRejects {
   nearGrenade: number;
   noRoute: number;
   routeSeen: number;
+  /** On the first flanker's side of Rook (a pincer's second flank goes round the other side, 4.11). */
+  sameSide: number;
 }
 
 /** Why no flank spot was found, in a few words (dev readout): "20 in front of you, 3 not hidden by their cover, ...". */
@@ -71,6 +73,7 @@ export function describeFlankRejects(r: FlankRejects): string {
     [r.noRoute, 'no route'],
     [r.nearGrenade, 'near a grenade'],
     [r.taken, 'taken'],
+    [r.sameSide, "on the first flanker's side"],
   ];
   const listed = parts.filter(([count]) => count > 0).map(([count, why]) => `${count} ${why}`);
   return `no flank spot (${listed.length > 0 ? listed.join(', ') : 'no cover spots'})`;
@@ -105,7 +108,7 @@ export class StandInWorld implements StandInHooks {
   private readonly pinSide = new Vector3();
   private readonly enemyPoint = new Vector3();
   /** What the last flank plan turned down (dev readout). */
-  readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0 };
+  readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0, sameSide: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
   private readonly seen: Glimpse = { visibleShare: 0, distanceM: 0, fromSide: false, inViewOfLastSpot: false };
   private glimpseTimerSec = 0;
@@ -154,6 +157,10 @@ export class StandInWorld implements StandInHooks {
 
   disorganised(): boolean {
     return this.squad.disorganised;
+  }
+
+  suppressionAllowed(): boolean {
+    return this.squad.suppressionAllowed;
   }
 
   keepSuppressing(enemy: StandInEnemy): boolean {
@@ -330,9 +337,10 @@ export class StandInWorld implements StandInHooks {
    * The best flank spot for this stand-in, or null (enemies.md, "Choosing cover", 4.7). A spot qualifies if it is free
    * (and not the one it holds), at least the flank angle round from where Rook looks, hides it from him (by its own prop),
    * lets a peek from it see him (his cover does not protect that side), is out of a live grenade's blast, and has a route
-   * with at most the allowed metres in his view. Among those: the least exposed route, then the shortest.
+   * with at most the allowed metres in his view. Among those: the least exposed route, then the shortest. With `side` (1
+   * or -1, see `flankSide`), only spots on that side of him: a pincer's second flank (4.11).
    */
-  planFlank(enemy: StandInEnemy): FlankPlan | null {
+  planFlank(enemy: StandInEnemy, side = 0): FlankPlan | null {
     const { position, eyes, forward } = this.quarry;
     const lookM = Math.hypot(forward.x, forward.z);
     const minCos = Math.cos(squadConfig.flankMinAngleDeg * (Math.PI / 180));
@@ -350,6 +358,10 @@ export class StandInWorld implements StandInHooks {
       const toM = Math.hypot(toX, toZ);
       if (lookM > 1e-6 && toM > 1e-6 && (forward.x * toX + forward.z * toZ) / (lookM * toM) > minCos) {
         rejects.inFront++;
+        continue;
+      }
+      if (side !== 0 && this.flankSide(point) !== side) {
+        rejects.sameSide++;
         continue;
       }
       if (!this.coverPoints.hides(point, eyes)) {
@@ -381,6 +393,12 @@ export class StandInWorld implements StandInHooks {
       if (!best || cost < best.cost) best = { point, cost };
     }
     return best;
+  }
+
+  /** Which side of Rook a spot is on, as he looks: 1 or -1 (right or left; straight ahead or behind counts as 1). */
+  flankSide(point: CoverPoint): number {
+    const { position, forward } = this.quarry;
+    return forward.z * (point.xM - position.x) - forward.x * (point.zM - position.z) >= 0 ? -1 : 1;
   }
 
   /** How many metres of a route Rook can see a standing body's head on, checked every metre or so. */
