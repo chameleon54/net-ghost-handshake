@@ -110,6 +110,18 @@ describe('CoverPoints.hides', () => {
     expect(cover.hides(behindCrate, new Vector3(-4, 1.6, -3.2))).toBe(false); // right over the crate, looking down
   });
 
+  it('only its own prop counts: a spot hidden by a wall in front of Rook is in front of its cover, not behind it', () => {
+    // A low crate at the origin, a spot on its north side (the crate to its south), and a tall wall close in front of Rook.
+    const room = buildGreybox([
+      { kind: 'prop', xM: 0, zM: 0, widthM: 1, depthM: 1, heightM: 1 },
+      { kind: 'wall', xM: 0, zM: -5, widthM: 4, depthM: 0.3, heightM: 3 },
+    ]);
+    const own = new CoverPoints([], room.collision);
+    const northOfCrate: CoverPoint = { xM: 0, zM: -0.95, height: 'low', facingYawRad: Math.PI };
+    expect(own.hides(northOfCrate, eyesAt(0, 6))).toBe(true); // Rook to the south: the crate hides it
+    expect(own.hides(northOfCrate, eyesAt(0, -6))).toBe(false); // Rook to the north, behind his wall: only his wall is in the way
+  });
+
   it('follows the eyes: moved far enough to the side, they see past the cover', () => {
     const behindPillar = spot(0, -0.75);
     expect(cover.hides(behindPillar, eyesAt(0, 3))).toBe(true);

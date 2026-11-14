@@ -521,6 +521,7 @@ export const coverFolder: Folder<CoverKey> = {
     { key: 'rangePenaltyPerM', label: 'Penalty per m outside that', min: 0, max: 5, step: 0.1 },
     { key: 'walkPenaltyPerM', label: 'Penalty per m of walking', min: 0, max: 5, step: 0.05 },
     { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
+    { key: 'ownCoverReachM', label: 'Hidden check: own cover within (m of the body)', min: 0.5, max: 3, step: 0.05 },
   ],
 };
 

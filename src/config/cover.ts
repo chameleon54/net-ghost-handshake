@@ -10,6 +10,11 @@ export const coverConfigDefaults = {
   walkPenaltyPerM: 0.3,
   /** Where the "is it hidden" rays aim on a body at a spot: its head centre, and its chest at this share of its height. */
   chestShareOfHeight: 0.6,
+  /**
+   * Only the spot's own prop hides it: the first thing hit going from the body toward Rook must be this close to the body.
+   * Spots sit 0.45 m from their prop, so this allows Rook up to about 65 degrees to the side. Decision 222.
+   */
+  ownCoverReachM: 1.2,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

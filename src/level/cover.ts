@@ -21,8 +21,10 @@ export interface CoverPoint {
 type Owner = object;
 
 // The cover service (architecture.md, "Cover points"): is a spot hidden from a threat, which spots are taken, and the best
-// free spot against a threat. "Hidden" is decided by rays through the level, from the threat's eyes to where a body's
+// free spot against a threat. "Hidden" is decided by rays through the level between the threat's eyes and where a body's
 // head and chest would be at the spot (crouched for low cover, standing for high), so it always matches the real props.
+// Only the spot's own prop counts: something far from the spot, such as the cover Rook hides behind, does not make it a
+// hiding place (it would put the enemy on the wrong side of its own cover).
 export class CoverPoints {
   private readonly claims = new Map<CoverPoint, Owner>();
   private readonly target = new Vector3();
@@ -33,13 +35,13 @@ export class CoverPoints {
     private readonly collision: LevelCollision,
   ) {}
 
-  /** True if every ray from `eyes` to the head and chest of a body at this spot hits a wall or prop. */
+  /** True if the lines from the head and the chest of a body at this spot toward `eyes` are both blocked by the spot's own prop. */
   hides(point: CoverPoint, eyes: Vector3): boolean {
     const bodyHeightM = point.height === 'low' ? standInConfig.crouchHeightM : dummyConfig.heightM;
     this.target.set(point.xM, bodyHeightM - dummyConfig.headRadiusM, point.zM);
-    if (this.clearLine(eyes, this.target)) return false;
+    if (!this.blockedNearby(this.target, eyes)) return false;
     this.target.y = bodyHeightM * coverConfig.chestShareOfHeight;
-    return !this.clearLine(eyes, this.target);
+    return this.blockedNearby(this.target, eyes);
   }
 
   /** Who holds this spot, or null if it is free. */
@@ -91,9 +93,10 @@ export class CoverPoints {
     this.claims.clear();
   }
 
-  private clearLine(from: Vector3, to: Vector3): boolean {
-    const distanceM = from.distanceTo(to);
-    this.direction.subVectors(to, from).divideScalar(distanceM);
-    return this.collision.rayDistance(from, this.direction, distanceM) === Infinity;
+  /** True if the line from `body` toward `eyes` hits something within the own-cover reach of `body`: its own prop. */
+  private blockedNearby(body: Vector3, eyes: Vector3): boolean {
+    const distanceM = body.distanceTo(eyes);
+    this.direction.subVectors(eyes, body).divideScalar(distanceM);
+    return this.collision.rayDistance(body, this.direction, Math.min(distanceM, coverConfig.ownCoverReachM)) !== Infinity;
   }
 }
