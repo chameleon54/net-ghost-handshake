@@ -123,6 +123,9 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     noiseBlocked: () => world.wallBetween,
     coverShotClear: (_e, _point, way, side) => (world.coverShotFrom ? world.coverShotFrom(way, side) : true),
     muzzleClear: () => world.muzzleClear,
+    hunting: () => squad.hunting,
+    huntMoveOver: (e) => squad.huntMoveOver(e),
+    huntHoldScale: (e) => squad.huntHoldScale(e),
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -1835,5 +1838,82 @@ describe('the stand-in and a real grenade in the real test room (4.4 follow-up)'
     grenades.push(new Vector3(3.9, 0.05, -3)); // just east of the tall crate: the crate is between
     expect(world.spotGrenade(enemy, safeM, seen)).toBe(false);
     expect(world.grenadeNear(enemy.feet, safeM)).toBe(true); // it is there all the same
+  });
+});
+
+describe('StandInEnemy on a hunt (decision 235)', () => {
+  const huntCover: CoverPoint = { xM: 0, zM: -20, height: 'low', facingYawRad: 0, lean: 'both' };
+  const far = new Vector3(0, 0, 10);
+  /** An awake stand-in, Rook out of sight, its squad's hunt on, sent toward a spot far to the north. */
+  const sent = (role: Role, leads: boolean) => {
+    const s = setup(0.99, new SquadCoordinator(), role);
+    s.world.sees = false;
+    s.enemy.hit('body', 1);
+    s.run(far, dtSec);
+    s.squad.beginHunt({ x: 0, z: -24 }, [s.enemy], () => ({ cost: 1 }), () => true);
+    s.enemy.beginHunt(huntCover, leads);
+    return s;
+  };
+
+  it('the leader goes at its flank speed, a follower at its walking speed', () => {
+    const leader = sent('trooper', true);
+    leader.run(far, 1);
+    expect(leader.enemy.state).toBe('hunt');
+    expect(-leader.enemy.zM).toBeCloseTo(roleConfig.trooper.flankSpeedMps, 1);
+    const follower = sent('trooper', false);
+    follower.run(far, 1);
+    expect(-follower.enemy.zM).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 1);
+  });
+
+  it("arriving, it holds cover there and the leader's look starts", () => {
+    const { enemy, run, squad } = sent('flanker', true);
+    run(far, 20 / roleConfig.flanker.flankSpeedMps + 0.5);
+    expect(enemy.state).toBe('cover');
+    expect(squad.huntLookingSec).not.toBeNull();
+  });
+
+  it('once the hunt stops (Rook found), it takes cover from where it is instead of walking on', () => {
+    const { enemy, world, run, squad } = sent('trooper', true);
+    run(far, 1);
+    const releasesBefore = world.releases;
+    squad.watchKnowledge(dtSec, true, true); // someone saw or heard him
+    run(far, dtSec * 2);
+    expect(enemy.state).toBe('approach'); // no cover hides it in the fake world: the 4.1 behaviour
+    expect(world.releases).toBeGreaterThan(releasesBefore);
+  });
+
+  it('takes the shared last known spot only if it is newer than its own', () => {
+    const { enemy } = setup();
+    enemy.hit('body', 1);
+    enemy.shareLastKnown(new Vector3(5, 0, 5), 20);
+    expect(enemy.lastKnown.x).toBe(5);
+    enemy.shareLastKnown(new Vector3(9, 0, 9), 30); // older: ignored
+    expect(enemy.lastKnown.x).toBe(5);
+    expect(enemy.knowsFresh).toBe(false); // shared knowledge stays old: it only looks there
+  });
+});
+
+describe('StandInWorld on a hunt: judged from the last known spot (decision 235)', () => {
+  // A crate at (0, -1) with a spot on its north side. The squad last knew Rook was at (0, 2), south of the crate, but he
+  // has moved to (0, -4), north of it, where that spot does not hide anyone from him. A second spot is too far away.
+  const crate: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 1, depthM: 1, heightM: 1 };
+  const crateSpot: CoverPoint = { xM: 0, zM: -1.95, height: 'low', facingYawRad: Math.PI };
+  const farCrate: RoomBox = { kind: 'prop', xM: 6, zM: -7, widthM: 1, depthM: 1, heightM: 1 };
+  const farSpot: CoverPoint = { xM: 6, zM: -7.95, height: 'low', facingYawRad: Math.PI };
+
+  it('the leader takes cover near that spot that hides from it; cover is judged from it while the squad searches', async () => {
+    const level = buildGreybox([crate, farCrate]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const squad = new SquadCoordinator();
+    const cover = new CoverPoints([crateSpot, farSpot], level.collision);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rookAt(0, -4), () => {}, () => [], Math.random, squad);
+    const enemy = new StandInEnemy({ xM: -4, zM: -6, yawRad: 0 }, world);
+    expect(world.coverHides(crateSpot)).toBe(false); // from where he really is
+    for (let i = 0; i < 60; i++) squad.watchKnowledge(1, true, false);
+    const lead = squad.beginHunt({ x: 0, z: 2 }, [enemy], (member) => world.planHuntSpot(member), () => true);
+    expect(lead?.plan.point).toBe(crateSpot);
+    expect(world.coverHides(crateSpot)).toBe(true); // from where the squad thinks he is
+    squad.watchKnowledge(1, true, true); // found him: real eyes again
+    expect(world.coverHides(crateSpot)).toBe(false);
   });
 });

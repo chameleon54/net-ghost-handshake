@@ -236,6 +236,49 @@ function reposition(enemy: StandInEnemy): void {
   enemy.beginReposition(plan.point);
   cover?.beginSuppress();
 }
+/**
+ * Starts the hunt (decision 235) once the squad's knowledge of Rook is old: they all take the freshest last known spot,
+ * one leads to cover near it (a flanker first, never the heavy), and one watches from its cover (the heavy first).
+ */
+function startHunt(): void {
+  const knowing = activeEnemies.filter((enemy) => enemy.awake && enemy.knowsWhere);
+  if (knowing.length === 0) return;
+  const freshest = knowing.reduce((best, enemy) => (enemy.lastKnownAgeSec < best.lastKnownAgeSec ? enemy : best));
+  const spot = freshest.lastKnown.clone();
+  for (const enemy of knowing) enemy.shareLastKnown(spot, freshest.lastKnownAgeSec);
+  const lead = squad.beginHunt(
+    spot,
+    activeEnemies.filter((enemy) => enemy.canFlank), // a heavy never flanks, so it never leads
+    (enemy) => worldOf.get(enemy)?.planHuntSpot(enemy) ?? null,
+    (enemy) => enemy.role === 'flanker',
+  );
+  if (!lead) return;
+  lead.member.beginHunt(lead.plan.point, true);
+  squad.assignWatcher(
+    activeEnemies.filter((enemy) => enemy !== lead.member && enemy.canAdvance),
+    (enemy) => enemy.role === 'heavy',
+  );
+}
+/** A follow step of the hunt: up to the tier's followers, nearest the spot first, each to cover closer to it but not past the leader. */
+function huntStep(): void {
+  squad.huntStepStarted();
+  const spot = squad.huntSpot;
+  const fromSpotM = (xM: number, zM: number) => Math.hypot(xM - spot.x, zM - spot.z);
+  const leaderCover = activeEnemies.find((enemy) => enemy === squad.huntLeader)?.cover;
+  const closestM = Math.max(squadConfig.advanceClosestM, leaderCover ? fromSpotM(leaderCover.xM, leaderCover.zM) : 0);
+  const followers = activeEnemies
+    .filter((enemy) => enemy.canAdvance && enemy !== squad.huntLeader && enemy !== squad.huntWatcher)
+    .sort((a, b) => fromSpotM(a.xM, a.zM) - fromSpotM(b.xM, b.zM));
+  let moving = 0;
+  for (const enemy of followers) {
+    if (moving >= Math.round(squad.tier.huntFollowers)) break;
+    const plan = worldOf.get(enemy)?.planAdvance(enemy, closestM);
+    if (!plan) continue;
+    enemy.beginHunt(plan.point, false); // claims its spot before the next one plans
+    squad.addHuntFollower(enemy);
+    moving++;
+  }
+}
 /** The stand-ins that could pin Rook's cover now (4.9), leaving out `mover`. */
 const coverers = (mover: StandInEnemy | null): StandInEnemy[] =>
   activeEnemies.filter((enemy) => enemy !== mover && enemy.canSuppress && (worldOf.get(enemy)?.canSuppressFrom(enemy) ?? false));
@@ -491,6 +534,10 @@ const loop = new Loop(
     const squadKnows = activeEnemies.some((enemy) => enemy.awake && enemy.knowsFresh);
     const rookHidden = glimpses.length > 0 && glimpses.every((glimpse) => glimpse.visibleShare <= 0); // as of the last update
     squad.update(stepSec, squadKnows ? player.position : null, rookHidden);
+    // The hunt (decision 235): once its knowledge has been old long enough, the squad comes looking, cover by cover.
+    squad.watchKnowledge(stepSec, activeEnemies.some((enemy) => enemy.awake), squadKnows);
+    if (squad.huntDue) startHunt();
+    if (squad.huntStepDue) huntStep();
     // A push (4.10): a moment after the squad heard his gun run dry, reload or jam. A jam also starts a flank at once.
     const push = squad.pushDue;
     if (push) {

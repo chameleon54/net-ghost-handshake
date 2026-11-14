@@ -30,7 +30,10 @@ export type PushKind = 'dry' | 'reload' | 'jam';
 // free. Since 4.10 it hears Rook's gun: a dry click, a reload or a jam opens a push window, and a moment later it pushes
 // (a play at once, more movers on a dry gun, a flank at once on a jam). Since 4.11 its aggression tier decides which of
 // these it may use and how often (src/config/aggression.ts): Cautious has no suppressing fire at all, the pincer sends
-// two flankers at once, and the hearing reacts only some of the time at the lower tiers. Rules only, no drawing.
+// two flankers at once, and the hearing reacts only some of the time at the lower tiers. Since the hunt (4.11, decision
+// 235), when the squad's knowledge of Rook stays old long enough it comes looking: one leads to cover near where it last
+// knew he was, others follow cover by cover, one watches; found, the hunt ends; nothing found, it holds carefully until
+// it sees or hears him. One hunt per lost contact. Rules only, no drawing.
 export class SquadCoordinator {
   constructor(private readonly random: () => number = Math.random) {}
 
@@ -65,6 +68,27 @@ export class SquadCoordinator {
   private rookHidden = false;
   /** Why the last play did not start, for the dev readout, or null. */
   playFailure: string | null = null;
+  /**
+   * The hunt (decision 235): how long the squad's knowledge has been old, whether a hunt is on, whether one already ran
+   * since the last contact, whether it found nothing (the careful hold), where the squad last knew Rook was, and who leads,
+   * follows and watches.
+   */
+  private staleSec = 0;
+  private huntOn = false;
+  private huntSpent = false;
+  private careful = false;
+  private readonly lastSpot = { x: 0, z: 0 };
+  private huntLeaderMember: Member | null = null;
+  private leaderDone = false;
+  private readonly huntFollowerMembers = new Set<Member>();
+  private huntWatcherMember: Member | null = null;
+  private huntStepWaitLeftSec = 0;
+  private huntLookLeftSec = 0;
+  private huntRetryLeftSec = 0;
+  /** Why the last hunt could not start, for the dev readout, or null. */
+  huntFailure: string | null = null;
+  /** How the last hunt ended, for the dev readout, or null. */
+  huntResult: 'found' | 'nothing' | null = null;
 
   /**
    * Once per game update, before the enemies. `rook`: where Rook is while the squad knows it (an awake enemy's knowledge
@@ -355,6 +379,160 @@ export class SquadCoordinator {
     this.coverGraceLeftSec = squadConfig.suppressAfterMoveSec;
   }
 
+  /**
+   * Once per game update (the hunt, decision 235): whether any enemy is awake, and whether any awake one knows fresh where
+   * Rook is. Fresh knowledge ends a hunt (found) and the careful hold, and allows a new hunt the next time it goes old.
+   */
+  watchKnowledge(dtSec: number, awake: boolean, fresh: boolean): void {
+    if (fresh || !awake) {
+      if (fresh && this.huntOn) this.huntResult = 'found';
+      this.endHunt();
+      this.staleSec = 0;
+      this.huntSpent = false;
+      this.careful = false;
+      return;
+    }
+    this.staleSec += dtSec;
+    this.huntRetryLeftSec = Math.max(this.huntRetryLeftSec - dtSec, 0);
+    if (!this.huntOn) return;
+    this.huntStepWaitLeftSec = Math.max(this.huntStepWaitLeftSec - dtSec, 0);
+    if (this.leaderDone) this.huntLookLeftSec = Math.max(this.huntLookLeftSec - dtSec, 0);
+    // The leader has looked long enough and nobody is still walking: nothing found, it holds carefully.
+    if (this.leaderDone && this.huntLookLeftSec <= 0 && this.huntFollowerMembers.size === 0) {
+      this.endHunt();
+      this.huntResult = 'nothing';
+      this.careful = true;
+    }
+  }
+
+  private endHunt(): void {
+    this.huntOn = false;
+    this.huntLeaderMember = null;
+    this.leaderDone = false;
+    this.huntFollowerMembers.clear();
+    this.huntWatcherMember = null;
+  }
+
+  /** How long the squad's knowledge of Rook has been old (0 while it knows where he is). For the dev readout. */
+  get staleForSec(): number {
+    return this.staleSec;
+  }
+
+  /** True while a hunt is on. */
+  get hunting(): boolean {
+    return this.huntOn;
+  }
+
+  /**
+   * True while the squad searches for Rook: a hunt is on, or one found nothing and it holds carefully. Meanwhile its
+   * choices (which cover hides, how much of a route is in view) are judged from where it last knew he was.
+   */
+  get searching(): boolean {
+    return this.huntOn || this.careful;
+  }
+
+  /** Where the squad last knew Rook was, as the hunt took it (his feet). */
+  get huntSpot(): { readonly x: number; readonly z: number } {
+    return this.lastSpot;
+  }
+
+  get huntLeader(): Member | null {
+    return this.huntLeaderMember;
+  }
+
+  get huntFollowers(): readonly Member[] {
+    return [...this.huntFollowerMembers];
+  }
+
+  get huntWatcher(): Member | null {
+    return this.huntWatcherMember;
+  }
+
+  /** True when a hunt should start: the tier hunts, the knowledge has been old long enough, and none ran since the last contact. */
+  get huntDue(): boolean {
+    if (this.tier.hunt <= 0 || this.huntOn || this.huntSpent || this.disorganised || this.huntRetryLeftSec > 0) return false;
+    return this.staleSec > 0 && this.staleSec >= this.tier.huntAfterSec;
+  }
+
+  /**
+   * Starts a hunt toward `spot` (where the squad last knew Rook was): the leader is the candidate with the cheapest plan,
+   * preferred ones first (flankers). The plans are asked once the hunt is on, so they are judged from `spot`. With no plan
+   * nothing starts and it tries again later; `huntFailure` says why.
+   */
+  beginHunt<M extends Member, P extends { readonly cost: number }>(
+    spot: { readonly x: number; readonly z: number },
+    candidates: readonly M[],
+    plan: (member: M) => P | null,
+    preferred: (member: M) => boolean,
+  ): { member: M; plan: P } | null {
+    this.lastSpot.x = spot.x;
+    this.lastSpot.z = spot.z;
+    this.huntOn = true;
+    const best = cheapestOf(candidates.filter(preferred), plan) ?? cheapestOf(candidates.filter((member) => !preferred(member)), plan);
+    if (!best) {
+      this.huntOn = false;
+      this.huntFailure = candidates.length > 0 ? 'no reachable cover near your last spot' : 'nobody can lead (wounded, busy, or heavies only)';
+      this.huntRetryLeftSec = squadConfig.huntRetrySec;
+      return null;
+    }
+    this.huntSpent = true;
+    this.huntFailure = null;
+    this.huntResult = null;
+    this.huntLeaderMember = best.member;
+    this.huntStepWaitLeftSec = 0; // the first follow step comes at once
+    return best;
+  }
+
+  /** The watcher of the hunt, instead of covering fire: the first preferred candidate (the heavy), or any, or none. */
+  assignWatcher<M extends Member>(candidates: readonly M[], preferred: (member: M) => boolean): M | null {
+    if (!this.huntOn) return null;
+    const watcher = candidates.find(preferred) ?? candidates[0] ?? null;
+    this.huntWatcherMember = watcher;
+    return watcher;
+  }
+
+  /** True when the followers may take their next step toward the spot. */
+  get huntStepDue(): boolean {
+    return this.huntOn && this.huntStepWaitLeftSec <= 0;
+  }
+
+  /** A follow step was handed out (or nobody could move): the next comes after the tier's interval. */
+  huntStepStarted(): void {
+    this.huntStepWaitLeftSec = this.tier.huntStepEverySec;
+  }
+
+  addHuntFollower(member: Member): void {
+    if (this.huntOn) this.huntFollowerMembers.add(member);
+  }
+
+  /** The hunt move by `member` is over (arrived, or anything else). The leader's end starts its look. */
+  huntMoveOver(member: Member): void {
+    this.huntFollowerMembers.delete(member);
+    if (member !== this.huntLeaderMember || this.leaderDone) return;
+    this.leaderDone = true;
+    this.huntLookLeftSec = squadConfig.huntLookSec;
+  }
+
+  /** The leader's look time left once it is at its spot, or null before. For the dev readout. */
+  get huntLookingSec(): number | null {
+    return this.huntOn && this.leaderDone ? this.huntLookLeftSec : null;
+  }
+
+  /** How much longer `member` holds between peeks because of the hunt: the watcher less, everyone in a careful hold more. */
+  huntHoldScale(member: Member): number {
+    if (this.huntOn && member === this.huntWatcherMember) return squadConfig.huntWatchHoldScale;
+    return this.careful ? squadConfig.huntCarefulHoldScale : 1;
+  }
+
+  /** Dev panel testing aid: a hunt is due now, once the squad's knowledge is old (not at a tier that never hunts). */
+  forceHunt(): void {
+    if (this.huntOn) return;
+    this.staleSec = Math.max(this.staleSec, this.tier.huntAfterSec);
+    this.huntSpent = false;
+    this.careful = false;
+    this.huntRetryLeftSec = 0;
+  }
+
   /** Dev panel testing aid: a suppress-and-advance play may start now (if Rook hides and nothing else is on). */
   forcePlay(): void {
     this.playWaitLeftSec = 0;
@@ -419,5 +597,12 @@ export class SquadCoordinator {
     this.coverGraceLeftSec = 0;
     this.rookHidden = false;
     this.playFailure = null;
+    this.endHunt();
+    this.staleSec = 0;
+    this.huntSpent = false;
+    this.careful = false;
+    this.huntRetryLeftSec = 0;
+    this.huntFailure = null;
+    this.huntResult = null;
   }
 }

@@ -129,7 +129,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.close();
 
   // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', hunt: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
@@ -261,7 +261,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const coverOverlay = new CoverOverlay(scene, coverPoints, activeStandIns, camera.position);
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
-  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning)');
+  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning, green: hunting)');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
   // The aggression tier (4.11): the game starts on Assertive; switch between the four here, even mid-fight.
   squadPanel
@@ -269,6 +269,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     .name('Aggression tier');
   squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
   squadPanel.add({ play: () => squad.forcePlay() }, 'play').name('Suppress and advance now (while you hide)');
+  squadPanel.add({ hunt: () => squad.forceHunt() }, 'hunt').name('Hunt now (once they have lost you)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
   const tiersPanel = standInPanel.addFolder('Aggression tiers (4.11)');
   tiersPanel.close();
@@ -416,6 +417,26 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : !squad.suppressionAllowed ? 'none at this tier (no suppressing fire)'
       : squad.playFailure ? `${squad.playFailure}, tries again in ${squad.playWaitSec.toFixed(1)} s`
       : `next chance in ${squad.playWaitSec.toFixed(1)} s (only while you hide)`;
+    // The hunt (decision 235): who leads, follows and watches, or how long until one starts, or how the last one ended.
+    const huntLetter = (member: object | null) => {
+      const i = activeStandIns.findIndex((s) => s === member);
+      return i >= 0 ? letter(i) : null;
+    };
+    const huntFollowing = squad.huntFollowers.map(huntLetter).filter(Boolean);
+    const huntWatching = huntLetter(squad.huntWatcher);
+    const looking = squad.huntLookingSec;
+    readouts.hunt = squad.hunting
+      ? [
+          `${huntLetter(squad.huntLeader) ?? '?'} ${looking === null ? 'leading' : `looking (${looking.toFixed(1)} s left)`}`,
+          huntFollowing.length > 0 ? `${huntFollowing.join(', ')} following` : '',
+          huntWatching ? `${huntWatching} watching` : '',
+        ].filter(Boolean).join(', ')
+      : squad.searching ? 'over, nothing found: holding carefully until they see or hear you'
+      : squad.tier.hunt <= 0 ? 'never at this tier'
+      : squad.staleForSec <= 0 ? (squad.huntResult === 'found' ? 'found you: they fight' : 'none (they know where you are, or are not awake)')
+      : squad.huntFailure ? `${squad.huntFailure}, tries again soon`
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : `knowledge old ${squad.staleForSec.toFixed(1)} s, starts at ${squad.tier.huntAfterSec} s`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
       `health    ${readouts.health}`,
@@ -428,6 +449,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       `flank     ${readouts.flank}`,
       `advance   ${readouts.play}`,
       `heard     ${readouts.heard}`,
+      `hunt      ${readouts.hunt}`,
       ...enemyLines,
       `camera    ${readouts.freeCamera}`,
       ...(readouts.status ? [`status    ${readouts.status}`] : []),

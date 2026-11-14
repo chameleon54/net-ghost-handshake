@@ -381,3 +381,120 @@ describe('SquadCoordinator aggression tiers (4.11)', () => {
     expect(squad.playWaitSec).toBe(aggressionConfig.relentless.playEverySec);
   });
 });
+
+describe('SquadCoordinator: the hunt (4.11, decision 235)', () => {
+  afterEach(() => {
+    aggressionSetting.current = 'assertive';
+  });
+  const spot = { x: 3, z: -2 };
+  const anyPlan = () => ({ cost: 1 });
+  /** The squad is awake and its knowledge of Rook stays old for `seconds`. */
+  const stale = (squad: SquadCoordinator, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) squad.watchKnowledge(1 / 60, true, false);
+  };
+  /** A squad whose hunt is on, led by `leader`. */
+  const hunting = (leader: object) => {
+    const squad = new SquadCoordinator();
+    stale(squad, assertive.huntAfterSec + 0.1);
+    squad.beginHunt(spot, [leader], anyPlan, () => true);
+    return squad;
+  };
+
+  it('starts once the knowledge has been old for the tier delay, while someone is awake; never at Cautious', () => {
+    const squad = new SquadCoordinator();
+    stale(squad, assertive.huntAfterSec - 0.5);
+    expect(squad.huntDue).toBe(false);
+    stale(squad, 1);
+    expect(squad.huntDue).toBe(true);
+    squad.watchKnowledge(1 / 60, true, true); // seen or heard: the clock starts again
+    expect(squad.huntDue).toBe(false);
+    stale(squad, assertive.huntAfterSec + 1);
+    squad.watchKnowledge(1 / 60, false, false); // nobody awake
+    expect(squad.huntDue).toBe(false);
+    aggressionSetting.current = 'relentless';
+    stale(squad, 0.1); // at once
+    expect(squad.huntDue).toBe(true);
+    aggressionSetting.current = 'cautious';
+    stale(squad, 60);
+    expect(squad.huntDue).toBe(false);
+  });
+
+  it('the leader: a flanker first, planned with the hunt on (judged from the spot); no plan, no hunt and a retry wait', () => {
+    const squad = new SquadCoordinator();
+    stale(squad, assertive.huntAfterSec + 0.1);
+    const [trooper, flanker] = [{}, {}];
+    let plannedWhileHunting = false;
+    const lead = squad.beginHunt(spot, [trooper, flanker], () => {
+      plannedWhileHunting = squad.hunting && squad.searching;
+      return { cost: 1 };
+    }, (member) => member === flanker);
+    expect(lead?.member).toBe(flanker);
+    expect(plannedWhileHunting).toBe(true);
+    expect(squad.huntSpot).toEqual(spot);
+    expect(squad.huntDue).toBe(false);
+
+    const none = new SquadCoordinator();
+    stale(none, assertive.huntAfterSec + 0.1);
+    expect(none.beginHunt(spot, [trooper], () => null, () => true)).toBeNull();
+    expect(none.hunting).toBe(false);
+    expect(none.searching).toBe(false);
+    expect(none.huntFailure).not.toBeNull();
+    expect(none.huntDue).toBe(false);
+    stale(none, squadConfig.huntRetrySec + 0.1);
+    expect(none.huntDue).toBe(true);
+  });
+
+  it('found: fresh knowledge ends the hunt at once', () => {
+    const squad = hunting({});
+    squad.watchKnowledge(1 / 60, true, true);
+    expect(squad.hunting).toBe(false);
+    expect(squad.searching).toBe(false);
+    expect(squad.huntLeader).toBeNull();
+    expect(squad.huntResult).toBe('found');
+  });
+
+  it('nothing found: over once the leader has looked and nobody walks; a careful hold; one hunt per lost contact', () => {
+    const [leader, follower, other] = [{}, {}, {}];
+    const squad = hunting(leader);
+    squad.addHuntFollower(follower);
+    squad.huntMoveOver(leader);
+    expect(squad.huntLookingSec).toBe(squadConfig.huntLookSec);
+    stale(squad, squadConfig.huntLookSec + 0.5);
+    expect(squad.hunting).toBe(true); // a follower still walks
+    squad.huntMoveOver(follower);
+    stale(squad, 0.1);
+    expect(squad.hunting).toBe(false);
+    expect(squad.searching).toBe(true);
+    expect(squad.huntResult).toBe('nothing');
+    expect(squad.huntHoldScale(other)).toBe(squadConfig.huntCarefulHoldScale);
+    stale(squad, 60);
+    expect(squad.huntDue).toBe(false); // the same spot again would be pointless
+    squad.watchKnowledge(1 / 60, true, true); // found him: the careful hold ends
+    expect(squad.searching).toBe(false);
+    expect(squad.huntHoldScale(other)).toBe(1);
+    stale(squad, assertive.huntAfterSec + 0.1);
+    expect(squad.huntDue).toBe(true); // lost again: a new hunt
+  });
+
+  it('the watcher (the heavy first) peeks more often; follow steps come at the tier interval', () => {
+    const [leader, trooper, heavy] = [{}, {}, {}];
+    const squad = hunting(leader);
+    expect(squad.assignWatcher([trooper, heavy], (member) => member === heavy)).toBe(heavy);
+    expect(squad.huntHoldScale(heavy)).toBe(squadConfig.huntWatchHoldScale);
+    expect(squad.huntHoldScale(trooper)).toBe(1);
+    expect(squad.huntStepDue).toBe(true); // the first step at once
+    squad.huntStepStarted();
+    expect(squad.huntStepDue).toBe(false);
+    stale(squad, assertive.huntStepEverySec + 0.1);
+    expect(squad.huntStepDue).toBe(true);
+  });
+
+  it('Hunt now (dev aid): due as soon as the knowledge is old, but not at a tier that never hunts', () => {
+    const squad = new SquadCoordinator();
+    stale(squad, 0.1);
+    squad.forceHunt();
+    expect(squad.huntDue).toBe(true);
+    aggressionSetting.current = 'cautious';
+    expect(squad.huntDue).toBe(false);
+  });
+});

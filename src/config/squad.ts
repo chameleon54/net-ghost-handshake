@@ -69,6 +69,17 @@ export const squadConfigDefaults = {
   flankPressMaxSec: 6,
   /** ...or until it has not seen Rook for this long (or he hurts it). */
   flankPressLostSightSec: 1,
+  // The hunt (4.11, decision 235). When it starts and how many follow is per tier (aggression.ts).
+  /** The hunt's leader goes to cover within this distance of where the squad last knew Rook was... */
+  huntNearM: 6,
+  /** ...and looks from there this long; then, with no follower still walking, the hunt is over. */
+  huntLookSec: 4,
+  /** When nobody can lead a hunt (no reachable cover near that spot), it tries again after this long. */
+  huntRetrySec: 2,
+  /** During the hunt the watcher holds this many times as long between peeks (less than 1: it peeks often). */
+  huntWatchHoldScale: 0.5,
+  /** After a hunt that found nothing, everyone holds this many times longer until they see or hear him. */
+  huntCarefulHoldScale: 1.5,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

@@ -86,7 +86,8 @@ export function describeFlankRejects(r: FlankRejects): string {
 // sparks and impact sounds work as they do for Rook's own shots; a miss passing close by his head also sends
 // `shot:near-miss` for the crack. It also measures what the stand-in sees of Rook for his exposure meter (4.5).
 // It also plans flanks (4.7): which cover spot round Rook's side to go to. One world per stand-in: it remembers the spot
-// its stand-in last saw Rook from.
+// its stand-in last saw Rook from. While the squad searches for him (the hunt, decision 235), cover and routes are judged
+// from where the squad last knew he was, not where he is.
 export class StandInWorld implements StandInHooks {
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
@@ -107,6 +108,8 @@ export class StandInWorld implements StandInHooks {
   private readonly sample = new Vector3();
   private readonly pinSide = new Vector3();
   private readonly enemyPoint = new Vector3();
+  private readonly huntEyes = new Vector3();
+  private readonly huntFeet = new Vector3();
   /** What the last flank plan turned down (dev readout). */
   readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0, sameSide: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
@@ -163,6 +166,58 @@ export class StandInWorld implements StandInHooks {
     return this.squad.suppressionAllowed;
   }
 
+  hunting(): boolean {
+    return this.squad.hunting;
+  }
+
+  huntMoveOver(enemy: StandInEnemy): void {
+    this.squad.huntMoveOver(enemy);
+  }
+
+  huntHoldScale(enemy: StandInEnemy): number {
+    return this.squad.huntHoldScale(enemy);
+  }
+
+  /**
+   * Where the squad judges Rook's view from when it picks cover and routes: his real eyes, or while it searches for him
+   * (the hunt, decision 235) where it last knew he was, at standing eye height. Sight itself always uses his real eyes.
+   */
+  private get viewEyes(): Vector3 {
+    if (!this.squad.searching) return this.quarry.eyes;
+    const spot = this.squad.huntSpot;
+    // shortcut: the floor there is taken as height 0 (as `lastKnown` is); use the floor height once levels have storeys (phase 5).
+    return this.huntEyes.set(spot.x, playerConfig.eyeHeightM, spot.z);
+  }
+
+  /** His feet, as `viewEyes` judges: where he is, or while the squad searches, where it last knew he was. */
+  private get viewFeet(): Vector3 {
+    if (!this.squad.searching) return this.quarry.position;
+    return this.huntFeet.set(this.squad.huntSpot.x, 0, this.squad.huntSpot.z);
+  }
+
+  /**
+   * Where the hunt's leader goes (decision 235), or null: a free cover point within the hunt distance of where the squad
+   * last knew Rook was, that hides it from that spot and lets a peek see it, and that it can reach. The least exposed
+   * route (judged from that spot) wins, then the shortest walk. Asked while the hunt is on.
+   */
+  planHuntSpot(enemy: StandInEnemy): FlankPlan | null {
+    const eyes = this.viewEyes;
+    const feet = this.viewFeet;
+    let best: FlankPlan | null = null;
+    for (const point of this.coverPoints.points) {
+      const holder = this.coverPoints.claimedBy(point);
+      if (holder && holder !== enemy) continue;
+      if (Math.hypot(point.xM - feet.x, point.zM - feet.z) > squadConfig.huntNearM) continue;
+      if (!this.coverPoints.hides(point, eyes)) continue;
+      if (!peekWays(point).some((way) => this.clearLine(peekEyesAt(point, way, this.peekEyes), eyes))) continue;
+      const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
+      if (!Number.isFinite(walk)) continue;
+      const cost = this.exposedRouteM(this.routeToCover) * exposedCostPerM + walk; // walkM left its route there
+      if (!best || cost < best.cost) best = { point, cost };
+    }
+    return best;
+  }
+
   keepSuppressing(enemy: StandInEnemy): boolean {
     return this.squad.keepSuppressing(enemy);
   }
@@ -188,7 +243,8 @@ export class StandInWorld implements StandInHooks {
    * resort), plus the metres in view. Also how much of the route is in his view, to know if it may go without cover.
    */
   planReposition(enemy: StandInEnemy): (FlankPlan & { readonly exposedM: number }) | null {
-    const { position, eyes } = this.quarry;
+    const position = this.viewFeet;
+    const eyes = this.viewEyes;
     const { preferMinM, preferMaxM } = enemy.values;
     let best: (FlankPlan & { readonly exposedM: number }) | null = null;
     for (const point of this.coverPoints.points) {
@@ -227,17 +283,19 @@ export class StandInWorld implements StandInHooks {
    * prop), at least the advance gain closer to him than where it is but not too close, out of a live grenade's blast, and
    * reachable. The move is covered by a squadmate's fire, but covering fire buys a short dash, not a long walk in the open:
    * at most the allowed metres of the route may be in his view, and the least exposed route wins, then the shortest walk
-   * (decision 239).
+   * (decision 239). A hunt's follower (decision 235) moves up toward where the squad last knew he was, no closer than
+   * `closestM` (its leader's distance from there).
    */
-  planAdvance(enemy: StandInEnemy): FlankPlan | null {
-    const { position, eyes } = this.quarry;
+  planAdvance(enemy: StandInEnemy, closestM = squadConfig.advanceClosestM): FlankPlan | null {
+    const position = this.viewFeet;
+    const eyes = this.viewEyes;
     const nowM = Math.hypot(enemy.xM - position.x, enemy.zM - position.z);
     let best: FlankPlan | null = null;
     for (const point of this.coverPoints.points) {
       const holder = this.coverPoints.claimedBy(point);
       if (point === enemy.cover || (holder && holder !== enemy)) continue;
       const toM = Math.hypot(point.xM - position.x, point.zM - position.z);
-      if (toM > nowM - squadConfig.advanceMinGainM || toM < squadConfig.advanceClosestM) continue;
+      if (toM > nowM - squadConfig.advanceMinGainM || toM < closestM) continue;
       if (!this.coverPoints.hides(point, eyes)) continue;
       const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
       if (!Number.isFinite(walk)) continue;
@@ -401,7 +459,7 @@ export class StandInWorld implements StandInHooks {
     return forward.z * (point.xM - position.x) - forward.x * (point.zM - position.z) >= 0 ? -1 : 1;
   }
 
-  /** How many metres of a route Rook can see a standing body's head on, checked every metre or so. */
+  /** How many metres of a route Rook can see a standing body's head on (judged as `viewEyes`), checked every metre or so. */
   private exposedRouteM(route: readonly Vector3[]): number {
     let exposedM = 0;
     for (let i = 1; i < route.length; i++) {
@@ -412,7 +470,7 @@ export class StandInWorld implements StandInHooks {
       for (let step = 1; step <= steps; step++) {
         this.sample.lerpVectors(from, to, step / steps);
         this.sample.y += standInConfig.eyeHeightM;
-        if (this.clearLine(this.quarry.eyes, this.sample)) exposedM += lengthM / steps;
+        if (this.clearLine(this.viewEyes, this.sample)) exposedM += lengthM / steps;
       }
     }
     return exposedM;
@@ -494,8 +552,8 @@ export class StandInWorld implements StandInHooks {
   pickCover(enemy: StandInEnemy): CoverPoint | null {
     return this.coverPoints.best(
       enemy,
-      this.quarry.eyes,
-      this.quarry.position,
+      this.viewEyes,
+      this.viewFeet,
       (point) => this.walkM(enemy, point),
       enemy.values,
       (point) => this.canFightFrom(point), // a spot it can shoot from is preferred (decision 237)
@@ -503,7 +561,7 @@ export class StandInWorld implements StandInHooks {
   }
 
   coverHides(point: CoverPoint): boolean {
-    return this.coverPoints.hides(point, this.quarry.eyes);
+    return this.coverPoints.hides(point, this.viewEyes);
   }
 
   releaseCover(enemy: StandInEnemy): void {
@@ -541,7 +599,7 @@ export class StandInWorld implements StandInHooks {
       if (Math.hypot(point.xM - grenade.x, point.zM - grenade.z) < safeM) continue;
       const walk = this.walkM(enemy, point);
       if (walk > standInConfig.grenadeRunMaxM) continue;
-      const hides = this.coverPoints.hides(point, this.quarry.eyes);
+      const hides = this.coverPoints.hides(point, this.viewEyes);
       if ((hides && !bestHides) || (hides === bestHides && walk < bestWalkM)) {
         best = point;
         bestHides = hides;

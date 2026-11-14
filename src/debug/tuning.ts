@@ -577,6 +577,10 @@ export const tierSliders: Slider<TierKey>[] = [
   { key: 'pushMoversDry', label: 'Hearing: move up on a dry gun (8: everyone)', min: 0, max: 8, step: 1 },
   { key: 'pushMoversReload', label: 'Hearing: move up on a reload', min: 0, max: 8, step: 1 },
   { key: 'pushMoversJam', label: 'Hearing: move up on a jam (plus a flank)', min: 0, max: 8, step: 1 },
+  { key: 'hunt', label: 'Hunt: comes looking at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'huntAfterSec', label: 'Hunt: after its knowledge is old for (s)', min: 0, max: 60, step: 0.5 },
+  { key: 'huntFollowers', label: 'Hunt: followers per step (8: everyone)', min: 0, max: 8, step: 1 },
+  { key: 'huntStepEverySec', label: 'Hunt: a follow step every (s)', min: 0.5, max: 30, step: 0.5 },
 ];
 
 export const squadFolder: Folder<SquadKey> = {
@@ -614,6 +618,11 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'repositionMaxExposedM', label: 'Reposition: uncovered, route in your view at most (m)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'huntNearM', label: 'Hunt: leader goes to cover within (m) of your last spot', min: 1, max: 20, step: 0.5 },
+    { key: 'huntLookSec', label: 'Hunt: leader looks from there for (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'huntRetrySec', label: 'Hunt: nobody can lead, try again after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'huntWatchHoldScale', label: 'Hunt: watcher holds (times as long)', min: 0.1, max: 2, step: 0.05 },
+    { key: 'huntCarefulHoldScale', label: 'Hunt found nothing: holds (times as long)', min: 1, max: 4, step: 0.1 },
   ],
 };
 
