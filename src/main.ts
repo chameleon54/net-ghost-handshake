@@ -86,7 +86,16 @@ scene.add(sun);
 const level = buildGreybox();
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
-const navigation = await Navigation.create(level.navigationGeometry);
+// If the library cannot start, the game still runs: enemies find no routes and stand still, and the start screen says so.
+let navigation: Navigation;
+let navigationFailed = false;
+try {
+  navigation = await Navigation.create(level.navigationGeometry);
+} catch (error) {
+  console.error('Navigation could not load:', error);
+  navigation = Navigation.unavailable();
+  navigationFailed = true;
+}
 const coverPoints = new CoverPoints(greyboxCover, level.collision); // the hand-placed cover spots (4.3)
 const player = new Player(level.collision);
 
@@ -197,7 +206,7 @@ const overlay = createOverlay(() => {
   audio.unlock();
   void pointerLock.request();
 });
-overlay.show(uiText.clickToPlay);
+overlay.show(navigationFailed ? `${uiText.clickToPlay}. ${uiText.navigationFailed}` : uiText.clickToPlay);
 
 // Death (milestone 3.1): the world freezes under a line of text until Enter, which restarts at once (no page reload).
 // The real death screen is 7.3. The overlay is made after the pause overlay so it sits on top, and clicking it resumes too.

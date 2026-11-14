@@ -42,11 +42,17 @@ function setup(roll = 0.99) {
     fleeTo: new Vector3(),
     fleeCover: null as CoverPoint | null,
     spotted: 0,
+    /** No route can be found. */
+    routeFails: false,
+    /** An invisible wall it cannot walk north past (pushOut holds its feet at this z), or none. */
+    wallAtZ: null as number | null,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
     canSeePlayer: (e) => world.sees || (world.seenWhenOut && e.peekOut >= 1),
-    pushOut: () => {},
+    pushOut: (feet) => {
+      if (world.wallAtZ !== null) feet.z = Math.max(feet.z, world.wallAtZ);
+    },
     fire: (_enemy, shot) => shots.push({ atSec: world.clockSec, hits: shot === 'hit', shot }),
     seesPlayerFrom: (eyes) => (world.seesFrom ? world.seesFrom(eyes) : world.sees),
     peekTell: () => world.tells.push(world.clockSec),
@@ -64,6 +70,7 @@ function setup(roll = 0.99) {
     grenadeSpotted: () => world.spotted++,
     findPath: (from, to, out) => {
       out.length = 0;
+      if (world.routeFails) return false;
       out.push(from.clone(), ...(world.route ?? [to]).map((p) => p.clone()));
       return true;
     },
@@ -402,7 +409,8 @@ describe('StandInEnemy fighting back (4.3 follow-up)', () => {
     world.sees = true;
     world.coverHides = false;
     world.cover = nextSpot;
-    run(rook, 0.1);
+    // It notices its cover has failed at its next cover check (decision 218), then stands and fights.
+    for (let i = 0; i < standInConfig.coverCheckIntervalSec / dtSec + 2 && enemy.state !== 'fight'; i++) run(rook, dtSec);
     expect(enemy.state).toBe('fight');
     expect(enemy.crouched).toBe(false);
     run(rook, standInConfig.fightSec - 0.2);
@@ -590,13 +598,28 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
     expect(world.tells).toHaveLength(2);
   });
 
-  it('up close the fight rule still wins: a peek that sees Rook within range turns into a fight', () => {
-    const { enemy, world, run } = holding(lowSpot);
+  it('with Rook close in front of cover that still hides it, a crouched side peek fires and goes back, staying crouched', () => {
+    const sideSpot: CoverPoint = { ...lowSpot, lean: 'both' };
+    const { enemy, world, shots, run } = holding(sideSpot);
     world.seenWhenOut = true;
-    const near = new Vector3(0, 0, 2); // 5 m south
+    world.seesFrom = (eyes) => eyes.x > 0.3 && eyes.y < 1; // only the crouched step east sees him
+    const near = new Vector3(0, 0, 2); // 5 m south, inside the stand-ground range
     runUntil(run, near, () => enemy.peekOut >= 1);
-    run(near, 2 * dtSec);
+    run(near, 0.5);
+    expect(enemy.state).toBe('cover'); // no stand-and-fight while its cover works (decision 218)
+    expect(enemy.heightM).toBe(standInConfig.crouchHeightM);
+    expect(shots.length).toBeGreaterThan(0);
+    run(near, 1);
+    expect(enemy.peekOut).toBe(0); // back in
+  });
+
+  it('up close with its cover failing, it still stands and fights', () => {
+    const { enemy, world, run } = holding(lowSpot);
+    world.sees = true;
+    world.coverHides = false;
+    run(new Vector3(0, 0, 2), 0.6);
     expect(enemy.state).toBe('fight');
+    expect(enemy.crouched).toBe(false);
   });
 });
 
@@ -719,6 +742,57 @@ describe('StandInEnemy and grenades (4.4 follow-up)', () => {
     run(new Vector3(0, 0, 0), 1.5); // Rook 3 m away, in sight
     expect(enemy.state).toBe('flee');
     expect(shots).toHaveLength(0);
+  });
+});
+
+describe('StandInEnemy: noises away from Rook, and failed walks (4.4 follow-up, decision 219)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -5, height: 'low', facingYawRad: Math.PI };
+
+  it('a bullet impact or a grenade wakes it, but does not tell it where Rook is', () => {
+    const { enemy } = setup();
+    enemy.hear({ kind: 'impact', position: new Vector3(4, 1, 0), radiusM: 15 });
+    expect(enemy.awake).toBe(true);
+    expect(enemy.knowsWhere).toBe(false);
+    enemy.hear({ kind: 'footstep', position: new Vector3(-3, 0, 2), radiusM: 15 });
+    enemy.hear({ kind: 'impact', position: new Vector3(4, 1, 0), radiusM: 15 });
+    enemy.hear({ kind: 'grenade-blast', position: new Vector3(4, 1, 0), radiusM: 80 });
+    expect(enemy.lastKnown.toArray()).toEqual([-3, 0, 2]); // still where it heard his step
+  });
+
+  it('with no route to its cover, it gives the spot up instead of standing there forever', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.cover = spot;
+    world.routeFails = true;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, 20), 0.5);
+    expect(world.releases).toBeGreaterThan(1); // it let the spot go (and keeps trying, as the spot is offered again)
+    expect(enemy.feet.toArray()).toEqual([0, 0, 0]);
+  });
+
+  it('stuck on the way to its cover, it gives up after its stuck time', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.cover = spot;
+    world.wallAtZ = -1; // it cannot get past z -1
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, 20), 0.5 + 0.2); // it reaches the wall
+    const releasesAtWall = world.releases;
+    run(new Vector3(0, 0, 20), standInConfig.walkStuckSec + 0.2);
+    expect(world.releases).toBeGreaterThan(releasesAtWall);
+  });
+
+  it('running from a grenade with no route, it stops running and carries on as usual', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.cover = { xM: 0, zM: -2, height: 'low', facingYawRad: Math.PI };
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, 15), 2);
+    world.grenade = new Vector3(0, 0.05, -1.5);
+    world.fleeTo.set(0, 0, -12);
+    world.routeFails = true;
+    run(new Vector3(0, 0, 15), 1);
+    expect(enemy.state).not.toBe('flee');
   });
 });
 

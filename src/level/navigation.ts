@@ -18,10 +18,16 @@ export class Navigation {
   private readonly searchBox = { x: navigationConfig.searchSidewaysM, y: navigationConfig.searchUpDownM, z: navigationConfig.searchSidewaysM };
   private readonly floorPoint = { x: 0, y: 0, z: 0 };
 
+  /** `null` when the library could not start: then there is no mesh, and no path is ever found. */
   private constructor(
-    private readonly navMesh: NavMesh,
-    private readonly query: NavMeshQuery,
+    private readonly navMesh: NavMesh | null,
+    private readonly query: NavMeshQuery | null,
   ) {}
+
+  /** A navigation with no mesh, for when the library fails to start: every path and floor query fails (decision 219). */
+  static unavailable(): Navigation {
+    return new Navigation(null, null);
+  }
 
   /** Starts the library (once) and builds the mesh from `geometry`, which must include the floor. */
   static async create(geometry: BufferGeometry): Promise<Navigation> {
@@ -51,7 +57,7 @@ export class Navigation {
     out.length = 0;
     const start = this.onFloor(from);
     const end = start && this.onFloor(to);
-    if (!start || !end) return false;
+    if (!this.query || !start || !end) return false;
     const { success, path } = this.query.computePath(start, end, { halfExtents: this.searchBox });
     if (!success) return false;
     for (const point of path) out.push(new Vector3(point.x, point.y, point.z)); // a few times a second, so a little garbage is fine
@@ -68,7 +74,7 @@ export class Navigation {
 
   /** The mesh's triangles, for the dev overlay: flat positions (x, y, z, ...) and indices. */
   triangles(): [positions: number[], indices: number[]] {
-    return getNavMeshPositionsAndIndices(this.navMesh);
+    return this.navMesh ? getNavMeshPositionsAndIndices(this.navMesh) : [[], []];
   }
 
   /**
@@ -77,6 +83,7 @@ export class Navigation {
    * crate's own top (which is a separate patch nobody can reach). Upgrade when a level has walkways or stairs.
    */
   private onFloor(position: Vector3): { x: number; y: number; z: number } | null {
+    if (!this.query) return null;
     this.floorPoint.x = position.x;
     this.floorPoint.y = 0;
     this.floorPoint.z = position.z;

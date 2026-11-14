@@ -90,3 +90,14 @@ describe('Navigation on the test room', () => {
     expect(Math.hypot(out.x - 3, out.z - -3)).toBeLessThan(1.3);
   });
 });
+
+describe('Navigation.unavailable (when the library fails to start, decision 219)', () => {
+  it('finds no path, no floor, and has no triangles', () => {
+    const none = Navigation.unavailable();
+    const path: Vector3[] = [new Vector3()];
+    expect(none.findPath(new Vector3(0, 0, 4), new Vector3(0, 0, -2), path)).toBe(false);
+    expect(path).toHaveLength(0);
+    expect(none.closestPoint(new Vector3(0, 0, 0), new Vector3())).toBe(false);
+    expect(none.triangles()).toEqual([[], []]);
+  });
+});

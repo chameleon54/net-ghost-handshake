@@ -15,4 +15,6 @@ export const uiText = {
   /** Temporary death text (the real death screen is milestone 7.3). */
   died: 'You died. Press Enter to restart',
   captureRefused: 'The browser did not allow that yet. Click again',
+  /** Shown under "Click to play" if the enemies' navigation failed to load (decision 219). */
+  navigationFailed: 'Enemy navigation could not load, so enemies will stand still. Reload the page to try again',
 } as const;

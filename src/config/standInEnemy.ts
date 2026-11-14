@@ -12,6 +12,8 @@ export const standInConfigDefaults = {
   closestM: 1,
   /** How often it plans a fresh route while walking (4.2). */
   repathIntervalSec: 0.5,
+  /** A walk has failed if no route is found, or it has not got closer to where it is going for this long (decision 219). */
+  walkStuckSec: 1.5,
   /** How often it checks that its cover still hides it, and picks new cover if not (4.3). */
   coverCheckIntervalSec: 0.5,
   /** It has reached its cover spot within this distance. */
@@ -39,7 +41,7 @@ export const standInConfigDefaults = {
   /** How far it steps sideways out of low cover, staying crouched (decision 216). */
   crouchPeekStepM: 0.75,
   /** What it knows of Rook stays fresh this long; a peek fires at his cover only on fresh knowledge (decision 216). */
-  memoryFreshSec: 5,
+  memoryFreshSec: 10,
   /** Chance that a peek which finds Rook hidden fires its burst at his cover anyway, for pressure (decision 207). */
   hiddenFireChance: 0.5,
   /** Below this share of its health it is wounded: it stops standing its ground and pulls back to cover (decision 214). */

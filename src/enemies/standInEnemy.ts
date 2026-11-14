@@ -3,7 +3,7 @@ import { dummyConfig } from '../config/dummy';
 import { grenadeConfig } from '../config/grenade';
 import { standInConfig } from '../config/standInEnemy';
 import type { CoverPoint } from '../level/cover';
-import { hearsNoise, type Noise } from '../stealth/noise';
+import { hearsNoise, type Noise, type NoiseKind } from '../stealth/noise';
 import type { HitZone } from './dummy';
 import { Health } from './health';
 import type { Target } from './target';
@@ -56,6 +56,10 @@ export interface StandInHooks {
 }
 
 const degToRad = Math.PI / 180;
+/** Getting this much closer to a walk's goal counts as progress (smaller changes are jitter). */
+const progressStepM = 0.05;
+/** Noises made where Rook's bullet or grenade ended up, not where he is. */
+const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'grenade-bounce', 'grenade-blast']);
 
 // A temporary enemy (milestone 4.1, decision 197), growing step by step into the real one. It starts idle, wakes on a
 // noise it hears or a hit, and from then on always knows where Rook is. It follows routes on the navigation mesh (4.2).
@@ -107,7 +111,15 @@ export class StandInEnemy implements Target {
   /** The point of `path` it is walking to. */
   private pathIndex = 0;
   private repathTimerSec = 0;
+  /** Whether the last route planned reached anywhere. */
+  private routeFound = true;
+  /** The current walk's goal, the closest it has got to it, and how long it has gone without getting closer. */
+  private readonly walkGoal = new Vector3(Infinity, 0, Infinity);
+  private walkClosestM = Infinity;
+  private walkStuckForSec = 0;
   private coverPoint: CoverPoint | null = null;
+  /** Whether its spot hid it from Rook at the last cover check. */
+  private spotHides = false;
   private coverTimerSec = 0;
   private readonly coverSpot = new Vector3();
   private peekPhase: PeekPhase = 'hold';
@@ -212,14 +224,19 @@ export class StandInEnemy implements Target {
     this.setState('idle');
   }
 
-  /** A noise Rook made: if it carries to its ears, it now knows he was there, and it wakes up if it was idle. */
+  /**
+   * A noise Rook caused: if it carries to its ears, it wakes up if it was idle. A noise made where he is (a shot, a step)
+   * also tells it where he was; one made where his bullet or grenade landed does not (decision 219).
+   */
   hear(noise: Noise): void {
     if (this.state === 'falling' || this.state === 'down') return;
     this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
     if (!hearsNoise(noise, this.ears)) return;
-    this.lastKnown.set(noise.position.x, 0, noise.position.z);
-    this.knowsWhere = true;
-    this.lastKnownAgeSec = 0;
+    if (!awayFromRook.has(noise.kind)) {
+      this.lastKnown.set(noise.position.x, 0, noise.position.z);
+      this.knowsWhere = true;
+      this.lastKnownAgeSec = 0;
+    }
     if (this.state === 'idle') this.wake();
   }
 
@@ -302,7 +319,9 @@ export class StandInEnemy implements Target {
       return;
     }
     // Seen up close, it stands and fights instead of running (decision 209); wounded, that fight is only to get away.
-    if (this.coverPoint && this.seesPlayer && distanceM <= standInConfig.standGroundM) {
+    // Not while its cover still works: then a peek that sees Rook fires from the peek and goes back in (decision 218).
+    const coverWorks = this.state === 'cover' && this.spotHides;
+    if (this.coverPoint && this.seesPlayer && distanceM <= standInConfig.standGroundM && !coverWorks) {
       this.beginFight();
       this.fight(dtSec, dx, dz, distanceM);
       return;
@@ -313,7 +332,7 @@ export class StandInEnemy implements Target {
       const toCoverM = Math.hypot(this.coverSpot.x - this.feet.x, this.coverSpot.z - this.feet.z);
       if (this.state !== 'cover' && toCoverM > standInConfig.coverArriveM) {
         this.startWalking();
-        this.walkRoute(dtSec, this.coverSpot);
+        if (!this.walkRoute(dtSec, this.coverSpot)) this.giveUpWalk(); // drop the spot; pick again straight away
         return;
       }
       // At its spot: crouch behind low cover, hold, and peek out every so often.
@@ -330,7 +349,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.startWalking();
-    if (distanceM > standInConfig.closestM) this.walkRoute(dtSec, player);
+    if (distanceM > standInConfig.closestM) this.walkRoute(dtSec, player); // if no route, it keeps trying
   }
 
   /**
@@ -342,7 +361,8 @@ export class StandInEnemy implements Target {
     this.coverTimerSec -= dtSec;
     if (this.coverTimerSec > 0) return;
     this.coverTimerSec = standInConfig.coverCheckIntervalSec;
-    if (this.coverPoint && this.hooks.coverHides(this.coverPoint)) return; // it stays while its spot works
+    this.spotHides = this.coverPoint !== null && this.hooks.coverHides(this.coverPoint);
+    if (this.spotHides) return; // it stays while its spot works
     if (this.state === 'cover' && this.seesPlayer) {
       this.beginFight();
       return;
@@ -355,6 +375,7 @@ export class StandInEnemy implements Target {
 
   private setCover(next: CoverPoint | null): void {
     this.coverPoint = next;
+    this.spotHides = next !== null; // a picked spot hides it (that is how it was picked)
     if (next) this.coverSpot.set(next.xM, 0, next.zM);
     this.repathTimerSec = 0; // a fresh route to the new spot
   }
@@ -404,6 +425,7 @@ export class StandInEnemy implements Target {
     this.hooks.grenadeSpotted(this);
     const point = this.hooks.planFlee(this, this.grenadeAt, this.grenadeDangerM, this.fleeSpot);
     this.coverPoint = point;
+    this.spotHides = false; // a flee spot may not hide it; it checks once it is there
     if (point) this.coverSpot.set(point.xM, 0, point.zM);
     this.crouched = false;
     this.engaged = false;
@@ -418,7 +440,7 @@ export class StandInEnemy implements Target {
   private flee(dtSec: number): void {
     const toSpotM = Math.hypot(this.fleeSpot.x - this.feet.x, this.fleeSpot.z - this.feet.z);
     if (toSpotM > standInConfig.coverArriveM) {
-      this.walkRoute(dtSec, this.fleeSpot, standInConfig.grenadeRunSpeedMps);
+      if (!this.walkRoute(dtSec, this.fleeSpot, standInConfig.grenadeRunSpeedMps)) this.giveUpWalk(); // carry on as usual
       return;
     }
     if (this.hooks.grenadeNear(this.feet, this.grenadeDangerM)) {
@@ -442,9 +464,22 @@ export class StandInEnemy implements Target {
       return;
     }
     const firing = this.seesPlayer;
-    this.walkRoute(dtSec, this.coverSpot, standInConfig.walkSpeedMps * standInConfig.retreatSpeedShare, !firing);
+    if (!this.walkRoute(dtSec, this.coverSpot, standInConfig.walkSpeedMps * standInConfig.retreatSpeedShare, !firing)) {
+      this.giveUpWalk(); // stop backing off and check its cover
+      return;
+    }
     if (firing) this.engage(dtSec, dx, dz, standInConfig.hitChance * standInConfig.retreatHitChanceShare);
     else this.engaged = false;
+  }
+
+  /**
+   * A walk failed (no route, or stuck): it lets go of the spot it was going to and looks for cover again straight away.
+   * A live grenade's blast is never picked, so after a failed grenade escape this is "carry on as usual" (decision 219).
+   */
+  private giveUpWalk(): void {
+    this.leaveCover();
+    this.coverTimerSec = 0;
+    this.startWalking();
   }
 
   /** Out of the fight (it lost sight of Rook): find cover again straight away. */
@@ -600,12 +635,19 @@ export class StandInEnemy implements Target {
 
   /**
    * Walks along its route toward `destination` at `speedMps`, planning a fresh one every so often. With `faceRoute` it
-   * faces the way it goes; without, it keeps its facing (backing off while aiming at Rook).
+   * faces the way it goes; without, it keeps its facing (backing off while aiming at Rook). Returns false once the walk
+   * has failed: no route was found, or it has not got closer to `destination` for a while (a route that stops short of
+   * a spot it cannot reach ends that way too).
    */
-  private walkRoute(dtSec: number, destination: Vector3, speedMps = standInConfig.walkSpeedMps, faceRoute = true): void {
+  private walkRoute(dtSec: number, destination: Vector3, speedMps = standInConfig.walkSpeedMps, faceRoute = true): boolean {
+    if (Math.hypot(destination.x - this.walkGoal.x, destination.z - this.walkGoal.z) > standInConfig.coverArriveM) {
+      this.walkGoal.copy(destination); // a new goal: start counting afresh
+      this.walkClosestM = Infinity;
+      this.walkStuckForSec = 0;
+    }
     this.repathTimerSec -= dtSec;
     if (this.repathTimerSec <= 0) {
-      this.hooks.findPath(this.feet, destination, this.path);
+      this.routeFound = this.hooks.findPath(this.feet, destination, this.path);
       this.pathIndex = 1; // the first point is where it stands
       this.repathTimerSec = standInConfig.repathIntervalSec;
     }
@@ -632,6 +674,14 @@ export class StandInEnemy implements Target {
     }
     this.hooks.pushOut(this.feet); // a safety net: the route already keeps clear of walls
     this.feet.y = 0;
+    const toGoalM = Math.hypot(destination.x - this.feet.x, destination.z - this.feet.z);
+    if (toGoalM < this.walkClosestM - progressStepM) {
+      this.walkClosestM = toGoalM;
+      this.walkStuckForSec = 0;
+    } else {
+      this.walkStuckForSec += dtSec;
+    }
+    return this.routeFound && this.walkStuckForSec < standInConfig.walkStuckSec;
   }
 
   /** Whether a round aimed at Rook hits: the chance, and the hit budget. */
@@ -710,6 +760,8 @@ export class StandInEnemy implements Target {
     if (this.state === state) return;
     this.state = state;
     this.stateSec = 0;
+    this.walkGoal.set(Infinity, 0, Infinity); // a walk only counts within one state
+    this.routeFound = true;
     this.resetPeek(); // a peek only lives inside one stay in cover
   }
 }

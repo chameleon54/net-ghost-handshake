@@ -472,6 +472,7 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
     { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
+    { key: 'walkStuckSec', label: 'Gives up a walk with no progress after (s)', min: 0.2, max: 10, step: 0.1 },
     { key: 'coverCheckIntervalSec', label: 'Checks its cover every (s)', min: 0.1, max: 3, step: 0.1 },
     { key: 'coverArriveM', label: 'At its cover within (m)', min: 0.05, max: 1, step: 0.05 },
     { key: 'standGroundM', label: 'Stands and fights within (m)', min: 0, max: 30, step: 0.5 },
