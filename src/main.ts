@@ -163,6 +163,7 @@ const standIns = greyboxStandIns.map((spawn) => {
   scene.add(view.group);
   return { enemy, world, view };
 });
+const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
@@ -405,7 +406,17 @@ const loop = new Loop(
       dummyViews[i].update();
     });
     camera.getWorldDirection(quarry.forward);
-    squad.update(stepSec);
+    // The squad times how long Rook holds his spot while it knows where he is, and sends a flanker when he holds it too long.
+    const squadKnows = activeEnemies.some((enemy) => enemy.awake && enemy.knowsFresh);
+    squad.update(stepSec, squadKnows ? player.position : null);
+    if (squad.flankDue) {
+      // The job goes to the enemy itself: that is who tells the squad when its flank is over.
+      const job = squad.assignFlank(
+        activeEnemies.filter((enemy) => enemy.canFlank),
+        (enemy) => worldOf.get(enemy)?.planFlank(enemy) ?? null,
+      );
+      job?.member.beginFlank(job.plan.point);
+    }
     glimpses.length = 0;
     for (const { enemy, world, view } of activeStandIns) {
       enemy.update(stepSec, player.position);

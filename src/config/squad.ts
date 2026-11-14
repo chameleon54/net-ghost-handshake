@@ -9,6 +9,23 @@ export const squadConfigDefaults = {
   slotRetrySec: 0.3,
   /** Dev testing aid: how many stand-ins are in the test room (1 to 4), from the next restart or Respawn. */
   standInCount: 4,
+  // Flanking (4.7, decision 225)
+  /** Rook "holds a spot" while he stays within this distance of where he settled... */
+  holdRadiusM: 2.5,
+  /** ...and once he has held it this long (while the squad knows where he is), a flank is due. */
+  holdBeforeFlankSec: 8,
+  /** After a flank ends (arrived, spotted, or anything else), this long before the next can start. */
+  flankWaitSec: 12,
+  /** When nobody has a flank spot, it tries again after this long. */
+  flankRetrySec: 2,
+  /** A flank spot is at least this far round from where Rook looks (his side or rear). */
+  flankMinAngleDeg: 60,
+  /** At most this much of the route to a flank spot may be in Rook's view. */
+  flankMaxExposedM: 4,
+  /** A flanker moves this fast (its walk is slower). */
+  flankSpeedMps: 3.5,
+  /** Seen by Rook for this long on the way, the flank is called off. */
+  spottedSec: 0.5,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

@@ -13,9 +13,9 @@ import type { Target } from './target';
  * `approach`: walking (to its cover, or straight for Rook when no cover hides it). `cover`: at its cover spot, holding.
  * `fight`: standing where it is, firing at Rook (he is close, or its cover failed). `retreat`: backing off to new cover
  * while firing. `shoot`: standing in the open firing, only when no cover hides it (the 4.1 behaviour). `flee`: running
- * out of a grenade's blast, not firing.
+ * out of a grenade's blast, not firing. `flank`: sent by the squad round Rook's side to a cover spot, not firing (4.7).
  */
-export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'flee' | 'falling' | 'down';
+export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'flee' | 'flank' | 'falling' | 'down';
 
 /** A round's outcome, decided when it is fired: it hits Rook, misses near him, or is fired at his cover while he is hidden. */
 export type StandInShot = 'hit' | 'miss' | 'cover';
@@ -66,6 +66,30 @@ export interface StandInHooks {
   mayHit(): boolean;
   /** A round hit Rook: the squad's hit budget is spent for a while. */
   hitLanded(): void;
+  /** Claims a cover spot for it (its old one let go): the flank spot the squad gave it. */
+  claimCover(enemy: StandInEnemy, point: CoverPoint): void;
+  /** Its flank is over (arrived, called off, or anything else): tells the squad. */
+  flankOver(enemy: StandInEnemy): void;
+}
+
+/** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
+export function peekWays(point: CoverPoint): number[] {
+  const ways = point.height === 'low' ? [0] : [];
+  if (point.lean === 'right' || point.lean === 'both') ways.push(1);
+  if (point.lean === 'left' || point.lean === 'both') ways.push(-1);
+  if (ways.length === 0) ways.push(1); // a high spot with no open side listed: it still steps out somewhere
+  return ways;
+}
+
+/** Where its eyes are when fully out of a peek from `point` going `way` (see `peekWays`). */
+export function peekEyesAt(point: CoverPoint, way: number, out: Vector3): Vector3 {
+  const low = point.height === 'low';
+  const stepM = low ? standInConfig.crouchPeekStepM : standInConfig.peekStepM;
+  // Rising, its eyes are at standing height over the spot; stepping, at its height there, to the side.
+  const eyeM = low && way !== 0 ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
+  const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
+  const rightZ = -Math.sin(point.facingYawRad);
+  return out.set(point.xM + way * rightX * stepM, eyeM, point.zM + way * rightZ * stepM);
 }
 
 const degToRad = Math.PI / 180;
@@ -84,7 +108,8 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // pulls back into cover, peeking less; it runs out of the blast of a grenade it sees (decision 214). If no cover hides
 // it, it falls back to heading for Rook and firing when it sees him. Since 4.5 its hit chance comes from Rook's exposure
 // meter, and before first contact (he has not seen it) its first burst always misses, as a warning. Since 4.6 it is one of
-// a squad: it fires only while it holds a firing slot, and the squad shares the hit budget. No drawing code here.
+// a squad: it fires only while it holds a firing slot, and the squad shares the hit budget. Since 4.7 the squad may send
+// it round Rook's side to flank him (the `flank` state). No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -121,6 +146,10 @@ export class StandInEnemy implements Target {
   private readonly fleeSpot = new Vector3();
   /** True while it holds one of the squad's firing slots (4.6). */
   private hasSlot = false;
+  /** Whether Rook could see it at the last sight check (on his screen, nothing in the way). */
+  private rookSeesIt = false;
+  /** On a flank: how long Rook has kept it in view. */
+  private flankSpottedSec = 0;
   /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
@@ -225,7 +254,7 @@ export class StandInEnemy implements Target {
   /** The part of its route still ahead (from where it stands), for the dev overlay. Empty when it is not walking. */
   routeAhead(out: Vector3[]): Vector3[] {
     out.length = 0;
-    if (this.state !== 'approach' && this.state !== 'retreat' && this.state !== 'flee') return out;
+    if (this.state !== 'approach' && this.state !== 'retreat' && this.state !== 'flee' && this.state !== 'flank') return out;
     out.push(this.feet);
     for (let i = this.pathIndex; i < this.path.length; i++) out.push(this.path[i]);
     return out;
@@ -326,7 +355,8 @@ export class StandInEnemy implements Target {
     if (this.sightTimerSec <= 0) {
       this.seesPlayer = this.hooks.canSeePlayer(this);
       this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
-      if (!this.contacted && this.hooks.rookSees(this)) this.contacted = true;
+      this.rookSeesIt = this.hooks.rookSees(this);
+      if (this.rookSeesIt) this.contacted = true;
       // It looks for grenades as often as it looks for Rook.
       if (!this.grenadeSeen && this.state !== 'flee' && this.hooks.spotGrenade(this, this.grenadeDangerM, this.grenadeAt)) {
         this.grenadeSeen = true;
@@ -347,6 +377,10 @@ export class StandInEnemy implements Target {
     }
     if (this.state === 'flee') {
       this.flee(dtSec);
+      return;
+    }
+    if (this.state === 'flank') {
+      this.flank(dtSec);
       return;
     }
     this.checkCover(dtSec);
@@ -461,6 +495,41 @@ export class StandInEnemy implements Target {
     }
     if (close || this.wounded) this.setState('retreat');
     else this.startWalking();
+  }
+
+  /** True if the squad may send it to flank: awake, not wounded, frozen, fighting or mid-burst, and no grenade on its mind. */
+  get canFlank(): boolean {
+    if (!this.awake || this.frozen || this.wounded || this.grenadeSeen || this.inBurst) return false;
+    return this.state === 'approach' || this.state === 'cover';
+  }
+
+  /** The squad sends it round Rook's side to `point` (4.7): it claims the spot and walks there without firing. */
+  beginFlank(point: CoverPoint): void {
+    this.hooks.claimCover(this, point);
+    this.setCover(point);
+    this.crouched = false;
+    this.engaged = false;
+    this.flankSpottedSec = 0;
+    this.setState('flank');
+  }
+
+  /**
+   * On a flank: it walks to its spot at the flank speed, facing the way it goes, without firing. Seen by Rook for a moment
+   * on the way, it calls the flank off and takes cover as usual from where it is; once there, it holds and peeks as usual.
+   */
+  private flank(dtSec: number): void {
+    this.flankSpottedSec = this.rookSeesIt ? this.flankSpottedSec + dtSec : 0;
+    if (this.flankSpottedSec >= squadConfig.spottedSec) {
+      this.giveUpWalk(); // spotted: lets the spot go and looks for cover straight away
+      return;
+    }
+    const toSpotM = Math.hypot(this.coverSpot.x - this.feet.x, this.coverSpot.z - this.feet.z);
+    if (toSpotM <= standInConfig.coverArriveM) {
+      this.coverTimerSec = 0; // check the spot still hides it straight away
+      this.setState('cover');
+      return;
+    }
+    if (!this.walkRoute(dtSec, this.coverSpot, squadConfig.flankSpeedMps)) this.giveUpWalk();
   }
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
@@ -579,23 +648,11 @@ export class StandInEnemy implements Target {
    * among the ways that let it see Rook, or among all of them if none does (decision 216).
    */
   private startTell(point: CoverPoint): void {
-    const low = point.height === 'low';
-    const ways = low ? [0] : [];
-    if (point.lean === 'right' || point.lean === 'both') ways.push(1);
-    if (point.lean === 'left' || point.lean === 'both') ways.push(-1);
-    if (ways.length === 0) ways.push(1); // a high spot with no open side listed: it still steps out somewhere
-    const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
-    const rightZ = -Math.sin(point.facingYawRad);
-    const stepM = low ? standInConfig.crouchPeekStepM : standInConfig.peekStepM;
-    const seeing = ways.filter((way) => {
-      // Rising, its eyes are at standing height over the spot; stepping, at its height there, to the side.
-      const eyeM = low && way !== 0 ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
-      this.peekEyes.set(this.coverSpot.x + way * rightX * stepM, eyeM, this.coverSpot.z + way * rightZ * stepM);
-      return this.hooks.seesPlayerFrom(this.peekEyes);
-    });
+    const ways = peekWays(point);
+    const seeing = ways.filter((way) => this.hooks.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
     const choices = seeing.length > 0 ? seeing : ways;
     const way = choices[Math.min(Math.floor(this.random() * choices.length), choices.length - 1)];
-    this.peekSide.set(way * rightX, 0, way * rightZ);
+    this.peekSide.set(way * Math.cos(point.facingYawRad), 0, way * -Math.sin(point.facingYawRad)); // 0 rises: no step
     this.hooks.peekTell(this);
     this.peekPhase = 'tell';
     this.peekTimerSec = standInConfig.tellSec;
@@ -820,6 +877,7 @@ export class StandInEnemy implements Target {
 
   private setState(state: StandInState): void {
     if (this.state === state) return;
+    if (this.state === 'flank') this.hooks.flankOver(this); // however a flank ends, the squad hears of it
     this.state = state;
     this.stateSec = 0;
     this.walkGoal.set(Infinity, 0, Infinity); // a walk only counts within one state

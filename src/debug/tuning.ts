@@ -556,6 +556,14 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
     { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
     { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'holdRadiusM', label: 'Flank: you hold a spot within (m)', min: 0.5, max: 8, step: 0.25 },
+    { key: 'holdBeforeFlankSec', label: 'Flank: after holding it (s)', min: 1, max: 60, step: 0.5 },
+    { key: 'flankWaitSec', label: 'Flank: wait before the next (s)', min: 0, max: 60, step: 0.5 },
+    { key: 'flankRetrySec', label: 'Flank: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'flankMinAngleDeg', label: 'Flank: spot at least (deg round from your view)', min: 0, max: 180, step: 5 },
+    { key: 'flankMaxExposedM', label: 'Flank: route in your view at most (m)', min: 0, max: 30, step: 0.5 },
+    { key: 'flankSpeedMps', label: 'Flank: moves at (m/s)', min: 0.5, max: 8, step: 0.1 },
+    { key: 'spottedSec', label: 'Flank: called off when seen for (s)', min: 0, max: 3, step: 0.05 },
   ],
 };
 

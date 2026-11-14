@@ -11,6 +11,7 @@ import { buildGreybox } from '../src/level/greybox';
 import { Navigation } from '../src/level/navigation';
 import { greyboxRoom } from '../src/data/greyboxRoom';
 import { greyboxCover } from '../src/data/greyboxCover';
+import { greyboxStandIns } from '../src/data/greyboxEnemies';
 import { CoverPoints, type CoverPoint } from '../src/level/cover';
 import { dummyConfig } from '../src/config/dummy';
 import { exposureConfig } from '../src/config/exposure';
@@ -54,6 +55,9 @@ function setup(roll = 0.99, squad = new SquadCoordinator()) {
     /** The hit chance a round gets (from the exposure meter in the game), and whether Rook can see the stand-in. */
     hitChance: fakeHitChance,
     rookSees: true,
+    /** Spots claimed for a flank, and how many times it said its flank was over. */
+    claimed: [] as CoverPoint[],
+    flankOvers: 0,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -91,6 +95,11 @@ function setup(roll = 0.99, squad = new SquadCoordinator()) {
     releaseSlot: (e) => squad.releaseSlot(e),
     mayHit: () => squad.mayHit(),
     hitLanded: () => squad.hitLanded(),
+    claimCover: (_e, point) => world.claimed.push(point),
+    flankOver: (e) => {
+      world.flankOvers++;
+      squad.flankOver(e);
+    },
   };
   const enemy = new StandInEnemy(spawn, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -269,6 +278,107 @@ describe('StandInEnemy in a squad (4.6)', () => {
     const hits = members.flatMap((m) => m.shots.filter((s) => s.hits).map((s) => s.atSec)).sort((a, b) => a - b);
     expect(hits.length).toBeGreaterThan(3);
     for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
+  });
+});
+
+describe('StandInEnemy flanking (4.7)', () => {
+  const far = new Vector3(0, 0, 20); // beyond its stop range: it walks
+  const flankSpot: CoverPoint = { xM: 7, zM: 0, height: 'low', facingYawRad: Math.PI / 2, lean: 'both' }; // 7 m east
+  /** An awake stand-in walking toward a far Rook, ready to be sent. */
+  const walking = (squad = new SquadCoordinator()) => {
+    const s = setup(0.99, squad);
+    s.world.rookSees = false;
+    s.enemy.hit('body', 1);
+    s.run(far, dtSec);
+    return s;
+  };
+
+  it('can be sent only while awake, walking or in cover, and not wounded or frozen', () => {
+    const { enemy } = walking();
+    expect(enemy.canFlank).toBe(true);
+    enemy.frozen = true;
+    expect(enemy.canFlank).toBe(false);
+    enemy.frozen = false;
+    enemy.hit('body', standInConfig.healthPoints * (1 - standInConfig.woundedHealthShare) + 1);
+    expect(enemy.wounded).toBe(true);
+    expect(enemy.canFlank).toBe(false);
+    expect(setup().enemy.canFlank).toBe(false); // idle
+  });
+
+  it('walks to its flank spot at the flank speed without firing, then holds there; the squad hears the flank is over', () => {
+    const { enemy, world, shots, run } = walking();
+    world.sees = true; // it could see Rook, but a flanker does not fire on the way
+    const start = enemy.feet.clone();
+    enemy.beginFlank(flankSpot);
+    expect(world.claimed).toEqual([flankSpot]);
+    expect(enemy.cover).toBe(flankSpot);
+    run(far, 1);
+    expect(enemy.state).toBe('flank');
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(squadConfig.flankSpeedMps, 0);
+    expect(shots).toHaveLength(0);
+    expect(world.flankOvers).toBe(0);
+    run(far, 2);
+    expect(enemy.state).toBe('cover');
+    expect(enemy.feet.x).toBeGreaterThan(7 - standInConfig.coverArriveM - 1e-6); // there, within the arrival distance
+    expect(world.flankOvers).toBe(1);
+  });
+
+  it('seen by Rook on the way for the spotted time, it calls the flank off and looks for cover', () => {
+    const unseen = walking();
+    unseen.enemy.beginFlank(flankSpot);
+    unseen.run(far, squadConfig.spottedSec + 0.3);
+    expect(unseen.enemy.state).toBe('flank');
+
+    const { enemy, world, run } = walking();
+    enemy.beginFlank(flankSpot);
+    world.rookSees = true;
+    const releasesBefore = world.releases;
+    run(far, squadConfig.spottedSec + 1 / standInConfig.sightChecksPerSec + 0.05);
+    expect(enemy.state).not.toBe('flank');
+    expect(world.flankOvers).toBe(1);
+    expect(world.releases).toBeGreaterThan(releasesBefore); // it let the flank spot go
+  });
+
+  it('a grenade it sees beats the flank, and the squad hears the flank is over', () => {
+    const { enemy, world, run } = walking();
+    enemy.beginFlank(flankSpot);
+    world.grenade = enemy.feet.clone();
+    run(far, standInConfig.grenadeReactionSec + 0.3);
+    expect(enemy.state).toBe('flee');
+    expect(world.flankOvers).toBe(1);
+  });
+
+  it('in a squad: after Rook holds his spot, one is sent; no other flank until it is over and the wait has passed', () => {
+    const squad = new SquadCoordinator();
+    const members = Array.from({ length: 4 }, () => walking(squad));
+    const rookFeet = { x: 0, z: 20 };
+    const step = (seconds: number) => {
+      for (let i = 0; i < Math.round(seconds / dtSec); i++) {
+        squad.update(dtSec, rookFeet);
+        if (squad.flankDue) {
+          // The fake plans: the third member has the cheapest spot.
+          const job = squad.assignFlank(members.map((m) => m.enemy), (e) => ({ point: flankSpot, cost: e === members[2].enemy ? 1 : 5 }));
+          job?.member.beginFlank(job.plan.point);
+        }
+        for (const m of members) {
+          m.world.clockSec += dtSec;
+          m.enemy.update(dtSec, far);
+        }
+      }
+    };
+    step(squadConfig.holdBeforeFlankSec - 0.5);
+    expect(members.some((m) => m.enemy.state === 'flank')).toBe(false);
+    step(1);
+    expect(members[2].enemy.state).toBe('flank');
+    expect(members.filter((m) => m.enemy.state === 'flank')).toHaveLength(1);
+    step(4); // it arrives (7 m at the flank speed)
+    expect(members[2].enemy.state).toBe('cover');
+    expect(squad.flanker).toBeNull();
+    step(squadConfig.flankWaitSec - 1);
+    const flanksSent = () => members.reduce((sum, m) => sum + m.world.claimed.length, 0);
+    expect(flanksSent()).toBe(1); // nobody sent during the wait
+    step(1.5);
+    expect(flanksSent()).toBe(2); // the next flank, after the wait (the cheapest plan again)
   });
 });
 
@@ -1087,6 +1197,58 @@ describe('StandInWorld', () => {
     expect(open.world.rookSees(open.enemy)).toBe(false);
     const walled = setupWorld([{ kind: 'wall', xM: 0, zM: -4, widthM: 4, depthM: 0.3, heightM: 3 }]);
     expect(walled.world.rookSees(walled.enemy)).toBe(false);
+  });
+});
+
+describe('StandInWorld choosing a flank spot (4.7)', () => {
+  // Rook at (0, 4) behind a wall to his north, looking north. A long wall at x 2.5 screens the east side from him. The one
+  // cover spot is east of a low crate at (5, 4), 90 degrees round from where he looks; the stand-in starts at (5, -4).
+  const rookCover: RoomBox = { kind: 'wall', xM: 0, zM: 3, widthM: 2, depthM: 0.3, heightM: 3 };
+  const screen: RoomBox = { kind: 'wall', xM: 2.5, zM: -1.3, widthM: 0.3, depthM: 9.4, heightM: 3 };
+  const crate: RoomBox = { kind: 'prop', xM: 5, zM: 4, widthM: 1, depthM: 1, heightM: 1 };
+  const eastSpot: CoverPoint = { xM: 5.95, zM: 4, height: 'low', facingYawRad: Math.PI / 2, lean: 'both' };
+
+  const plan = async (boxes: RoomBox[], look = new Vector3(0, 0, -1)) => {
+    const level = buildGreybox(boxes);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const rook = rookAt(0, 4);
+    rook.forward.copy(look);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([eastSpot], level.collision), rook, () => {});
+    const enemy = new StandInEnemy({ xM: 5, zM: -4, yawRad: Math.PI }, world);
+    return world.planFlank(enemy);
+  };
+
+  it('picks a spot to his side that hides it, from which a peek sees him, reached out of his view', async () => {
+    const result = await plan([rookCover, screen, crate]);
+    expect(result?.point).toBe(eastSpot);
+    expect(result!.cost).toBeLessThan(100 * squadConfig.flankMaxExposedM + 20);
+  });
+
+  it('not a spot in front of where he looks', async () => {
+    expect(await plan([rookCover, screen, crate], new Vector3(1, 0, 0))).toBeNull(); // he looks east, at it
+  });
+
+  it('not a spot from which a peek cannot see past his cover', async () => {
+    const post: RoomBox = { kind: 'wall', xM: 0.8, zM: 4, widthM: 0.3, depthM: 0.3, heightM: 3 }; // right beside him, east
+    expect(await plan([rookCover, screen, crate, post])).toBeNull();
+  });
+
+  it('not one whose route is too long in his view', async () => {
+    expect(await plan([rookCover, crate])).toBeNull(); // no screen: he sees most of the way
+  });
+});
+
+describe('flanking in the real test room (4.7)', () => {
+  it('with Rook at his start spot looking north, some stand-in has a flank spot from its spawn', async () => {
+    const level = buildGreybox();
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const cover = new CoverPoints(greyboxCover, level.collision);
+    const rook = rookAt(0, 4.5);
+    const found = greyboxStandIns.map((spawn) => {
+      const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rook, () => {});
+      return world.planFlank(new StandInEnemy(spawn, world))?.point ?? null;
+    });
+    expect(found.some((point) => point !== null)).toBe(true);
   });
 });
 

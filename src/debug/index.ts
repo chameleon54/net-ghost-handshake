@@ -253,8 +253,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const coverOverlay = new CoverOverlay(scene, coverPoints, activeStandIns, camera.position);
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
-  standInPanel.add(labels, 'shown').name('Show labels (orange: firing slot)');
+  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: flanking)');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
+  squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
@@ -354,7 +355,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       .map((s, i) => `${letter(i)} ${s.state}${s.crouched ? ' (c)' : ''}${s.wounded ? ' (w)' : ''} ${s.health.current.toFixed(0)}`)
       .join(', ');
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
-    readouts.squad = `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? `: ${firing.join(', ')}` : ''}`;
+    const flankerIndex = activeStandIns.findIndex((s) => s === squad.flanker);
+    readouts.squad =
+      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? `: ${firing.join(', ')}` : ''}; ` +
+      `you held your spot ${squad.heldSec.toFixed(1)} s; ${flankerIndex >= 0 ? `${letter(flankerIndex)} flanking` : 'no flank'}`;
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }

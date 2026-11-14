@@ -10,9 +10,10 @@ import { createRayHit, type LevelCollision } from '../level/collision';
 import type { CoverPoint, CoverPoints } from '../level/cover';
 import type { Navigation } from '../level/navigation';
 import { hitChance, missOffsetM, type Glimpse } from '../player/exposure';
+import { squadConfig } from '../config/squad';
 import { SquadCoordinator } from '../squad/squadCoordinator';
 import type { WeaponEvents } from '../weapons/events';
-import type { StandInEnemy, StandInHooks, StandInShot } from './standInEnemy';
+import { peekEyesAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot } from './standInEnemy';
 
 /** What the stand-in needs to know about Rook. */
 export interface StandInQuarry {
@@ -33,6 +34,16 @@ export interface StandInQuarry {
 
 /** A miss tries this many aim points, looking for one that strikes a surface near Rook. */
 const missTries = 4;
+/** A flank route is checked for being in Rook's view at points this far apart. */
+const routeSampleM = 1;
+/** In a flank plan's cost, one metre in Rook's view counts as much as this many metres of walking: least exposed first. */
+const exposedCostPerM = 100;
+
+/** Where a flank goes, and what it costs (metres in Rook's view weigh far more than metres walked). */
+export interface FlankPlan {
+  readonly point: CoverPoint;
+  readonly cost: number;
+}
 
 // The stand-in's real senses and gun: rays through the level for sight, the navigation mesh and collision for walking,
 // the cover points (4.3), and the bullet itself. A round's hit or miss is already decided; this only places it. A hit
@@ -40,7 +51,8 @@ const missTries = 4;
 // near him such as his cover (enemies.md, "deliberate misses"). Both send `shot:landed`, so the tracers, bullet marks,
 // sparks and impact sounds work as they do for Rook's own shots; a miss passing close by his head also sends
 // `shot:near-miss` for the crack. It also measures what the stand-in sees of Rook for his exposure meter (4.5).
-// One world per stand-in: it remembers the spot its stand-in last saw Rook from.
+// It also plans flanks (4.7): which cover spot round Rook's side to go to. One world per stand-in: it remembers the spot
+// its stand-in last saw Rook from.
 export class StandInWorld implements StandInHooks {
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
@@ -57,6 +69,8 @@ export class StandInWorld implements StandInHooks {
   private readonly firstMiss = new Vector3();
   private readonly bulletPath = new Line3();
   private readonly hips = new Vector3();
+  private readonly peekEyes = new Vector3();
+  private readonly sample = new Vector3();
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
   private readonly seen: Glimpse = { visibleShare: 0, distanceM: 0, fromSide: false, inViewOfLastSpot: false };
   private glimpseTimerSec = 0;
@@ -93,6 +107,67 @@ export class StandInWorld implements StandInHooks {
 
   hitLanded(): void {
     this.squad.hitLanded();
+  }
+
+  claimCover(enemy: StandInEnemy, point: CoverPoint): void {
+    this.coverPoints.claim(point, enemy);
+  }
+
+  flankOver(enemy: StandInEnemy): void {
+    this.squad.flankOver(enemy);
+  }
+
+  /**
+   * The best flank spot for this stand-in, or null (enemies.md, "Choosing cover", 4.7). A spot qualifies if it is free
+   * (and not the one it holds), at least the flank angle round from where Rook looks, hides it from him (by its own prop),
+   * lets a peek from it see him (his cover does not protect that side), is out of a live grenade's blast, and has a route
+   * with at most the allowed metres in his view. Among those: the least exposed route, then the shortest.
+   */
+  planFlank(enemy: StandInEnemy): FlankPlan | null {
+    const { position, eyes, forward } = this.quarry;
+    const lookM = Math.hypot(forward.x, forward.z);
+    const minCos = Math.cos(squadConfig.flankMinAngleDeg * (Math.PI / 180));
+    let best: FlankPlan | null = null;
+    for (const point of this.coverPoints.points) {
+      if (point === enemy.cover) continue;
+      const holder = this.coverPoints.claimedBy(point);
+      if (holder && holder !== enemy) continue;
+      const toX = point.xM - position.x;
+      const toZ = point.zM - position.z;
+      const toM = Math.hypot(toX, toZ);
+      if (lookM > 1e-6 && toM > 1e-6 && (forward.x * toX + forward.z * toZ) / (lookM * toM) > minCos) continue; // in front of him
+      if (!this.coverPoints.hides(point, eyes)) continue;
+      if (!peekWays(point).some((way) => this.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)))) continue;
+      this.spot.set(point.xM, 0, point.zM);
+      if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) continue;
+      if (!this.navigation.findPath(enemy.feet, this.spot, this.routeToCover)) continue;
+      const route = this.routeToCover;
+      if (route[route.length - 1].distanceTo(this.spot) > standInConfig.coverArriveM) continue;
+      const exposedM = this.exposedRouteM(route);
+      if (exposedM > squadConfig.flankMaxExposedM) continue;
+      let lengthM = 0;
+      for (let i = 1; i < route.length; i++) lengthM += route[i - 1].distanceTo(route[i]);
+      const cost = exposedM * exposedCostPerM + lengthM;
+      if (!best || cost < best.cost) best = { point, cost };
+    }
+    return best;
+  }
+
+  /** How many metres of a route Rook can see a standing body's head on, checked every metre or so. */
+  private exposedRouteM(route: readonly Vector3[]): number {
+    let exposedM = 0;
+    for (let i = 1; i < route.length; i++) {
+      const from = route[i - 1];
+      const to = route[i];
+      const lengthM = from.distanceTo(to);
+      const steps = Math.max(Math.ceil(lengthM / routeSampleM), 1);
+      for (let step = 1; step <= steps; step++) {
+        this.sample.lerpVectors(from, to, step / steps);
+        this.sample.y += standInConfig.eyeHeightM;
+        if (this.clearLine(this.quarry.eyes, this.sample)) exposedM += lengthM / steps;
+      }
+    }
+    return exposedM;
   }
 
   /** It sees Rook if either his head (lean included) or his chest is in clear view of its eyes. */
