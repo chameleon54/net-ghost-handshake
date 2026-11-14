@@ -52,6 +52,11 @@ export class SquadCoordinator {
     return this.holdSec;
   }
 
+  /** Time left before a flank may start (the wait after one, or the retry). For the dev readout. */
+  get flankWaitSec(): number {
+    return this.flankWaitLeftSec;
+  }
+
   /** The enemy on the flank job, or null. */
   get flanker(): Member | null {
     return this.flankMember;

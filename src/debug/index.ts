@@ -71,6 +71,8 @@ interface Parts {
   squad: SquadCoordinator;
   /** Puts the squad back at its spawns, with the count from the Squad folder. */
   respawnSquad: () => void;
+  /** Why the last flank attempt found nothing, or null (4.7 follow-up). */
+  flankFailure: () => string | null;
   navigation: Navigation;
   coverPoints: CoverPoints;
   /** The game camera: Rook's eyes, for the cover overlay's colours. */
@@ -88,7 +90,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -126,7 +128,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.close();
 
   // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
@@ -369,8 +371,16 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
     const flankerIndex = activeStandIns.findIndex((s) => s === squad.flanker);
     readouts.squad =
-      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}, ` +
-      `you held your spot ${squad.heldSec.toFixed(1)} s, ${flankerIndex >= 0 ? `${letter(flankerIndex)} flanking` : 'no flank'}`;
+      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}` +
+      `${squad.disorganised ? ', DISORGANISED (leader down)' : ''}`;
+    // Why a flank is or is not under way, in the order the rules are checked.
+    const held = `held your spot ${squad.heldSec.toFixed(1)} of ${squadConfig.holdBeforeFlankSec} s`;
+    readouts.flank =
+      flankerIndex >= 0 ? `${letter(flankerIndex)} flanking`
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : squad.heldSec < squadConfig.holdBeforeFlankSec ? `none yet: ${held}`
+      : flankFailure() !== null ? `${flankFailure()}, tries again in ${squad.flankWaitSec.toFixed(1)} s`
+      : `next one in ${squad.flankWaitSec.toFixed(1)} s`;
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
@@ -381,6 +391,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       `weapon    ${readouts.weapon}`,
       `exposure  ${readouts.exposure}`,
       `squad     ${readouts.squad}`,
+      `flank     ${readouts.flank}`,
       ...enemyLines,
       `camera    ${readouts.freeCamera}`,
       ...(readouts.status ? [`status    ${readouts.status}`] : []),

@@ -32,7 +32,7 @@ import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
 import { StandInEnemy } from './enemies/standInEnemy';
 import { StandInView } from './enemies/standInView';
-import { StandInWorld } from './enemies/standInWorld';
+import { describeFlankRejects, StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
 import { greyboxStandIns } from './data/greyboxEnemies';
 import { squadConfig } from './config/squad';
@@ -164,6 +164,8 @@ const standIns = greyboxStandIns.map((spawn) => {
   return { enemy, world, view };
 });
 const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
+/** Dev readout: why the last flank attempt found nothing, or null. */
+let flankFailure: string | null = null;
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
@@ -315,7 +317,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance() });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance() });
   });
 }
 
@@ -411,12 +413,17 @@ const loop = new Loop(
     squad.update(stepSec, squadKnows ? player.position : null);
     if (squad.flankDue) {
       // The job goes to the enemy itself: that is who tells the squad when its flank is over.
+      const candidates = activeEnemies.filter((enemy) => enemy.canFlank);
       const job = squad.assignFlank(
-        activeEnemies.filter((enemy) => enemy.canFlank),
+        candidates,
         (enemy) => worldOf.get(enemy)?.planFlank(enemy) ?? null,
         (enemy) => enemy.role === 'flanker', // flankers first; the others only if no flanker can (decision 217)
       );
       job?.member.beginFlank(job.plan.point);
+      // For the dev readout: why the attempt found nothing (the spot rules, as the first candidate saw them).
+      const first = candidates.find((enemy) => enemy.role === 'flanker') ?? candidates[0];
+      const rejects = first ? worldOf.get(first)?.flankRejects : undefined;
+      flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
     }
     glimpses.length = 0;
     for (const { enemy, world, view } of activeStandIns) {

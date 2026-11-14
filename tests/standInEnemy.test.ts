@@ -6,7 +6,7 @@ import { roleConfig, roles, type Role } from '../src/config/roles';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
 import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
-import { StandInWorld } from '../src/enemies/standInWorld';
+import { describeFlankRejects, StandInWorld, type FlankRejects } from '../src/enemies/standInWorld';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { buildGreybox } from '../src/level/greybox';
 import { Navigation } from '../src/level/navigation';
@@ -1334,8 +1334,11 @@ describe('StandInWorld choosing a flank spot (4.7)', () => {
     rook.forward.copy(look);
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([eastSpot], level.collision), rook, () => {});
     const enemy = new StandInEnemy({ xM: 5, zM: -4, yawRad: Math.PI }, world);
-    return world.planFlank(enemy);
+    const result = world.planFlank(enemy);
+    lastRejects = { ...world.flankRejects };
+    return result;
   };
+  let lastRejects: FlankRejects | null = null;
 
   it('picks a spot to his side that hides it, from which a peek sees him, reached out of his view', async () => {
     const result = await plan([rookCover, screen, crate]);
@@ -1343,8 +1346,10 @@ describe('StandInWorld choosing a flank spot (4.7)', () => {
     expect(result!.cost).toBeLessThan(100 * squadConfig.flankMaxExposedM + 20);
   });
 
-  it('not a spot in front of where he looks', async () => {
+  it('not a spot in front of where he looks, and it says why (for the dev readout)', async () => {
     expect(await plan([rookCover, screen, crate], new Vector3(1, 0, 0))).toBeNull(); // he looks east, at it
+    expect(lastRejects?.inFront).toBe(1);
+    expect(describeFlankRejects(lastRejects!)).toBe('no flank spot (1 in front of you)');
   });
 
   it('not a spot from which a peek cannot see past his cover', async () => {
@@ -1354,6 +1359,7 @@ describe('StandInWorld choosing a flank spot (4.7)', () => {
 
   it('not one whose route is too long in his view', async () => {
     expect(await plan([rookCover, crate])).toBeNull(); // no screen: he sees most of the way
+    expect(describeFlankRejects(lastRejects!)).toBe('no flank spot (1 route too much in your view)');
   });
 });
 

@@ -45,6 +45,32 @@ export interface FlankPlan {
   readonly cost: number;
 }
 
+/** How many cover spots the last flank plan turned down, and for which rule (the first one each failed). For the dev readout. */
+export interface FlankRejects {
+  taken: number;
+  inFront: number;
+  notHidden: number;
+  peekBlocked: number;
+  nearGrenade: number;
+  noRoute: number;
+  routeSeen: number;
+}
+
+/** Why no flank spot was found, in a few words (dev readout): "20 in front of you, 3 not hidden by their cover, ...". */
+export function describeFlankRejects(r: FlankRejects): string {
+  const parts: [number, string][] = [
+    [r.inFront, 'in front of you'],
+    [r.notHidden, 'not hidden by their cover'],
+    [r.peekBlocked, 'peek cannot see you'],
+    [r.routeSeen, 'route too much in your view'],
+    [r.noRoute, 'no route'],
+    [r.nearGrenade, 'near a grenade'],
+    [r.taken, 'taken'],
+  ];
+  const listed = parts.filter(([count]) => count > 0).map(([count, why]) => `${count} ${why}`);
+  return `no flank spot (${listed.length > 0 ? listed.join(', ') : 'no cover spots'})`;
+}
+
 // The stand-in's real senses and gun: rays through the level for sight, the navigation mesh and collision for walking,
 // the cover points (4.3), and the bullet itself. A round's hit or miss is already decided; this only places it. A hit
 // lands on Rook's chest and hurts him; a miss passes him (closer as his exposure rises), preferring to strike a surface
@@ -71,6 +97,8 @@ export class StandInWorld implements StandInHooks {
   private readonly hips = new Vector3();
   private readonly peekEyes = new Vector3();
   private readonly sample = new Vector3();
+  /** What the last flank plan turned down (dev readout). */
+  readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
   private readonly seen: Glimpse = { visibleShare: 0, distanceM: 0, fromSide: false, inViewOfLastSpot: false };
   private glimpseTimerSec = 0;
@@ -135,24 +163,45 @@ export class StandInWorld implements StandInHooks {
     const { position, eyes, forward } = this.quarry;
     const lookM = Math.hypot(forward.x, forward.z);
     const minCos = Math.cos(squadConfig.flankMinAngleDeg * (Math.PI / 180));
+    const rejects = this.flankRejects;
+    for (const key of Object.keys(rejects) as (keyof FlankRejects)[]) rejects[key] = 0;
     let best: FlankPlan | null = null;
     for (const point of this.coverPoints.points) {
-      if (point === enemy.cover) continue;
       const holder = this.coverPoints.claimedBy(point);
-      if (holder && holder !== enemy) continue;
+      if (point === enemy.cover || (holder && holder !== enemy)) {
+        rejects.taken++;
+        continue;
+      }
       const toX = point.xM - position.x;
       const toZ = point.zM - position.z;
       const toM = Math.hypot(toX, toZ);
-      if (lookM > 1e-6 && toM > 1e-6 && (forward.x * toX + forward.z * toZ) / (lookM * toM) > minCos) continue; // in front of him
-      if (!this.coverPoints.hides(point, eyes)) continue;
-      if (!peekWays(point).some((way) => this.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)))) continue;
+      if (lookM > 1e-6 && toM > 1e-6 && (forward.x * toX + forward.z * toZ) / (lookM * toM) > minCos) {
+        rejects.inFront++;
+        continue;
+      }
+      if (!this.coverPoints.hides(point, eyes)) {
+        rejects.notHidden++;
+        continue;
+      }
+      if (!peekWays(point).some((way) => this.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)))) {
+        rejects.peekBlocked++;
+        continue;
+      }
       this.spot.set(point.xM, 0, point.zM);
-      if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) continue;
-      if (!this.navigation.findPath(enemy.feet, this.spot, this.routeToCover)) continue;
+      if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) {
+        rejects.nearGrenade++;
+        continue;
+      }
       const route = this.routeToCover;
-      if (route[route.length - 1].distanceTo(this.spot) > standInConfig.coverArriveM) continue;
+      if (!this.navigation.findPath(enemy.feet, this.spot, route) || route[route.length - 1].distanceTo(this.spot) > standInConfig.coverArriveM) {
+        rejects.noRoute++;
+        continue;
+      }
       const exposedM = this.exposedRouteM(route);
-      if (exposedM > squadConfig.flankMaxExposedM) continue;
+      if (exposedM > squadConfig.flankMaxExposedM) {
+        rejects.routeSeen++;
+        continue;
+      }
       let lengthM = 0;
       for (let i = 1; i < route.length; i++) lengthM += route[i - 1].distanceTo(route[i]);
       const cost = exposedM * exposedCostPerM + lengthM;
