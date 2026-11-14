@@ -53,6 +53,26 @@ export const squadConfigDefaults = {
   pinnedByFireM: 1,
   /** ...sends it back into cover, holding this many times longer. */
   pinnedHoldScale: 1.5,
+  // Hearing Rook's weapon (4.10, decision 233)
+  /** After the squad hears him run dry, reload or jam, it pushes this long later (if he is still vulnerable). */
+  pushReactionSec: 1,
+  /** A push window (dry, or jammed) stays open at most this long. */
+  pushMaxWindowSec: 8,
+  /** How many move up in a push: on a dry gun, on a reload, on a jam (a jam also starts a flank at once). */
+  pushMoversDry: 2,
+  pushMoversReload: 1,
+  pushMoversJam: 1,
+  // Repositioning (decision 237)
+  /** A stand-in moves to another spot after this many peeks from one spot, at least... */
+  repositionPeeksMin: 2,
+  /** ...and at most (random in between, each time it arrives somewhere). */
+  repositionPeeksMax: 4,
+  /** Or after this many peeks in a row that saw nothing. */
+  repositionBlindPeeks: 2,
+  /** The new spot is at least this far from the old one. */
+  repositionMinM: 3,
+  /** Without covering fire it moves only if at most this much of its route is in Rook's view. */
+  repositionMaxExposedM: 2,
   /** The flank attack (decision 227): on arrival it peeks at once and stays out firing for at most this long... */
   flankPressMaxSec: 6,
   /** ...or until it has not seen Rook for this long (or he hurts it). */

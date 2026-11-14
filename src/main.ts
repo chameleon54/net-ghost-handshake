@@ -6,8 +6,7 @@ import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
 import { Navigation } from './level/navigation';
-import { CoverPoints } from './level/cover';
-import { greyboxCover } from './data/greyboxCover';
+import { CoverPoints, coverPointsFromBoxes } from './level/cover';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
@@ -16,7 +15,6 @@ import { fallDamage } from './player/fall';
 import { PlayerHealth } from './player/playerHealth';
 import { HealItems } from './player/healItems';
 import { healthConfig } from './config/health';
-import { greyboxHazards } from './data/greyboxRoom';
 import { standsOnHazard } from './level/hazards';
 import { createOverlay } from './ui/overlay';
 import { createHud } from './ui/hud';
@@ -27,16 +25,16 @@ import { MovementSounds } from './audio/movementSounds';
 import { MovementReporter } from './player/movementReporter';
 import { surfaceAt } from './level/surfaces';
 import { EventBus } from './core/events';
-import { greyboxDummies } from './data/greyboxDummies';
+import { testArena, testArenaDummies, testArenaLayout, testArenaStandIns, testArenaStart } from './data/testArena';
 import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
 import { StandInEnemy } from './enemies/standInEnemy';
 import { StandInView } from './enemies/standInView';
 import { describeFlankRejects, StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
-import { greyboxStandIns } from './data/greyboxEnemies';
 import { squadConfig } from './config/squad';
-import { SquadCoordinator } from './squad/squadCoordinator';
+import { SquadCoordinator, type PushKind } from './squad/squadCoordinator';
+import type { NoiseKind } from './stealth/noise';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { ImpactSparks } from './fx/impactSparks';
@@ -87,7 +85,8 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(4, 8, 3);
 scene.add(sun);
 
-const level = buildGreybox();
+// The test arena (decision 236): larger than the old test room, built to the chamber rules, replaced in phase 5.
+const level = buildGreybox(testArena, testArenaLayout);
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
 // If the library cannot start, the game still runs: enemies find no routes and stand still, and the start screen says so.
@@ -100,8 +99,14 @@ try {
   navigation = Navigation.unavailable();
   navigationFailed = true;
 }
-const coverPoints = new CoverPoints(greyboxCover, level.collision); // the hand-placed cover spots (4.3)
-const player = new Player(level.collision);
+// Cover spots generated from the arena's props (decision 236), keeping only those an enemy can stand on.
+const spotOnMesh = new THREE.Vector3();
+const arenaCover = coverPointsFromBoxes(testArena).filter((point) => {
+  const feet = new THREE.Vector3(point.xM, 0, point.zM);
+  return navigation.closestPoint(feet, spotOnMesh) && Math.hypot(spotOnMesh.x - feet.x, spotOnMesh.z - feet.z) < 0.05;
+});
+const coverPoints = new CoverPoints(arenaCover, level.collision);
+const player = new Player(level.collision, testArenaStart);
 
 // Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
 const weaponEvents = new EventBus<WeaponEvents>();
@@ -115,7 +120,7 @@ const viewmodel = new Viewmodel(weaponEvents); // the weapon in hand, drawn in i
 viewmodel.setAspect(window.innerWidth / window.innerHeight);
 const aim = new Aim();
 const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
-const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
+const dummies = testArenaDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
 // The stand-in enemy (4.1): temporary, it walks the navigation mesh (4.2) to cover that hides it from Rook (4.3) and
@@ -146,7 +151,7 @@ const quarry = {
 // Since 4.6 there are four, a squad: the coordinator hands out firing slots and keeps one hit budget for all of them.
 // Each has its own world (it remembers where it last saw Rook from). The dev panel's count says how many are in the room.
 const squad = new SquadCoordinator();
-const standIns = greyboxStandIns.map((spawn) => {
+const standIns = testArenaStandIns.map((spawn) => {
   const world = new StandInWorld(
     weaponEvents,
     level.collision,
@@ -166,6 +171,70 @@ const standIns = greyboxStandIns.map((spawn) => {
 const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
 /** Dev readout: why the last flank attempt found nothing, or null. */
 let flankFailure: string | null = null;
+/**
+ * Starts a suppress-and-advance play (4.9) with up to `movers` moving up: the one with the shortest walk, then the others
+ * nearest Rook, each to its own spot; one suppressor covers them (the heavy first). Nothing moves without that cover.
+ */
+function startPlay(movers: number): void {
+  const candidates = activeEnemies.filter((enemy) => enemy.canAdvance && enemy.role !== 'flanker'); // flankers flank
+  const play = squad.assignAdvance(
+    candidates,
+    (enemy) => worldOf.get(enemy)?.planAdvance(enemy) ?? null,
+    coverers(null),
+    (enemy) => enemy.role === 'heavy', // the heavy lays down the covering fire first
+    (enemy) => enemy.firesOnTheMove,
+  );
+  if (!play) return;
+  play.advancer.member.beginAdvance(play.advancer.plan.point); // claims its spot before the next one plans
+  play.suppressor?.beginSuppress(); // none when the mover is the heavy: it fires on the move (decision 237)
+  const nearestFirst = candidates
+    .filter((enemy) => enemy !== play.advancer.member && enemy !== play.suppressor)
+    .sort((a, b) => a.feet.distanceTo(player.position) - b.feet.distanceTo(player.position));
+  let moving = 1;
+  for (const enemy of nearestFirst) {
+    if (moving >= movers) break;
+    const plan = worldOf.get(enemy)?.planAdvance(enemy);
+    if (!plan) continue;
+    enemy.beginAdvance(plan.point);
+    squad.addAdvancer(enemy);
+    moving++;
+  }
+}
+// Hearing Rook's gun (4.10): an awake stand-in that hears him run dry, reload or jam opens a push window; firing, the end
+// of the reload or clearing the jam closes it.
+const pushKinds: Partial<Record<NoiseKind, PushKind>> = { 'empty-click': 'dry', reload: 'reload', jam: 'jam' };
+weaponEvents.on('noise:made', (noise) => {
+  const kind = pushKinds[noise.kind];
+  if (kind && activeEnemies.some((enemy) => enemy.awake && enemy.canHear(noise))) squad.heard(kind);
+});
+weaponEvents.on('weapon:fired', () => squad.closeWindow('dry'));
+weaponEvents.on('weapon:reloaded', () => {
+  squad.closeWindow('dry');
+  squad.closeWindow('reload');
+});
+weaponEvents.on('weapon:interrupted', () => squad.closeWindow('reload'));
+weaponEvents.on('weapon:jam-cleared', () => squad.closeWindow('jam'));
+/**
+ * A stand-in moves on to another spot (decision 237): one at a time; with covering fire if someone is free, by a route
+ * mostly out of Rook's view, or always for the heavy (it fires on the move). Otherwise it stays and asks after its next peek.
+ */
+function reposition(enemy: StandInEnemy): void {
+  if (squad.repositioner !== null) return; // someone else is moving on: it waits its turn
+  const plan = worldOf.get(enemy)?.planReposition(enemy);
+  if (!plan) {
+    enemy.repositionDeclined();
+    return;
+  }
+  const hiddenRoute = plan.exposedM <= squadConfig.repositionMaxExposedM;
+  const cover = enemy.firesOnTheMove || hiddenRoute ? null : squad.assignCover(coverers(enemy), (other) => other.role === 'heavy');
+  if (!enemy.firesOnTheMove && !hiddenRoute && !cover) {
+    enemy.repositionDeclined();
+    return;
+  }
+  squad.assignReposition(enemy);
+  enemy.beginReposition(plan.point);
+  cover?.beginSuppress();
+}
 /** The stand-ins that could pin Rook's cover now (4.9), leaving out `mover`. */
 const coverers = (mover: StandInEnemy | null): StandInEnemy[] =>
   activeEnemies.filter((enemy) => enemy !== mover && enemy.canSuppress && (worldOf.get(enemy)?.canSuppressFrom(enemy) ?? false));
@@ -192,7 +261,7 @@ const sounds = new SoundTap(audio, () => audio.running); // every sound passes t
 const weaponSounds = new WeaponSounds(weaponEvents, sounds);
 new NoiseReporter(weaponEvents, () => camera.position);
 // Movement sounds (3.4): the reporter says what the player did, the sounds and the noise service listen.
-const movement = new MovementReporter(weaponEvents, player, surfaceAt);
+const movement = new MovementReporter(weaponEvents, player, (x, y, z) => surfaceAt(x, y, z, testArena, testArenaLayout.floors));
 new MovementSounds(weaponEvents, sounds);
 player.onLanded = (speedMps) => {
   playerHealth.damage(fallDamage(speedMps), 'fall');
@@ -348,7 +417,7 @@ const loop = new Loop(
       if (input.consumePress('Enter')) restart();
       return;
     }
-    if (standsOnHazard(player.position.x, player.position.y, player.position.z, greyboxHazards)) {
+    if (standsOnHazard(player.position.x, player.position.y, player.position.z, testArenaLayout.hazards)) {
       playerHealth.damage(healthConfig.hazardDamagePerSec * stepSec, 'hazard');
     }
     playerHealth.update(stepSec);
@@ -421,6 +490,14 @@ const loop = new Loop(
     const squadKnows = activeEnemies.some((enemy) => enemy.awake && enemy.knowsFresh);
     const rookHidden = glimpses.length > 0 && glimpses.every((glimpse) => glimpse.visibleShare <= 0); // as of the last update
     squad.update(stepSec, squadKnows ? player.position : null, rookHidden);
+    // A push (4.10): a moment after the squad heard his gun run dry, reload or jam. A jam also starts a flank at once.
+    const push = squad.pushDue;
+    if (push) {
+      squad.pushStarted(); // one push per window
+      if (push === 'jam') squad.forceFlank(); // "flankers commit": the flank below starts this update
+      const movers = { dry: squadConfig.pushMoversDry, reload: squadConfig.pushMoversReload, jam: squadConfig.pushMoversJam }[push];
+      if (!squad.playRunning && movers > 0) startPlay(Math.round(movers));
+    }
     if (squad.flankDue) {
       // The job goes to the enemy itself: that is who tells the squad when its flank is over.
       const candidates = activeEnemies.filter((enemy) => enemy.canFlank);
@@ -440,18 +517,10 @@ const loop = new Loop(
       flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
     }
     // Suppress and advance (4.9): while Rook hides, one moves up to closer cover while another pins his cover.
-    if (squad.playDue) {
-      const play = squad.assignAdvance(
-        activeEnemies.filter((enemy) => enemy.canAdvance && enemy.role !== 'flanker'), // flankers flank
-        (enemy) => worldOf.get(enemy)?.planAdvance(enemy) ?? null,
-        coverers(null),
-        (enemy) => enemy.role === 'heavy', // the heavy lays down the covering fire first
-      );
-      if (play) {
-        play.advancer.member.beginAdvance(play.advancer.plan.point);
-        play.suppressor.beginSuppress();
-      }
-    }
+    if (squad.playDue) startPlay(1);
+    // Repositioning (decision 237): one stand-in that has used its spot enough moves on, if the squad allows it.
+    const mover = activeEnemies.find((enemy) => enemy.wantsToReposition);
+    if (mover) reposition(mover);
     glimpses.length = 0;
     for (const { enemy, world, view } of activeStandIns) {
       enemy.update(stepSec, player.position);

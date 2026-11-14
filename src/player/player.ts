@@ -63,9 +63,19 @@ export class Player {
   private readonly leanOrigin = new THREE.Vector3();
   private readonly leanDirection = new THREE.Vector3();
 
-  constructor(private readonly collision: LevelCollision) {
+  /** Where it starts and restarts: the room's start spot, or the one in the config (the old test room's). */
+  private readonly start: { readonly xM: number; readonly zM: number; readonly yawRad: number };
+
+  constructor(
+    private readonly collision: LevelCollision,
+    start?: { readonly xM: number; readonly zM: number; readonly yawRad: number },
+  ) {
     this.head = new HeadPlacer(collision);
     this.ledges = new LedgeProbe(collision);
+    this.start = start ?? { xM: playerConfig.startXM, zM: playerConfig.startZM, yawRad: playerConfig.startYawRad };
+    this.position.set(this.start.xM, 0, this.start.zM);
+    this.previousPosition.copy(this.position);
+    this.yawRad = this.start.yawRad;
   }
 
   get isSprinting(): boolean {
@@ -94,7 +104,7 @@ export class Player {
 
   /** Back to the start spot, standing still, looking the starting way (instant restart). */
   respawn(): void {
-    this.position.set(playerConfig.startXM, 0, playerConfig.startZM);
+    this.position.set(this.start.xM, 0, this.start.zM);
     this.previousPosition.copy(this.position);
     this.velocity.x = 0;
     this.velocity.z = 0;
@@ -103,7 +113,7 @@ export class Player {
     this.slowLeftSec = 0;
     this.stance.reset();
     this.mantle.cancel();
-    this.yawRad = playerConfig.startYawRad;
+    this.yawRad = this.start.yawRad;
     this.pitchRad = 0;
     this.eyeHeightM = this.previousEyeHeightM = playerConfig.eyeHeightM;
     this.leanOffsetM = this.previousLeanOffsetM = 0;

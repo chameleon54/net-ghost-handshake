@@ -85,6 +85,8 @@ export interface StandInHooks {
   suppressOver(enemy: StandInEnemy): void;
   /** Its advance is over (arrived, or anything else): tells the squad. */
   advanceOver(enemy: StandInEnemy): void;
+  /** True if something solid is between a noise at `from` and its ears at `to` (the noise is muffled, 4.10). */
+  noiseBlocked(from: Vector3, to: Vector3): boolean;
 }
 
 /** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
@@ -182,6 +184,15 @@ export class StandInEnemy implements Target {
   private suppressSide = 1;
   /** Rook's fire came close while it was out (the Suppressed state): its next hold is longer. */
   private pinnedByRook = false;
+  /**
+   * Repositioning (decision 237): peeks from this spot, blind peeks in a row (it saw nothing), after how many peeks it
+   * moves on (2 to 4, set on arriving), whether its last peek was blind, and whether it wants to move now.
+   */
+  private peeksHere = 0;
+  private blindPeeks = 0;
+  private repositionAfter = 3;
+  private lastPeekBlind = false;
+  private wantsMove = false;
   /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
@@ -317,9 +328,7 @@ export class StandInEnemy implements Target {
    * also tells it where he was; one made where his bullet or grenade landed does not (decision 219).
    */
   hear(noise: Noise): void {
-    if (this.state === 'falling' || this.state === 'down') return;
-    this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
-    if (!hearsNoise(noise, this.ears)) return;
+    if (!this.canHear(noise)) return;
     if (!awayFromRook.has(noise.kind)) {
       this.lastKnown.set(noise.position.x, 0, noise.position.z);
       this.knowsWhere = true;
@@ -328,13 +337,23 @@ export class StandInEnemy implements Target {
     if (this.state === 'idle') this.wake();
   }
 
+  /** True if this noise carries to its ears: within its range, or half of it through a wall or prop (4.10). */
+  canHear(noise: Noise): boolean {
+    if (this.state === 'falling' || this.state === 'down') return false;
+    this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
+    return hearsNoise(noise, this.ears, () => this.hooks.noiseBlocked(noise.position, this.ears));
+  }
+
   hit(zone: HitZone, bodyDamage: number): boolean {
     if (!this.hittable) return false;
     if (zone === 'head') return this.kill();
     const killed = this.health.damage(bodyDamage);
     if (killed) this.die();
     else if (this.state === 'idle') this.wake();
-    else if (this.pressing && this.peekPhase !== 'hold' && this.peekPhase !== 'back') this.startPeekBack(); // hurt: back in at once
+    else if (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire') {
+      this.wantsMove = true; // hurt while peeking: this spot is known, it moves on after (decision 237)
+      if (this.pressing) this.startPeekBack(); // a flank attack or suppressing: back in at once
+    }
     return killed;
   }
 
@@ -423,7 +442,7 @@ export class StandInEnemy implements Target {
       return;
     }
     if (this.state === 'flank' || this.state === 'advance') {
-      this.move(dtSec);
+      this.move(dtSec, player);
       return;
     }
     this.checkCover(dtSec);
@@ -495,6 +514,14 @@ export class StandInEnemy implements Target {
   }
 
   private setCover(next: CoverPoint | null): void {
+    if (next !== this.coverPoint) {
+      // A new spot: count its peeks afresh, and decide after how many it will move on (decision 237).
+      this.peeksHere = 0;
+      this.blindPeeks = 0;
+      this.wantsMove = false;
+      const { repositionPeeksMin, repositionPeeksMax } = squadConfig;
+      this.repositionAfter = repositionPeeksMin + Math.floor(this.random() * (Math.max(repositionPeeksMax - repositionPeeksMin, 0) + 1));
+    }
     this.coverPoint = next;
     this.spotHides = next !== null; // a picked spot hides it (that is how it was picked)
     if (next) this.coverSpot.set(next.xM, 0, next.zM);
@@ -611,6 +638,7 @@ export class StandInEnemy implements Target {
   pinDown(): void {
     if (this.state !== 'cover' || (this.peekPhase !== 'tell' && this.peekPhase !== 'out' && this.peekPhase !== 'fire')) return;
     this.pinnedByRook = true;
+    this.wantsMove = true; // pinned: this spot is known, it moves on (decision 237)
     this.startPeekBack();
   }
 
@@ -620,8 +648,9 @@ export class StandInEnemy implements Target {
    * out firing (the flank attack). An advance goes at its walking speed under covering fire and does not turn back; on
    * arrival it holds and peeks as usual.
    */
-  private move(dtSec: number): void {
+  private move(dtSec: number, player: Vector3): void {
     const flanking = this.state === 'flank';
+    const firing = !flanking && this.firesOnTheMove; // the heavy keeps firing while it moves (decision 237)
     this.flankSpottedSec = flanking && this.rookSeesIt ? this.flankSpottedSec + dtSec : 0;
     if (this.flankSpottedSec >= squadConfig.spottedSec) {
       this.giveUpWalk(); // spotted: lets the spot go and looks for cover straight away
@@ -640,7 +669,47 @@ export class StandInEnemy implements Target {
       return;
     }
     const speedMps = flanking ? this.values.flankSpeedMps : this.values.walkSpeedMps;
-    if (!this.walkRoute(dtSec, this.coverSpot, speedMps)) this.giveUpWalk();
+    if (!this.walkRoute(dtSec, this.coverSpot, speedMps, !firing)) {
+      this.giveUpWalk();
+      return;
+    }
+    if (firing) this.fireOnTheMove(dtSec, player.x - this.feet.x, player.z - this.feet.z);
+  }
+
+  /**
+   * The heavy's fire while it moves (decision 237): aimed bursts at Rook when it sees him (at the backing-off share of the
+   * hit chance), suppressing bursts at the edge of his cover when it does not (pinning that side). Each burst needs a slot.
+   */
+  private fireOnTheMove(dtSec: number, dx: number, dz: number): void {
+    if (this.seesPlayer) {
+      this.engage(dtSec, dx, dz, standInConfig.retreatHitChanceShare);
+      return;
+    }
+    if (!this.knowsFresh) {
+      this.engaged = false;
+      return;
+    }
+    if (!this.engaged) {
+      this.engaged = true;
+      this.roundsInBurst = 0;
+      this.cooldownSec = 0;
+      this.suppressSide = this.random() < 0.5 ? -1 : 1; // which edge of his cover it pins this time
+    }
+    if (this.faceLastKnown(dtSec) > standInConfig.aimToleranceDeg * degToRad) return;
+    this.cooldownSec -= dtSec;
+    if (this.cooldownSec > 0) return;
+    if (!this.takeSlot()) {
+      this.cooldownSec = 0;
+      return;
+    }
+    this.hooks.fire(this, 'suppress');
+    this.roundsInBurst++;
+    if (this.roundsInBurst < squadConfig.suppressBurstRounds) {
+      this.cooldownSec += standInConfig.roundIntervalSec;
+      return;
+    }
+    this.roundsInBurst = 0;
+    this.cooldownSec += squadConfig.suppressBurstPauseSec;
   }
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
@@ -751,7 +820,10 @@ export class StandInEnemy implements Target {
       if (this.peekTimerSec <= 0) this.startPeekFire();
     } else {
       this.setPeekShare(point, 1 - progressOf(this.peekTimerSec, standInConfig.peekBackSec));
-      if (this.peekTimerSec <= 0) this.resetPeek();
+      if (this.peekTimerSec <= 0) {
+        this.peekDone();
+        this.resetPeek();
+      }
     }
   }
 
@@ -784,6 +856,7 @@ export class StandInEnemy implements Target {
     // Fire at his cover only on fresh knowledge of where he is (decision 216); old knowledge, it only looks.
     const fireAtCover = this.knowsFresh && this.random() < standInConfig.hiddenFireChance;
     this.peekMode = this.seesPlayer ? 'aimed' : this.suppressing ? 'suppress' : fireAtCover ? 'cover' : 'look';
+    this.lastPeekBlind = !this.seesPlayer && !this.suppressing; // pinning his cover for a squadmate is not blind
     this.peekRounds = 0;
     this.cooldownSec = 0; // the tell was the warning: no extra reaction pause
     this.peekTimerSec = this.values.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
@@ -849,6 +922,37 @@ export class StandInEnemy implements Target {
     this.peekTimerSec = standInConfig.peekBackSec;
     this.pressing = false; // a flank attack ends when it goes back in
     this.endSuppress(); // and so does suppressing
+  }
+
+  /**
+   * A peek from its spot is over (decision 237): after enough peeks from one spot, or too many blind ones in a row, it
+   * wants to move to another. The squad decides when (one at a time, with covering fire or by a hidden route).
+   */
+  private peekDone(): void {
+    this.peeksHere++;
+    this.blindPeeks = this.lastPeekBlind ? this.blindPeeks + 1 : 0;
+    this.lastPeekBlind = false;
+    if (this.peeksHere >= this.repositionAfter || this.blindPeeks >= squadConfig.repositionBlindPeeks) this.wantsMove = true;
+  }
+
+  /** True when it wants to move to another spot and can (holding cover, not mid-peek): the squad decides (decision 237). */
+  get wantsToReposition(): boolean {
+    return this.wantsMove && this.canAdvance && this.peekPhase === 'hold';
+  }
+
+  /** The squad turned the move down for now (no spot, or no cover and too open a route): it asks again after another peek. */
+  repositionDeclined(): void {
+    this.wantsMove = false;
+  }
+
+  /** The squad sends it to another spot (decision 237): like an advance (covered, not turned back), not necessarily closer. */
+  beginReposition(point: CoverPoint): void {
+    this.beginMove(point, 'advance');
+  }
+
+  /** True if it fires while it moves (the heavy, decision 237): it is its own covering fire. */
+  get firesOnTheMove(): boolean {
+    return this.values.firesOnTheMove > 0;
   }
 
   /** Back to holding, for a random while. */

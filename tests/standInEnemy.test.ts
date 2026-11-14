@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
 import { squadConfig } from '../src/config/squad';
+import { noiseConfig } from '../src/config/noise';
 import { roleConfig, roles, type Role } from '../src/config/roles';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
@@ -63,6 +64,8 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     keepSuppressing: true,
     suppressOvers: 0,
     advanceOvers: 0,
+    /** Whether a wall is between any noise and its ears. */
+    wallBetween: false,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -112,6 +115,7 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     keepSuppressing: () => world.keepSuppressing,
     suppressOver: () => world.suppressOvers++,
     advanceOver: () => world.advanceOvers++,
+    noiseBlocked: () => world.wallBetween,
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -146,6 +150,16 @@ describe('StandInEnemy waking up', () => {
     expect(enemy.state).toBe('idle');
     expect(enemy.feet.toArray()).toEqual([0, 0, 0]);
     expect(shots).toHaveLength(0);
+  });
+
+  it('through a wall, a noise carries only part of its range (4.10)', () => {
+    const { enemy, world } = setup();
+    world.wallBetween = true;
+    const at = new Vector3(0, standInConfig.eyeHeightM, -5);
+    expect(enemy.canHear(noiseAt(at, 6))).toBe(false); // 5 m away: too far through the wall
+    expect(enemy.canHear(noiseAt(at, 5 / noiseConfig.wallMuffleShare + 0.5))).toBe(true);
+    world.wallBetween = false;
+    expect(enemy.canHear(noiseAt(at, 6))).toBe(true);
   });
 
   it('wakes on a noise that carries to it, not on one that falls short', () => {
@@ -606,6 +620,89 @@ describe('StandInEnemy suppressing and advancing (4.9)', () => {
     expect(world.tells).toHaveLength(0); // still holding: the hold is longer
     run(far, holdSec * (squadConfig.pinnedHoldScale - 1));
     expect(world.tells).toHaveLength(1);
+  });
+});
+
+describe('StandInEnemy repositioning and the heavy on the move (decision 237)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const next: CoverPoint = { xM: 5, zM: -3, height: 'low', facingYawRad: Math.PI };
+  const far = new Vector3(0, 0, 10);
+  const peekSec = standInConfig.tellSec + standInConfig.peekOutSec + 0.6 + standInConfig.peekBackSec;
+  const holdMaxSec = standInConfig.peekHoldMaxSec;
+  /** A stand-in of `role` holding `spot`, every random number `roll`. */
+  const holding = (roll = 0.99, role: Role = 'trooper') => {
+    const s = setup(roll, new SquadCoordinator(), role);
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(far, 2.5); // the heavy walks slower
+    expect(s.enemy.state).toBe('cover');
+    return s;
+  };
+
+  it('two blind peeks in a row and it wants to move on', () => {
+    const { enemy, run } = holding(); // it never sees Rook, even out of cover
+    run(far, holdMaxSec + peekSec);
+    expect(enemy.wantsToReposition).toBe(false); // one blind peek
+    run(far, holdMaxSec + peekSec);
+    expect(enemy.wantsToReposition).toBe(true);
+    enemy.repositionDeclined();
+    expect(enemy.wantsToReposition).toBe(false);
+  });
+
+  it('after enough peeks from one spot it wants to move on, even when it sees him', () => {
+    const { enemy, world, run } = holding(0.99); // 0.99: the most peeks, repositionPeeksMax
+    world.seenWhenOut = true;
+    for (let i = 0; i < squadConfig.repositionPeeksMax - 1; i++) run(far, holdMaxSec + peekSec);
+    expect(enemy.wantsToReposition).toBe(false);
+    run(far, holdMaxSec + peekSec);
+    expect(enemy.wantsToReposition).toBe(true);
+  });
+
+  it('pinned or hurt while peeking, it wants to move on', () => {
+    const pinned = holding();
+    pinned.enemy.beginSuppress(); // out at once
+    pinned.world.keepSuppressing = false;
+    pinned.run(far, standInConfig.tellSec + standInConfig.peekOutSec);
+    pinned.enemy.pinDown();
+    pinned.run(far, standInConfig.peekBackSec + 0.1);
+    expect(pinned.enemy.wantsToReposition).toBe(true);
+  });
+
+  it('a reposition moves like an advance and tells the squad when it is over', () => {
+    const { enemy, world, run } = holding();
+    enemy.beginReposition(next);
+    run(far, dtSec);
+    expect(enemy.state).toBe('advance');
+    run(far, 3);
+    expect(enemy.state).toBe('cover');
+    expect(enemy.cover).toBe(next);
+    expect(world.advanceOvers).toBe(1);
+  });
+
+  it('the heavy fires on the move: suppressing bursts when it does not see Rook, aimed ones when it does', () => {
+    const blind = holding(0.99, 'heavy');
+    blind.shots.length = 0;
+    blind.enemy.beginAdvance(next);
+    blind.run(far, 2);
+    expect(blind.enemy.state).toBe('advance');
+    expect(blind.shots.length).toBeGreaterThan(0);
+    expect(blind.shots.every((s) => s.shot === 'suppress')).toBe(true);
+
+    const seeing = holding(0.99, 'heavy');
+    seeing.world.sees = true;
+    seeing.run(far, 1 / standInConfig.sightChecksPerSec + 0.05); // it notices at its next sight check
+    seeing.shots.length = 0;
+    seeing.enemy.beginAdvance(next);
+    seeing.run(far, 1.5);
+    expect(seeing.shots.length).toBeGreaterThan(0);
+    expect(seeing.shots.every((s) => s.shot === 'hit' || s.shot === 'miss')).toBe(true);
+
+    const trooper = holding(0.99, 'trooper');
+    trooper.shots.length = 0;
+    trooper.enemy.beginAdvance(next);
+    trooper.run(far, 1.5);
+    expect(trooper.shots).toHaveLength(0); // the others do not fire while they move
   });
 });
 
@@ -1430,6 +1527,16 @@ describe('StandInWorld', () => {
     expect(pins).toHaveLength(1);
     expect(pins[0].anchor.toArray()).toEqual([0, 0, 0]);
     expect(Math.abs(pins[0].side.x)).toBeCloseTo(1, 5); // square to its line of fire (north to south)
+  });
+
+  it('a wall between a noise and its ears muffles it; the surface the noise was made on does not (4.10)', () => {
+    const wall: RoomBox = { kind: 'wall', xM: 0, zM: -4, widthM: 4, depthM: 0.3, heightM: 3 };
+    const { world } = setupWorld([wall]);
+    const ears = new Vector3(0, 1.6, -8);
+    expect(world.noiseBlocked(new Vector3(0, 1.6, 0), ears)).toBe(true); // through the wall
+    expect(world.noiseBlocked(new Vector3(0, 1.6, -3.85), ears)).toBe(true); // a bullet in the far face: the wall is between
+    expect(world.noiseBlocked(new Vector3(0, 1.6, -4.15), ears)).toBe(false); // a bullet in the face toward it
+    expect(world.noiseBlocked(new Vector3(0, 0, -6), ears)).toBe(false); // a step on the floor
   });
 
   it("knows when one of Rook's rounds passes close to it", () => {

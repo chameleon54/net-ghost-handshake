@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { greyboxFloors, greyboxHazards, greyboxRoom, greyboxRoomSize, isClimbable, type RoomBox } from '../data/greyboxRoom';
+import { greyboxLayout, greyboxRoom, isClimbable, type RoomBox, type RoomLayout } from '../data/greyboxRoom';
 import { LevelCollision } from './collision';
 
 export interface GreyboxLevel {
@@ -20,7 +20,8 @@ function boxGeometry(box: RoomBox): THREE.BufferGeometry {
   return geometry;
 }
 
-export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLevel {
+export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: RoomLayout = greyboxLayout): GreyboxLevel {
+  const { size, floors, hazards } = layout;
   const group = new THREE.Group();
   const geometries = boxes.map(boxGeometry);
 
@@ -29,14 +30,14 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   });
 
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(greyboxRoomSize.widthM, greyboxRoomSize.depthM).rotateX(-Math.PI / 2),
+    new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2),
     new THREE.MeshStandardMaterial({ color: shades.floor }),
   );
   group.add(floor);
 
   // The floor patches with their own surface (footsteps): drawn in slightly different tints so they can be told apart.
   const surfaceTints = { concrete: shades.floor, metal: 0x263340, tile: 0x4a5258 } as const;
-  for (const zone of greyboxFloors) {
+  for (const zone of floors) {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(zone.widthM, zone.depthM).rotateX(-Math.PI / 2),
       new THREE.MeshStandardMaterial({ color: surfaceTints[zone.surface], polygonOffset: true, polygonOffsetFactor: -0.5, polygonOffsetUnits: -0.5 }),
@@ -46,7 +47,7 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   }
 
   // The test hazard pads: flat red squares on the floor.
-  for (const pad of greyboxHazards) {
+  for (const pad of hazards) {
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(pad.widthM, pad.depthM).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ color: 0xc41e1e, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
@@ -56,7 +57,8 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   }
 
   // A grid helps the eye judge movement. 0.01 m up so it does not flicker against the floor.
-  const grid = new THREE.GridHelper(greyboxRoomSize.widthM, greyboxRoomSize.widthM, 0x55606b, 0x3a424a);
+  const gridM = Math.max(size.widthM, size.depthM);
+  const grid = new THREE.GridHelper(gridM, gridM, 0x55606b, 0x3a424a);
   grid.position.y = 0.01;
   group.add(grid);
 
@@ -66,7 +68,7 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   const climbableBoxes = boxes.filter(isClimbable);
   const climbable = climbableBoxes.length > 0 ? mergeGeometries(climbableBoxes.map(boxGeometry), false) : null;
   // The navigation mesh needs the floor too (collision treats height 0 as the floor instead).
-  const floorGeometry = new THREE.PlaneGeometry(greyboxRoomSize.widthM, greyboxRoomSize.depthM).rotateX(-Math.PI / 2);
+  const floorGeometry = new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2);
   const navigationGeometry = mergeGeometries([...boxes.map(boxGeometry), floorGeometry], false);
   if (!navigationGeometry) throw new Error('Could not merge the room geometry for navigation');
   return { group, collision: new LevelCollision(merged, climbable), navigationGeometry };

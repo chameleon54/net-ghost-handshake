@@ -5,13 +5,16 @@ export type Role = 'trooper' | 'flanker' | 'heavy' | 'leader';
 
 export const roleConfigDefaults = {
   /** The default: holds cover, peeks and fires steady bursts. */
-  trooper: { healthPoints: 100, walkSpeedMps: 2.5, flankSpeedMps: 3.5, burstRounds: 3, preferMinM: 5, preferMaxM: 12 },
+  trooper: { healthPoints: 100, walkSpeedMps: 2.5, flankSpeedMps: 3.5, burstRounds: 3, preferMinM: 5, preferMaxM: 12, firesOnTheMove: 0 },
   /** Fast and fragile; gets the flank job first. */
-  flanker: { healthPoints: 60, walkSpeedMps: 3.5, flankSpeedMps: 4.5, burstRounds: 3, preferMinM: 4, preferMaxM: 10 },
-  /** Slow and tough, long bursts, likes close cover. A flank speed of 0 means it never flanks. */
-  heavy: { healthPoints: 180, walkSpeedMps: 1.8, flankSpeedMps: 0, burstRounds: 6, preferMinM: 3, preferMaxM: 8 },
+  flanker: { healthPoints: 60, walkSpeedMps: 3.5, flankSpeedMps: 4.5, burstRounds: 3, preferMinM: 4, preferMaxM: 10, firesOnTheMove: 0 },
+  /**
+   * Slow and tough, long bursts, likes close cover. A flank speed of 0 means it never flanks. It fires while it moves
+   * (`firesOnTheMove` 1, decision 237), so it needs no one else's covering fire.
+   */
+  heavy: { healthPoints: 180, walkSpeedMps: 1.8, flankSpeedMps: 0, burstRounds: 6, preferMinM: 3, preferMaxM: 8, firesOnTheMove: 1 },
   /** Fights like a trooper; his death briefly disorganises the squad. */
-  leader: { healthPoints: 100, walkSpeedMps: 2.5, flankSpeedMps: 3.5, burstRounds: 3, preferMinM: 5, preferMaxM: 12 },
+  leader: { healthPoints: 100, walkSpeedMps: 2.5, flankSpeedMps: 3.5, burstRounds: 3, preferMinM: 5, preferMaxM: 12, firesOnTheMove: 0 },
 } as const;
 
 /** One role's values: health, walking and flank speed, rounds per burst, and the liked cover range (m from Rook). */

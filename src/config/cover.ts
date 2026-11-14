@@ -12,6 +12,11 @@ export const coverConfigDefaults = {
    * Spots sit 0.45 m from their prop, so this allows Rook up to about 65 degrees to the side. Decision 222.
    */
   ownCoverReachM: 1.2,
+  /**
+   * Score lost by a spot from which no peek can see Rook (a blind spot), so a fighting spot is preferred; a blind spot is
+   * taken only if no fighting spot is free (decision 237). The same scale as the penalties above.
+   */
+  blindSpotPenalty: 10,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

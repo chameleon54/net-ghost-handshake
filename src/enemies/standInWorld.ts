@@ -11,6 +11,7 @@ import type { CoverPoint, CoverPoints } from '../level/cover';
 import type { Navigation } from '../level/navigation';
 import { hitChance, missOffsetM, type Glimpse } from '../player/exposure';
 import { squadConfig } from '../config/squad';
+import { coverConfig } from '../config/cover';
 import { SquadCoordinator } from '../squad/squadCoordinator';
 import type { WeaponEvents } from '../weapons/events';
 import { peekEyesAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot } from './standInEnemy';
@@ -32,6 +33,8 @@ export interface StandInQuarry {
   readonly movingFast: boolean;
 }
 
+/** A noise's line to the ears skips this much at each end (the surface the noise was made on does not muffle it). */
+const noiseSurfaceM = 0.1;
 /** Rook's near miss checks a stand-in's chest at this share of its height (with its head). */
 const coverChestShare = 0.6;
 /** A miss tries this many aim points, looking for one that strikes a surface near Rook. */
@@ -163,6 +166,52 @@ export class StandInWorld implements StandInHooks {
 
   advanceOver(enemy: StandInEnemy): void {
     this.squad.advanceOver(enemy);
+    this.squad.repositionOver(enemy); // a reposition moves like an advance
+  }
+
+  /** True if a peek from this spot (rising, or stepping out) can see Rook: a fighting spot (decision 237). */
+  canFightFrom(point: CoverPoint): boolean {
+    return peekWays(point).some((way) => this.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
+  }
+
+  /**
+   * Where to move on to from a spot it has used enough (decision 237), or null: a free hiding spot (not its own) at least
+   * the reposition distance from where it is, scored like choosing cover (its liked range, the walk, and a spot it cannot
+   * shoot from as a last resort). Also how much of the route is in Rook's view, to know if it may go without cover.
+   */
+  planReposition(enemy: StandInEnemy): (FlankPlan & { readonly exposedM: number }) | null {
+    const { position, eyes } = this.quarry;
+    const { preferMinM, preferMaxM } = enemy.values;
+    let best: FlankPlan | null = null;
+    for (const point of this.coverPoints.points) {
+      const holder = this.coverPoints.claimedBy(point);
+      if (point === enemy.cover || (holder && holder !== enemy)) continue;
+      if (Math.hypot(point.xM - enemy.xM, point.zM - enemy.zM) < squadConfig.repositionMinM) continue;
+      if (!this.coverPoints.hides(point, eyes)) continue;
+      const walk = this.walkM(enemy, point);
+      if (!Number.isFinite(walk)) continue;
+      const fromRookM = Math.hypot(point.xM - position.x, point.zM - position.z);
+      const outOfRangeM = Math.max(preferMinM - fromRookM, fromRookM - preferMaxM, 0);
+      const blind = this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty;
+      const cost = outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM + blind;
+      if (!best || cost < best.cost) best = { point, cost };
+    }
+    if (!best) return null;
+    this.spot.set(best.point.xM, 0, best.point.zM);
+    this.navigation.findPath(enemy.feet, this.spot, this.routeToCover);
+    return { ...best, exposedM: this.exposedRouteM(this.routeToCover) };
+  }
+
+  /**
+   * True if a wall or prop is between a noise and the ears. The ends are left out by a hand's width, because a noise is
+   * often made on a surface (a bullet in a wall, a step on the floor) and that surface does not muffle it.
+   */
+  noiseBlocked(from: Vector3, to: Vector3): boolean {
+    const distanceM = from.distanceTo(to);
+    if (distanceM <= 2 * noiseSurfaceM) return false;
+    this.direction.subVectors(to, from).divideScalar(distanceM);
+    this.sample.copy(from).addScaledVector(this.direction, noiseSurfaceM);
+    return this.collision.rayDistance(this.sample, this.direction, distanceM - 2 * noiseSurfaceM) !== Infinity;
   }
 
   /**
@@ -182,7 +231,8 @@ export class StandInWorld implements StandInHooks {
       if (!this.coverPoints.hides(point, eyes)) continue;
       const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
       if (!Number.isFinite(walk)) continue;
-      if (!best || walk < best.cost) best = { point, cost: walk };
+      const cost = walk * coverConfig.walkPenaltyPerM + (this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty);
+      if (!best || cost < best.cost) best = { point, cost };
     }
     return best;
   }
@@ -392,7 +442,14 @@ export class StandInWorld implements StandInHooks {
   }
 
   pickCover(enemy: StandInEnemy): CoverPoint | null {
-    return this.coverPoints.best(enemy, this.quarry.eyes, this.quarry.position, (point) => this.walkM(enemy, point), enemy.values);
+    return this.coverPoints.best(
+      enemy,
+      this.quarry.eyes,
+      this.quarry.position,
+      (point) => this.walkM(enemy, point),
+      enemy.values,
+      (point) => this.canFightFrom(point), // a spot it can shoot from is preferred (decision 237)
+    );
   }
 
   coverHides(point: CoverPoint): boolean {

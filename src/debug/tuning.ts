@@ -371,6 +371,7 @@ export const movementFolder: Folder<MovementKey> = {
 export const noiseFolder: Folder<NoiseKey> = {
   title: 'Noise (how far enemies hear)',
   sliders: [
+    { key: 'wallMuffleShare', label: 'Through a wall or prop: carries (share)', min: 0, max: 1, step: 0.05 },
     { key: 'rifleShotM', label: 'M4-A shot (m)', min: 0, max: 100, step: 1 },
     { key: 'pistolShotM', label: 'P9 shot, suppressed (m)', min: 0, max: 50, step: 0.5 },
     { key: 'impactM', label: 'Bullet hitting a surface (m)', min: 0, max: 60, step: 1 },
@@ -520,6 +521,7 @@ export const coverFolder: Folder<CoverKey> = {
     { key: 'walkPenaltyPerM', label: 'Penalty per m of walking', min: 0, max: 5, step: 0.05 },
     { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
     { key: 'ownCoverReachM', label: 'Hidden check: own cover within (m of the body)', min: 0.5, max: 3, step: 0.05 },
+    { key: 'blindSpotPenalty', label: 'Penalty for a spot whose peek cannot see you', min: 0, max: 50, step: 0.5 },
   ],
 };
 
@@ -557,6 +559,7 @@ export const roleSliders: Slider<RoleKey>[] = [
   { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 12, step: 1 },
   { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
   { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
+  { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
 ];
 
 export const squadFolder: Folder<SquadKey> = {
@@ -587,6 +590,16 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'suppressAfterMoveSec', label: 'Suppress: stops after the move by (s)', min: 0, max: 5, step: 0.1 },
     { key: 'pinnedByFireM', label: 'Your near miss pins an enemy within (m)', min: 0, max: 3, step: 0.1 },
     { key: 'pinnedHoldScale', label: 'Pinned enemy holds longer (x)', min: 1, max: 5, step: 0.1 },
+    { key: 'pushReactionSec', label: 'Hearing: push after (s)', min: 0, max: 5, step: 0.1 },
+    { key: 'pushMaxWindowSec', label: 'Hearing: dry or jam window at most (s)', min: 0.5, max: 30, step: 0.5 },
+    { key: 'pushMoversDry', label: 'Hearing: move up on a dry gun', min: 0, max: 4, step: 1 },
+    { key: 'pushMoversReload', label: 'Hearing: move up on a reload', min: 0, max: 4, step: 1 },
+    { key: 'pushMoversJam', label: 'Hearing: move up on a jam (plus a flank)', min: 0, max: 4, step: 1 },
+    { key: 'repositionPeeksMin', label: 'Reposition: after at least (peeks)', min: 1, max: 10, step: 1 },
+    { key: 'repositionPeeksMax', label: 'Reposition: after at most (peeks)', min: 1, max: 10, step: 1 },
+    { key: 'repositionBlindPeeks', label: 'Reposition: after blind peeks in a row', min: 1, max: 10, step: 1 },
+    { key: 'repositionMinM', label: 'Reposition: new spot at least (m away)', min: 0.5, max: 15, step: 0.5 },
+    { key: 'repositionMaxExposedM', label: 'Reposition: uncovered, route in your view at most (m)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
   ],

@@ -128,7 +128,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.close();
 
   // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
@@ -385,9 +385,15 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round${exposure.pinned ? ', a side of your cover is PINNED' : ''}`;
     // Suppress and advance (4.9): who pins, who moves up, or why none is on.
     const suppressorIndex = activeStandIns.findIndex((s) => s === squad.suppressor);
-    const advancerIndex = activeStandIns.findIndex((s) => s === squad.advancer);
+    const movingLetters = activeStandIns.flatMap((s, i) => (squad.advancers.includes(s) || squad.repositioner === s ? [letter(i)] : []));
     const pinning = suppressorIndex >= 0 ? `${letter(suppressorIndex)} pins your cover` : '';
-    const moving = advancerIndex >= 0 ? `${letter(advancerIndex)} moves up` : '';
+    const moving = movingLetters.length > 0 ? `${movingLetters.join(', ')} move${movingLetters.length > 1 ? '' : 's'} up` : '';
+    // Hearing his gun (4.10): what the squad heard, and when it pushes.
+    const heardNames = { dry: 'your gun run dry', reload: 'you reload', jam: 'your gun jam' } as const;
+    const heard = squad.heardKind;
+    readouts.heard = !heard ? 'nothing'
+      : squad.pushedAlready ? `${heardNames[heard]}: pushed`
+      : `${heardNames[heard]}: push in ${squad.pushInSec.toFixed(1)} s`;
     readouts.play =
       pinning || moving ? [pinning, moving].filter(Boolean).join(', ')
       : squad.disorganised ? 'none while the squad is disorganised'
@@ -404,6 +410,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       `squad     ${readouts.squad}`,
       `flank     ${readouts.flank}`,
       `advance   ${readouts.play}`,
+      `heard     ${readouts.heard}`,
       ...enemyLines,
       `camera    ${readouts.freeCamera}`,
       ...(readouts.status ? [`status    ${readouts.status}`] : []),

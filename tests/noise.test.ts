@@ -16,6 +16,14 @@ const dtSec = 1 / 60;
 describe('hearsNoise', () => {
   const noise: Noise = { kind: 'rifle-shot', position: new Vector3(0, 0, 0), radiusM: 10 };
 
+  it('through a wall it carries only the muffled share of its range (4.10)', () => {
+    const wall = () => true;
+    const share = noiseConfig.wallMuffleShare;
+    expect(hearsNoise(noise, new Vector3(10 * share - 0.1, 0, 0), wall)).toBe(true); // close enough even through it
+    expect(hearsNoise(noise, new Vector3(10 * share + 0.1, 0, 0), wall)).toBe(false);
+    expect(hearsNoise(noise, new Vector3(10 * share + 0.1, 0, 0), () => false)).toBe(true); // nothing in the way
+  });
+
   it('is heard inside the radius, at the edge, and not beyond it', () => {
     expect(hearsNoise(noise, new Vector3(3, 0, 4))).toBe(true); // 5 m
     expect(hearsNoise(noise, new Vector3(10, 0, 0))).toBe(true); // exactly at the edge

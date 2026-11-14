@@ -3,6 +3,9 @@ import { squadConfig } from '../config/squad';
 /** Something that can hold a firing slot (an enemy). */
 type Member = object;
 
+/** What the squad heard of Rook's gun (4.10): he ran dry, is reloading, or jammed. */
+export type PushKind = 'dry' | 'reload' | 'jam';
+
 // The squad coordinator (enemies.md, milestone 4.6): it makes the squad act together. It hands out firing slots (only a
 // few enemies fire at once; an enemy asks for a slot before a burst and gives it back after) and keeps the hit budget for
 // the whole squad (at most one damaging hit on Rook within any 0.5 s, so several enemies can never hit him at once).
@@ -10,7 +13,9 @@ type Member = object;
 // flank at a time, with a wait between them). Since 4.8 flankers get that job first, and when the squad leader goes down
 // the squad is disorganised for a while. Since 4.9, while Rook hides, it runs suppress and advance: one enemy pins his
 // cover while another moves up, and nobody moves up without that covering fire; flanks get covering fire when someone is
-// free. Aggression comes later (4.11). Rules only, no drawing.
+// free. Since 4.10 it hears Rook's gun: a dry click, a reload or a jam opens a push window, and a moment later it pushes
+// (a play at once, more movers on a dry gun, a flank at once on a jam). Aggression comes later (4.11). Rules only, no
+// drawing.
 export class SquadCoordinator {
   private readonly holders = new Set<Member>();
   /** Game time since any enemy last landed a damaging hit. */
@@ -27,7 +32,14 @@ export class SquadCoordinator {
   private disorderLeftSec = 0;
   /** Suppress and advance (4.9): who pins Rook's cover, who moves up, and the timers. */
   private suppressMember: Member | null = null;
-  private advanceMember: Member | null = null;
+  private readonly advanceMembers = new Set<Member>();
+  /** The one stand-in moving on to another spot (decision 237), or null: one at a time. */
+  private repositionMember: Member | null = null;
+  /** Hearing Rook's weapon (4.10): the open push window, the reaction delay, and whether it already pushed. */
+  private pushWindow: PushKind | null = null;
+  private pushWindowLeftSec = 0;
+  private pushDelayLeftSec = 0;
+  private pushedThisWindow = false;
   private playWaitLeftSec = squadConfig.advanceEverySec;
   /** After the covered move ends, the suppressor keeps on this long. */
   private coverGraceLeftSec = 0;
@@ -46,6 +58,9 @@ export class SquadCoordinator {
     this.disorderLeftSec = Math.max(this.disorderLeftSec - dtSec, 0);
     this.playWaitLeftSec = Math.max(this.playWaitLeftSec - dtSec, 0);
     this.coverGraceLeftSec = Math.max(this.coverGraceLeftSec - dtSec, 0);
+    this.pushDelayLeftSec = Math.max(this.pushDelayLeftSec - dtSec, 0);
+    this.pushWindowLeftSec = Math.max(this.pushWindowLeftSec - dtSec, 0);
+    if (this.pushWindowLeftSec <= 0) this.pushWindow = null;
     this.rookHidden = rook !== null && rookHidden;
     if (!rook) {
       this.hasHoldSpot = false;
@@ -130,8 +145,64 @@ export class SquadCoordinator {
     return this.suppressMember;
   }
 
-  get advancer(): Member | null {
-    return this.advanceMember;
+  /** Who is moving up under that fire (one, or more in a push). */
+  get advancers(): readonly Member[] {
+    return [...this.advanceMembers];
+  }
+
+  /**
+   * The squad heard Rook's gun (4.10): a push window opens (or stays open, if it is the same one). It pushes once, after the
+   * reaction delay, if the window is still open then. A dry gun or a jam keeps it open until closed, at most the window
+   * limit; a reload until it ends.
+   */
+  heard(kind: PushKind): void {
+    if (this.pushWindow !== kind) {
+      this.pushWindow = kind;
+      this.pushDelayLeftSec = squadConfig.pushReactionSec;
+      this.pushedThisWindow = false;
+    }
+    this.pushWindowLeftSec = squadConfig.pushMaxWindowSec;
+  }
+
+  /** He is no longer vulnerable that way (he fired, his reload ended, his jam is cleared): that window closes. */
+  closeWindow(kind: PushKind): void {
+    if (this.pushWindow !== kind) return;
+    this.pushWindow = null;
+    this.pushWindowLeftSec = 0;
+  }
+
+  /** The open push window, and the time until the push. For the dev readout. */
+  get heardKind(): PushKind | null {
+    return this.pushWindow;
+  }
+
+  get pushInSec(): number {
+    return this.pushDelayLeftSec;
+  }
+
+  get pushedAlready(): boolean {
+    return this.pushedThisWindow;
+  }
+
+  /** The push due now (the window is open, the delay is over, it has not pushed yet, not in disorder), or null. */
+  get pushDue(): PushKind | null {
+    if (!this.pushWindow || this.pushDelayLeftSec > 0 || this.pushedThisWindow || this.disorganised) return null;
+    return this.pushWindow;
+  }
+
+  /** The push for the open window has been made (or could not be): one per window. */
+  pushStarted(): void {
+    this.pushedThisWindow = true;
+  }
+
+  /** True while a suppress-and-advance play is running (someone pins, or someone moves up). */
+  get playRunning(): boolean {
+    return this.suppressMember !== null || this.advanceMembers.size > 0;
+  }
+
+  /** One more mover joins the running play (a push moves up more than one). */
+  addAdvancer(member: Member): void {
+    this.advanceMembers.add(member);
   }
 
   /** Time before the next suppress-and-advance play may start. For the dev readout. */
@@ -141,7 +212,7 @@ export class SquadCoordinator {
 
   /** True when a suppress-and-advance play may start: Rook hides where the squad knows he is, and nothing else is on. */
   get playDue(): boolean {
-    if (this.suppressMember !== null || this.advanceMember !== null || this.disorganised) return false;
+    if (this.playRunning || this.disorganised) return false;
     return this.rookHidden && this.playWaitLeftSec <= 0;
   }
 
@@ -155,7 +226,9 @@ export class SquadCoordinator {
     plan: (member: M) => P | null,
     coverers: readonly M[],
     preferredCover: (member: M) => boolean,
-  ): { advancer: { member: M; plan: P }; suppressor: M } | null {
+    /** True for a mover that is its own covering fire (the heavy fires on the move, decision 237). */
+    selfCovers: (member: M) => boolean = () => false,
+  ): { advancer: { member: M; plan: P }; suppressor: M | null } | null {
     let best: { member: M; plan: P } | null = null;
     for (const member of movers) {
       const option = plan(member);
@@ -163,14 +236,14 @@ export class SquadCoordinator {
     }
     const mover = best?.member;
     const others = coverers.filter((member) => member !== mover);
-    const suppressor = others.find(preferredCover) ?? others[0] ?? null;
-    if (!best || !suppressor) {
+    const suppressor = mover && selfCovers(mover) ? null : (others.find(preferredCover) ?? others[0] ?? null);
+    if (!best || (!suppressor && !selfCovers(best.member))) {
       this.playFailure = !best ? 'no closer cover to move up to' : 'nobody to give covering fire';
       this.playWaitLeftSec = squadConfig.playRetrySec;
       return null;
     }
     this.playFailure = null;
-    this.advanceMember = best.member;
+    this.advanceMembers.add(best.member);
     this.suppressMember = suppressor;
     this.playWaitLeftSec = squadConfig.advanceEverySec;
     return { advancer: best, suppressor };
@@ -187,7 +260,8 @@ export class SquadCoordinator {
   /** True while `member` should keep pinning: it is the suppressor and the move it covers is on (or just over). */
   keepSuppressing(member: Member): boolean {
     if (member !== this.suppressMember) return false;
-    return this.advanceMember !== null || this.flankMember !== null || this.coverGraceLeftSec > 0;
+    const moving = this.advanceMembers.size > 0 || this.flankMember !== null || this.repositionMember !== null;
+    return moving || this.coverGraceLeftSec > 0;
   }
 
   /** The suppressor stopped (the move is over, its time is up, it was hurt, or anything else). */
@@ -197,8 +271,26 @@ export class SquadCoordinator {
 
   /** The advance by `member` is over (arrived, or anything else): its covering fire stops a moment later. */
   advanceOver(member: Member): void {
-    if (member !== this.advanceMember) return;
-    this.advanceMember = null;
+    if (!this.advanceMembers.delete(member)) return;
+    if (this.advanceMembers.size === 0) this.coverGraceLeftSec = squadConfig.suppressAfterMoveSec;
+  }
+
+  /** Who is moving on to another spot (decision 237), or null. */
+  get repositioner(): Member | null {
+    return this.repositionMember;
+  }
+
+  /** `member` may move on to another spot now: true, and it is the one repositioning, if nobody else is (one at a time). */
+  assignReposition(member: Member): boolean {
+    if (this.repositionMember !== null && this.repositionMember !== member) return false;
+    this.repositionMember = member;
+    return true;
+  }
+
+  /** The reposition by `member` is over: its covering fire (if any) stops a moment later. */
+  repositionOver(member: Member): void {
+    if (member !== this.repositionMember) return;
+    this.repositionMember = null;
     this.coverGraceLeftSec = squadConfig.suppressAfterMoveSec;
   }
 
@@ -255,8 +347,13 @@ export class SquadCoordinator {
     this.flankWaitLeftSec = 0;
     this.disorderLeftSec = 0;
     this.suppressMember = null;
-    this.advanceMember = null;
+    this.advanceMembers.clear();
+    this.repositionMember = null;
     this.playWaitLeftSec = squadConfig.advanceEverySec;
+    this.pushWindow = null;
+    this.pushWindowLeftSec = 0;
+    this.pushDelayLeftSec = 0;
+    this.pushedThisWindow = false;
     this.coverGraceLeftSec = 0;
     this.rookHidden = false;
     this.playFailure = null;

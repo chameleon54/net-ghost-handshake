@@ -28,6 +28,8 @@ export const noiseConfigDefaults = {
   slideM: 10,
   vaultM: 6,
   climbM: 5,
+  /** Through a wall or prop, a noise carries this share of its distance (4.10). Not a distance: on the panel as a share. */
+  wallMuffleShare: 0.5,
   /** A landing: this far for a light one, this far for a hard fall. */
   landingSoftM: 6,
   landingHardM: 15,

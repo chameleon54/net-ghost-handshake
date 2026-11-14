@@ -197,6 +197,98 @@ describe('SquadCoordinator suppress and advance (4.9)', () => {
   });
 });
 
+describe("SquadCoordinator hearing Rook's gun (4.10)", () => {
+  const step = (squad: SquadCoordinator, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 60); i++) squad.update(1 / 60, { x: 0, z: 0 }, false);
+  };
+
+  it('pushes once, after the reaction delay, while the window is open', () => {
+    const squad = new SquadCoordinator();
+    squad.heard('dry');
+    expect(squad.pushDue).toBeNull();
+    step(squad, squadConfig.pushReactionSec - 0.1);
+    squad.heard('dry'); // another click: the same window, the delay goes on
+    expect(squad.pushDue).toBeNull();
+    step(squad, 0.2);
+    expect(squad.pushDue).toBe('dry');
+    squad.pushStarted();
+    expect(squad.pushDue).toBeNull(); // one push per window
+    squad.heard('dry');
+    expect(squad.pushDue).toBeNull();
+  });
+
+  it('no push if he stops being vulnerable before the delay is over (he fired, reloaded, cleared the jam)', () => {
+    const squad = new SquadCoordinator();
+    squad.heard('jam');
+    step(squad, squadConfig.pushReactionSec / 2);
+    squad.closeWindow('dry'); // a different window: nothing changes
+    squad.closeWindow('jam');
+    step(squad, squadConfig.pushReactionSec);
+    expect(squad.pushDue).toBeNull();
+    expect(squad.heardKind).toBeNull();
+  });
+
+  it('a new kind of sound opens a new window (a reload after the dry clicks); a window ends after its limit', () => {
+    const squad = new SquadCoordinator();
+    squad.heard('dry');
+    step(squad, squadConfig.pushReactionSec + 0.1);
+    squad.pushStarted();
+    squad.heard('reload');
+    step(squad, squadConfig.pushReactionSec + 0.1);
+    expect(squad.pushDue).toBe('reload');
+    step(squad, squadConfig.pushMaxWindowSec);
+    expect(squad.heardKind).toBeNull();
+  });
+
+  it('no push while the squad is disorganised', () => {
+    const squad = new SquadCoordinator();
+    squad.leaderDown();
+    squad.heard('dry');
+    step(squad, squadConfig.pushReactionSec + 0.1);
+    expect(squad.pushDue).toBeNull();
+  });
+
+  it('a play with more than one mover: the covering fire goes on until the last one has arrived', () => {
+    const squad = new SquadCoordinator();
+    const [first, second, cover] = [{}, {}, {}];
+    squad.assignAdvance([first], () => ({ cost: 1 }), [cover], () => false);
+    squad.addAdvancer(second);
+    expect(squad.advancers).toHaveLength(2);
+    squad.advanceOver(first);
+    step(squad, squadConfig.suppressAfterMoveSec + 0.1);
+    expect(squad.keepSuppressing(cover)).toBe(true); // the second is still moving
+    squad.advanceOver(second);
+    step(squad, squadConfig.suppressAfterMoveSec + 0.1);
+    expect(squad.keepSuppressing(cover)).toBe(false);
+  });
+});
+
+describe('SquadCoordinator repositioning and the heavy (decision 237)', () => {
+  it('one reposition at a time; its covering fire goes on while it moves and a moment after', () => {
+    const squad = new SquadCoordinator();
+    const [a, b, cover] = [{}, {}, {}];
+    expect(squad.assignReposition(a)).toBe(true);
+    expect(squad.assignReposition(b)).toBe(false);
+    expect(squad.assignCover([cover], () => false)).toBe(cover);
+    expect(squad.keepSuppressing(cover)).toBe(true);
+    squad.repositionOver(a);
+    expect(squad.repositioner).toBeNull();
+    squad.update(squadConfig.suppressAfterMoveSec + 0.01);
+    expect(squad.keepSuppressing(cover)).toBe(false);
+    expect(squad.assignReposition(b)).toBe(true);
+  });
+
+  it('a mover that fires on the move (the heavy) needs nobody to cover it', () => {
+    const squad = new SquadCoordinator();
+    const heavy = {};
+    const play = squad.assignAdvance([heavy], () => ({ cost: 1 }), [], () => false, (m) => m === heavy);
+    expect(play?.advancer.member).toBe(heavy);
+    expect(play?.suppressor).toBeNull();
+    const trooper = {};
+    expect(new SquadCoordinator().assignAdvance([trooper], () => ({ cost: 1 }), [], () => false, (m) => m === heavy)).toBeNull();
+  });
+});
+
 describe('the squad spawns in the test room (4.6)', () => {
   it('are four, on the navigation mesh, and at least 2 m apart', async () => {
     const level = buildGreybox();

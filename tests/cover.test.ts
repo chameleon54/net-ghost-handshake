@@ -172,6 +172,23 @@ describe('CoverPoints.best', () => {
     expect(heavy).toBeLessThan(trooper);
   });
 
+  it('prefers a spot it can shoot from (a fighting spot), and takes a blind one only if nothing else is free (decision 237)', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const walk = straightLine(new Vector3(1.5, 0, -5));
+    const nearest = cover.best({}, rookEyes, rookFeet, walk);
+    cover.clearClaims();
+    expect(nearest).not.toBeNull();
+    // Say the nearest spot is blind: another hiding spot wins.
+    const other = cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper, (p) => p !== nearest);
+    cover.clearClaims();
+    expect(other).not.toBeNull();
+    expect(other).not.toBe(nearest);
+    // Every spot blind: it still takes the best of them.
+    expect(cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper, () => false)).toBe(nearest);
+    cover.clearClaims();
+  });
+
   it('skips spots it cannot walk to, and gives null when nothing hides', () => {
     const rookFeet = new Vector3(0, 0, 4.5);
     expect(cover.best({}, eyesAt(0, 4.5), rookFeet, () => Infinity)).toBeNull();
