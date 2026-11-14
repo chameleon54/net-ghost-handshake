@@ -34,6 +34,12 @@ export const exposureConfigDefaults = {
   crackQuietVolume: 0.5,
   /** How often the enemies' view of Rook is measured for the meter. */
   checksPerSec: 10,
+  /** The pinned side (4.9): marked while suppressing fire lands on it, and this long after. */
+  pinnedExtraSec: 1,
+  /** Seen after leaning or stepping out on a pinned side, the meter starts at least this full. */
+  pinnedStartExposure: 0.5,
+  /** His eyes must be at least this far toward the pinned side (from where he hid) to count as out on it. */
+  pinnedSideM: 0.15,
   // Shape. Not on the panel.
   /** The third point checked on Rook's body, about his hips: this share of his eye height. */
   hipHeightShareOfEyes: 0.45,

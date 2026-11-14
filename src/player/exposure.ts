@@ -17,12 +17,40 @@ const clamp01 = (value: number): number => Math.min(Math.max(value, 0), 1);
 // faster the more of him it sees and the closer it is. A peeking enemy is hidden most of the time, so the meter does not
 // drop just because nobody is looking: it holds while he is still in view of where an enemy last saw him from, and only
 // drains once he is behind cover (or after a while with nobody seeing him). Enemies read it for their hit chance.
+// Since 4.9 a side of his cover can be pinned by suppressing fire: if he is seen after leaning or stepping out on that
+// side, the meter starts at least half full, so hits come sooner (gameplay.md, decision 31).
 export class Exposure {
   value = 0;
   private unseenSec = 0;
+  private seenBefore = false;
+  /** The pinned side: where he hid (feet), the way toward the pinned side (a unit vector), and how long it lasts. */
+  private readonly pinAnchor = { x: 0, z: 0 };
+  private readonly pinSide = { x: 0, z: 0 };
+  private pinLeftSec = 0;
 
-  /** Once per game update. `glimpses`: one per awake enemy. */
-  update(dtSec: number, glimpses: readonly Glimpse[], crouched: boolean): void {
+  /** True while a side of his cover is pinned. */
+  get pinned(): boolean {
+    return this.pinLeftSec > 0;
+  }
+
+  /** Suppressing fire landed on one side of his cover: `anchor` is where he hid, `side` points to that side (unit). */
+  pin(anchor: { readonly x: number; readonly z: number }, side: { readonly x: number; readonly z: number }): void {
+    this.pinAnchor.x = anchor.x;
+    this.pinAnchor.z = anchor.z;
+    this.pinSide.x = side.x;
+    this.pinSide.z = side.z;
+    this.pinLeftSec = exposureConfig.pinnedExtraSec;
+  }
+
+  /** True if eyes at (x, z) are out on the pinned side. */
+  outOnPinnedSide(x: number, z: number): boolean {
+    if (!this.pinned) return false;
+    return (x - this.pinAnchor.x) * this.pinSide.x + (z - this.pinAnchor.z) * this.pinSide.z >= exposureConfig.pinnedSideM;
+  }
+
+  /** Once per game update. `glimpses`: one per awake enemy. `eyes`: where his eyes are (for the pinned side). */
+  update(dtSec: number, glimpses: readonly Glimpse[], crouched: boolean, eyes?: { readonly x: number; readonly z: number }): void {
+    this.pinLeftSec = Math.max(this.pinLeftSec - dtSec, 0);
     let fillPerSec = 0;
     let inView = false;
     for (const glimpse of glimpses) {
@@ -30,10 +58,16 @@ export class Exposure {
       if (glimpse.inViewOfLastSpot) inView = true;
     }
     if (fillPerSec > 0) {
+      // Seen again after hiding, out on a pinned side: the meter starts partly full.
+      if (!this.seenBefore && eyes && this.outOnPinnedSide(eyes.x, eyes.z)) {
+        this.value = Math.max(this.value, exposureConfig.pinnedStartExposure);
+      }
+      this.seenBefore = true;
       this.unseenSec = 0;
       this.value = clamp01(this.value + fillPerSec * dtSec);
       return;
     }
+    this.seenBefore = false;
     this.unseenSec += dtSec;
     const holding = inView && this.unseenSec < exposureConfig.holdMaxSec;
     if (!holding) this.value = clamp01(this.value - exposureConfig.drainPerSec * dtSec);
@@ -43,6 +77,8 @@ export class Exposure {
   reset(): void {
     this.value = 0;
     this.unseenSec = 0;
+    this.seenBefore = false;
+    this.pinLeftSec = 0;
   }
 }
 

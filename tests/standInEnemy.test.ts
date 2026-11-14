@@ -59,6 +59,10 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     /** Spots claimed for a flank, and how many times it said its flank was over. */
     claimed: [] as CoverPoint[],
     flankOvers: 0,
+    /** Whether the squad wants it to keep suppressing, and how many times it said it stopped, or its advance ended. */
+    keepSuppressing: true,
+    suppressOvers: 0,
+    advanceOvers: 0,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -105,6 +109,9 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     downed: (e) => {
       if (e.role === 'leader') squad.leaderDown();
     },
+    keepSuppressing: () => world.keepSuppressing,
+    suppressOver: () => world.suppressOvers++,
+    advanceOver: () => world.advanceOvers++,
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -496,6 +503,109 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(flanksSent()).toBe(1); // nobody sent during the wait
     step(1.5);
     expect(flanksSent()).toBe(2); // the next flank, after the wait (the cheapest plan again)
+  });
+});
+
+describe('StandInEnemy suppressing and advancing (4.9)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const far = new Vector3(0, 0, 10);
+  const outSec = standInConfig.tellSec + standInConfig.peekOutSec;
+  /** A stand-in holding cover, Rook hidden from it (even when it peeks), with fresh knowledge of where he is. */
+  const holding = () => {
+    const s = setup();
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(far, 1.5);
+    expect(s.enemy.state).toBe('cover');
+    s.world.tells.length = 0;
+    s.shots.length = 0;
+    return s;
+  };
+
+  it('can suppress and advance from cover; not while wounded', () => {
+    const { enemy } = holding();
+    expect(enemy.canSuppress).toBe(true);
+    expect(enemy.canAdvance).toBe(true);
+    enemy.hit('body', roleConfig.trooper.healthPoints * (1 - standInConfig.woundedHealthShare) + 1);
+    expect(enemy.canSuppress).toBe(false);
+    expect(enemy.canAdvance).toBe(false);
+  });
+
+  it('suppressing: out at once, long bursts of suppressing fire, until the squad says the move is over', () => {
+    const { enemy, world, shots, run } = holding();
+    enemy.beginSuppress();
+    expect(enemy.isSuppressing).toBe(true);
+    run(far, dtSec * 2);
+    expect(world.tells).toHaveLength(1); // no hold first
+    run(far, outSec + 1.5);
+    expect(enemy.peekOut).toBe(1);
+    expect(shots.length).toBeGreaterThanOrEqual(squadConfig.suppressBurstRounds);
+    expect(shots.every((s) => s.shot === 'suppress')).toBe(true);
+    world.keepSuppressing = false;
+    run(far, standInConfig.peekBackSec + 0.1);
+    expect(enemy.peekOut).toBe(0);
+    expect(enemy.isSuppressing).toBe(false);
+    expect(world.suppressOvers).toBe(1);
+  });
+
+  it('suppressing ends when Rook hurts it, or after its time', () => {
+    const hurt = holding();
+    hurt.enemy.beginSuppress();
+    hurt.run(far, outSec + 0.3);
+    hurt.enemy.hit('body', 1);
+    hurt.run(far, standInConfig.peekBackSec + 0.1);
+    expect(hurt.enemy.isSuppressing).toBe(false);
+    expect(hurt.enemy.peekOut).toBe(0);
+
+    const timed = holding();
+    timed.enemy.beginSuppress();
+    timed.run(far, outSec + squadConfig.suppressMaxSec + standInConfig.peekBackSec + 0.2);
+    expect(timed.enemy.isSuppressing).toBe(false);
+  });
+
+  it('suppressing and seeing Rook, it fires aimed rounds at him instead', () => {
+    const { enemy, world, shots, run } = holding();
+    world.seenWhenOut = true;
+    enemy.beginSuppress();
+    run(far, outSec + 0.5);
+    expect(shots.length).toBeGreaterThan(0);
+    expect(shots.every((s) => s.shot !== 'suppress')).toBe(true);
+  });
+
+  it('advancing: walks to its spot at its walking speed, is not turned back when seen, then holds as usual', () => {
+    const { enemy, world, shots, run } = holding();
+    world.rookSees = true;
+    const next: CoverPoint = { xM: 5, zM: -3, height: 'low', facingYawRad: Math.PI };
+    const start = enemy.feet.clone();
+    enemy.beginAdvance(next);
+    run(far, 1);
+    expect(enemy.state).toBe('advance');
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 0);
+    run(far, 2);
+    expect(enemy.state).toBe('cover');
+    expect(world.advanceOvers).toBe(1);
+    expect(shots).toHaveLength(0);
+    world.tells.length = 0;
+    run(far, standInConfig.peekHoldMinSec - 0.5);
+    expect(world.tells).toHaveLength(0); // no attack on arrival: it holds first
+  });
+
+  it("Rook's near miss while it is out sends it back in, and its next hold is longer", () => {
+    const { enemy, world, run } = holding();
+    enemy.beginSuppress(); // out at once
+    run(far, outSec);
+    world.keepSuppressing = false; // so it does not come straight back out
+    enemy.pinDown();
+    run(far, standInConfig.peekBackSec + 0.05);
+    expect(enemy.peekOut).toBe(0);
+    world.tells.length = 0;
+    const roll = 0.99;
+    const holdSec = standInConfig.peekHoldMinSec + roll * (standInConfig.peekHoldMaxSec - standInConfig.peekHoldMinSec);
+    run(far, holdSec + 0.1);
+    expect(world.tells).toHaveLength(0); // still holding: the hold is longer
+    run(far, holdSec * (squadConfig.pinnedHoldScale - 1));
+    expect(world.tells).toHaveLength(1);
   });
 });
 
@@ -1191,6 +1301,8 @@ describe('StandInWorld', () => {
     const damageFrom: Vector3[] = [];
     const cracks: { position: Vector3; distanceM: number }[] = [];
     events.on('shot:near-miss', ({ position, distanceM }) => cracks.push({ position: position.clone(), distanceM }));
+    const pins: { anchor: Vector3; side: Vector3 }[] = [];
+    events.on('cover:pinned', ({ anchor, side }) => pins.push({ anchor: anchor.clone(), side: side.clone() }));
     const landed: { muzzle: Vector3; end: Vector3; hit: boolean; shooter: string }[] = [];
     const fired: Vector3[] = [];
     events.on('shot:landed', (s) => landed.push({ muzzle: s.muzzle.clone(), end: s.end.clone(), hit: s.hit, shooter: s.shooter }));
@@ -1201,7 +1313,7 @@ describe('StandInWorld', () => {
       damageFrom.push(from.clone());
     });
     const enemy = new StandInEnemy({ xM: 0, zM: -8, yawRad: Math.PI }, world); // 8 m north, facing south at him
-    return { world, enemy, damage, damageFrom, landed, fired, cracks };
+    return { world, enemy, damage, damageFrom, landed, fired, cracks, pins };
   };
 
   it('sees the player in the open, not through a wall', () => {
@@ -1309,6 +1421,24 @@ describe('StandInWorld', () => {
     expect(world.glimpse(enemy, 1).inViewOfLastSpot).toBe(false);
   });
 
+  it('suppressing fire aims beside where he hides (the edge of his cover) and pins that side', () => {
+    const { world, enemy, landed, pins, damage } = setupWorld([backWall]);
+    enemy.hear(noiseAt(new Vector3(0, 1.6, 0), 30)); // it knows where he is
+    world.fire(enemy, 'suppress');
+    expect(damage).toHaveLength(0);
+    expect(passFromChestM(landed[0])).toBeCloseTo(squadConfig.suppressEdgeOffsetM, 1);
+    expect(pins).toHaveLength(1);
+    expect(pins[0].anchor.toArray()).toEqual([0, 0, 0]);
+    expect(Math.abs(pins[0].side.x)).toBeCloseTo(1, 5); // square to its line of fire (north to south)
+  });
+
+  it("knows when one of Rook's rounds passes close to it", () => {
+    const { world, enemy } = setupWorld([]);
+    const muzzle = new Vector3(0, 1.6, 0);
+    expect(world.nearMiss(enemy, muzzle, new Vector3(0.5, 1.6, -9))).toBe(true); // half a metre past its head
+    expect(world.nearMiss(enemy, muzzle, new Vector3(4, 1.6, -9))).toBe(false); // well wide
+  });
+
   it('Rook sees it only when it is on his screen and nothing is in the way', () => {
     const open = setupWorld([]);
     expect(open.world.rookSees(open.enemy)).toBe(true);
@@ -1316,6 +1446,27 @@ describe('StandInWorld', () => {
     expect(open.world.rookSees(open.enemy)).toBe(false);
     const walled = setupWorld([{ kind: 'wall', xM: 0, zM: -4, widthM: 4, depthM: 0.3, heightM: 3 }]);
     expect(walled.world.rookSees(walled.enemy)).toBe(false);
+  });
+});
+
+describe('StandInWorld choosing where to move up to (4.9)', () => {
+  // Rook at (0, 4). The stand-in starts 8 m north of him, at (0, -4). A crate 3.5 m north of him has a spot on its far
+  // side (4.45 m from him: closer, and hidden); a crate beside him has a spot too close to him.
+  const nearCrate: RoomBox = { kind: 'prop', xM: 0, zM: 0.5, widthM: 1, depthM: 1, heightM: 1 };
+  const nearSpot: CoverPoint = { xM: 0, zM: -0.45, height: 'low', facingYawRad: Math.PI };
+  const tooCloseCrate: RoomBox = { kind: 'prop', xM: 2, zM: 3, widthM: 1, depthM: 1, heightM: 1 };
+  const tooCloseSpot: CoverPoint = { xM: 2, zM: 2.05, height: 'low', facingYawRad: Math.PI };
+
+  const plan = async (points: CoverPoint[]) => {
+    const level = buildGreybox([nearCrate, tooCloseCrate]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints(points, level.collision), rookAt(0, 4), () => {});
+    return world.planAdvance(new StandInEnemy({ xM: 0, zM: -4, yawRad: Math.PI }, world));
+  };
+
+  it('picks a hiding spot at least the gain closer to Rook, but not one too close to him', async () => {
+    expect((await plan([nearSpot, tooCloseSpot]))?.point).toBe(nearSpot);
+    expect(await plan([tooCloseSpot])).toBeNull();
   });
 });
 

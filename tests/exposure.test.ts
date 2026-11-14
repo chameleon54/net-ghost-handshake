@@ -60,6 +60,32 @@ describe('the exposure meter (4.5)', () => {
   });
 });
 
+describe('the pinned side (4.9)', () => {
+  const unseen = glimpse({ visibleShare: 0, inViewOfLastSpot: false });
+  /** Hidden at the origin with the side toward +x pinned, then seen with his eyes at (x, 0). */
+  const seenAt = (x: number, pinnedAgoSec = 0) => {
+    const meter = new Exposure();
+    meter.pin({ x: 0, z: 0 }, { x: 1, z: 0 });
+    meter.update(1 / 60, [unseen], true);
+    if (pinnedAgoSec > 0) meter.update(pinnedAgoSec, [unseen], true);
+    meter.update(1 / 60, [glimpse()], false, { x, z: 0 });
+    return meter.value;
+  };
+
+  it('seen after leaning or stepping out on the pinned side, the meter starts partly full', () => {
+    expect(seenAt(0.3)).toBeGreaterThanOrEqual(exposureConfig.pinnedStartExposure);
+  });
+
+  it('the other side, or over the top, starts as usual', () => {
+    expect(seenAt(-0.3)).toBeLessThan(0.1);
+    expect(seenAt(0)).toBeLessThan(0.1);
+  });
+
+  it('the pin wears off a moment after the fire stops', () => {
+    expect(seenAt(0.3, exposureConfig.pinnedExtraSec + 0.1)).toBeLessThan(0.1);
+  });
+});
+
 describe('hit chance and misses from exposure (4.5)', () => {
   it('no hits below the start exposure, then a straight rise to the most at full', () => {
     expect(hitChance(0, false)).toBe(0);

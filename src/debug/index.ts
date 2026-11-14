@@ -128,7 +128,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.close();
 
   // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
@@ -258,9 +258,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const coverOverlay = new CoverOverlay(scene, coverPoints, activeStandIns, camera.position);
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
-  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: flanking)');
+  standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning)');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
   squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
+  squadPanel.add({ play: () => squad.forcePlay() }, 'play').name('Suppress and advance now (while you hide)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
   const rolesPanel = standInPanel.addFolder('Roles (4.8)');
   rolesPanel.close();
@@ -381,7 +382,17 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : squad.heldSec < squadConfig.holdBeforeFlankSec ? `none yet: ${held}`
       : flankFailure() !== null ? `${flankFailure()}, tries again in ${squad.flankWaitSec.toFixed(1)} s`
       : `next one in ${squad.flankWaitSec.toFixed(1)} s`;
-    readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
+    readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round${exposure.pinned ? ', a side of your cover is PINNED' : ''}`;
+    // Suppress and advance (4.9): who pins, who moves up, or why none is on.
+    const suppressorIndex = activeStandIns.findIndex((s) => s === squad.suppressor);
+    const advancerIndex = activeStandIns.findIndex((s) => s === squad.advancer);
+    const pinning = suppressorIndex >= 0 ? `${letter(suppressorIndex)} pins your cover` : '';
+    const moving = advancerIndex >= 0 ? `${letter(advancerIndex)} moves up` : '';
+    readouts.play =
+      pinning || moving ? [pinning, moving].filter(Boolean).join(', ')
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : squad.playFailure ? `${squad.playFailure}, tries again in ${squad.playWaitSec.toFixed(1)} s`
+      : `next chance in ${squad.playWaitSec.toFixed(1)} s (only while you hide)`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
       `health    ${readouts.health}`,
@@ -392,6 +403,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       `exposure  ${readouts.exposure}`,
       `squad     ${readouts.squad}`,
       `flank     ${readouts.flank}`,
+      `advance   ${readouts.play}`,
       ...enemyLines,
       `camera    ${readouts.freeCamera}`,
       ...(readouts.status ? [`status    ${readouts.status}`] : []),

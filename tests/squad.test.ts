@@ -128,6 +128,75 @@ describe('SquadCoordinator roles (4.8)', () => {
   });
 });
 
+describe('SquadCoordinator suppress and advance (4.9)', () => {
+  const rook = { x: 0, z: 0 };
+  const due = () => {
+    const squad = new SquadCoordinator();
+    squad.update(squadConfig.advanceEverySec + 0.1, rook, true);
+    return squad;
+  };
+  const heavy = { heavy: true };
+  const [a, b] = [{ heavy: false }, { heavy: false }];
+  const isHeavy = (m: { heavy: boolean }) => m.heavy;
+
+  it('a play is due only while Rook hides where the squad knows he is, after the wait, and not in disorder', () => {
+    const squad = new SquadCoordinator();
+    squad.update(1, rook, true);
+    expect(squad.playDue).toBe(false); // the wait
+    expect(due().playDue).toBe(true);
+    const seen = new SquadCoordinator();
+    seen.update(squadConfig.advanceEverySec + 0.1, rook, false);
+    expect(seen.playDue).toBe(false);
+    const lost = new SquadCoordinator();
+    lost.update(squadConfig.advanceEverySec + 0.1, null, true);
+    expect(lost.playDue).toBe(false);
+    const leaderless = due();
+    leaderless.leaderDown();
+    expect(leaderless.playDue).toBe(false);
+  });
+
+  it('the cheapest mover moves up, covered by someone else (the heavy first); nothing without covering fire', () => {
+    const squad = due();
+    const play = squad.assignAdvance([a, heavy], (m) => ({ cost: m === heavy ? 1 : 2 }), [a, b, heavy], isHeavy);
+    expect(play?.advancer.member).toBe(heavy);
+    expect(play?.suppressor).toBe(a); // not the mover, even though it is the heavy
+    expect(squad.playDue).toBe(false);
+
+    const alone = due();
+    expect(alone.assignAdvance([a], () => ({ cost: 1 }), [a], isHeavy)).toBeNull();
+    expect(alone.playFailure).toBe('nobody to give covering fire');
+    expect(alone.playDue).toBe(false); // tries again later
+    const nowhere = due();
+    expect(nowhere.assignAdvance([a], () => null, [b, heavy], isHeavy)).toBeNull();
+    expect(nowhere.playFailure).toBe('no closer cover to move up to');
+  });
+
+  it('the suppressor keeps on while the move is on, and stops a moment after it is over', () => {
+    const squad = due();
+    squad.assignAdvance([a], () => ({ cost: 1 }), [b, heavy], isHeavy);
+    expect(squad.keepSuppressing(heavy)).toBe(true);
+    expect(squad.keepSuppressing(b)).toBe(false);
+    squad.advanceOver(a);
+    expect(squad.keepSuppressing(heavy)).toBe(true); // the grace after the move
+    squad.update(squadConfig.suppressAfterMoveSec + 0.01, rook, true);
+    expect(squad.keepSuppressing(heavy)).toBe(false);
+    squad.suppressOver(heavy);
+    expect(squad.suppressor).toBeNull();
+  });
+
+  it('a flank gets covering fire when someone is free, for as long as the flank is on', () => {
+    const squad = new SquadCoordinator();
+    squad.forceFlank();
+    squad.assignFlank([a], () => ({ cost: 1 }));
+    expect(squad.assignCover([b, heavy], isHeavy)).toBe(heavy);
+    expect(squad.keepSuppressing(heavy)).toBe(true);
+    expect(squad.assignCover([b], isHeavy)).toBeNull(); // one suppressor at a time
+    squad.flankOver(a);
+    squad.update(squadConfig.suppressAfterMoveSec + 0.01, rook, true);
+    expect(squad.keepSuppressing(heavy)).toBe(false);
+  });
+});
+
 describe('the squad spawns in the test room (4.6)', () => {
   it('are four, on the navigation mesh, and at least 2 m apart', async () => {
     const level = buildGreybox();

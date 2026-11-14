@@ -15,11 +15,15 @@ import type { Target } from './target';
  * `fight`: standing where it is, firing at Rook (he is close, or its cover failed). `retreat`: backing off to new cover
  * while firing. `shoot`: standing in the open firing, only when no cover hides it (the 4.1 behaviour). `flee`: running
  * out of a grenade's blast, not firing. `flank`: sent by the squad round Rook's side to a cover spot, not firing (4.7).
+ * `advance`: sent by the squad to closer cover under a squadmate's covering fire, not firing (4.9).
  */
-export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'flee' | 'flank' | 'falling' | 'down';
+export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'flee' | 'flank' | 'advance' | 'falling' | 'down';
 
-/** A round's outcome, decided when it is fired: it hits Rook, misses near him, or is fired at his cover while he is hidden. */
-export type StandInShot = 'hit' | 'miss' | 'cover';
+/**
+ * A round's outcome, decided when it is fired: it hits Rook, misses near him, is fired at his cover while he is hidden,
+ * or is suppressing fire at the edge of his cover (4.9).
+ */
+export type StandInShot = 'hit' | 'miss' | 'cover' | 'suppress';
 
 /** Where a peek from cover is: holding, the tell, coming out, firing, going back in (4.4). */
 type PeekPhase = 'hold' | 'tell' | 'out' | 'fire' | 'back';
@@ -75,6 +79,12 @@ export interface StandInHooks {
   disorganised(): boolean;
   /** It went down (killed): tells the squad (a squad leader's death disorganises it). */
   downed(enemy: StandInEnemy): void;
+  /** True while the squad wants it to keep pinning Rook's cover (the move it covers is on). */
+  keepSuppressing(enemy: StandInEnemy): boolean;
+  /** It stopped suppressing (for any reason): tells the squad. */
+  suppressOver(enemy: StandInEnemy): void;
+  /** Its advance is over (arrived, or anything else): tells the squad. */
+  advanceOver(enemy: StandInEnemy): void;
 }
 
 /** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
@@ -115,7 +125,9 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // meter, and before first contact (he has not seen it) its first burst always misses, as a warning. Since 4.6 it is one of
 // a squad: it fires only while it holds a firing slot, and the squad shares the hit budget. Since 4.7 the squad may send
 // it round Rook's side to flank him (the `flank` state). Since 4.8 it has a role (trooper, flanker, heavy or squad leader)
-// whose values set its health, speeds, burst length and liked cover range. No drawing code here.
+// whose values set its health, speeds, burst length and liked cover range. Since 4.9 the squad may have it pin Rook's
+// cover (suppressing) or move up under that fire (`advance`), and Rook's near misses pin it back into cover. No drawing
+// code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -165,6 +177,11 @@ export class StandInEnemy implements Target {
   private pressing = false;
   private pressSec = 0;
   private pressUnseenSec = 0;
+  /** Suppressing (4.9): pinning the edge of Rook's cover for a squadmate, and which side of it (1 or -1). */
+  private suppressing = false;
+  private suppressSide = 1;
+  /** Rook's fire came close while it was out (the Suppressed state): its next hold is longer. */
+  private pinnedByRook = false;
   /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
@@ -195,7 +212,7 @@ export class StandInEnemy implements Target {
   /** The way a peek steps (a unit vector across the cover), or zero when it rises over low cover instead. */
   private readonly peekSide = new Vector3();
   /** What this peek does once out: fire at Rook, fire at his cover, or just look. */
-  private peekMode: 'aimed' | 'cover' | 'look' = 'look';
+  private peekMode: 'aimed' | 'cover' | 'suppress' | 'look' = 'look';
   private peekRounds = 0;
   private readonly peekEyes = new Vector3();
 
@@ -275,7 +292,8 @@ export class StandInEnemy implements Target {
   /** The part of its route still ahead (from where it stands), for the dev overlay. Empty when it is not walking. */
   routeAhead(out: Vector3[]): Vector3[] {
     out.length = 0;
-    if (this.state !== 'approach' && this.state !== 'retreat' && this.state !== 'flee' && this.state !== 'flank') return out;
+    const walking = ['approach', 'retreat', 'flee', 'flank', 'advance'].includes(this.state);
+    if (!walking) return out;
     out.push(this.feet);
     for (let i = this.pathIndex; i < this.path.length; i++) out.push(this.path[i]);
     return out;
@@ -371,7 +389,10 @@ export class StandInEnemy implements Target {
       }
       return;
     }
-    if (this.state === 'idle' || this.frozen) return;
+    if (this.state === 'idle' || this.frozen) {
+      this.endSuppress(); // frozen (dev aid): it is not pinning anyone
+      return;
+    }
 
     this.sightTimerSec -= dtSec;
     if (this.sightTimerSec <= 0) {
@@ -401,8 +422,8 @@ export class StandInEnemy implements Target {
       this.flee(dtSec);
       return;
     }
-    if (this.state === 'flank') {
-      this.flank(dtSec);
+    if (this.state === 'flank' || this.state === 'advance') {
+      this.move(dtSec);
       return;
     }
     this.checkCover(dtSec);
@@ -526,22 +547,82 @@ export class StandInEnemy implements Target {
     return this.state === 'approach' || this.state === 'cover';
   }
 
+  /** True if the squad may send it to closer cover (4.9): holding cover, not wounded, frozen or mid-burst. */
+  get canAdvance(): boolean {
+    return this.awake && !this.frozen && !this.wounded && !this.grenadeSeen && !this.inBurst && this.state === 'cover';
+  }
+
+  /** True if the squad may have it pin Rook's cover: holding cover with fresh knowledge of where he is. */
+  get canSuppress(): boolean {
+    if (!this.awake || this.frozen || this.wounded || this.grenadeSeen || this.inBurst) return false;
+    return this.state === 'cover' && this.coverPoint !== null && this.knowsFresh;
+  }
+
+  /** True while it pins the edge of Rook's cover for a squadmate. */
+  get isSuppressing(): boolean {
+    return this.suppressing;
+  }
+
+  /** Which side of Rook's cover it pins: 1 or -1, as seen from it (right or left of the line to him). */
+  get suppressSideSign(): number {
+    return this.suppressSide;
+  }
+
   /** The squad sends it round Rook's side to `point` (4.7): it claims the spot and walks there without firing. */
   beginFlank(point: CoverPoint): void {
+    this.flankSpottedSec = 0;
+    this.beginMove(point, 'flank');
+  }
+
+  /** The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). */
+  beginAdvance(point: CoverPoint): void {
+    this.beginMove(point, 'advance');
+  }
+
+  private beginMove(point: CoverPoint, state: 'flank' | 'advance'): void {
     this.hooks.claimCover(this, point);
     this.setCover(point);
     this.crouched = false;
     this.engaged = false;
-    this.flankSpottedSec = 0;
-    this.setState('flank');
+    this.setState(state);
   }
 
   /**
-   * On a flank: it walks to its spot at the flank speed, facing the way it goes, without firing. Seen by Rook for a moment
-   * on the way, it calls the flank off and takes cover as usual from where it is; once there, it holds and peeks as usual.
+   * The squad has it pin Rook's cover (4.9): from its cover it peeks at once (with the tell) and stays out firing long
+   * bursts at the edge of his cover, one side of it, until the squad says the move it covers is over, its time is up, or
+   * Rook hurts it. If it sees him it fires aimed rounds instead.
    */
-  private flank(dtSec: number): void {
-    this.flankSpottedSec = this.rookSeesIt ? this.flankSpottedSec + dtSec : 0;
+  beginSuppress(): void {
+    this.suppressing = true;
+    this.suppressSide = this.random() < 0.5 ? -1 : 1;
+    if (this.peekPhase === 'hold') this.peekTimerSec = 0;
+  }
+
+  private endSuppress(): void {
+    if (!this.suppressing) return;
+    this.suppressing = false;
+    this.hooks.suppressOver(this);
+  }
+
+  /**
+   * One of Rook's rounds passed or landed close while it was out of cover (the Suppressed state, 4.9): it ducks back in at
+   * once and holds longer.
+   */
+  pinDown(): void {
+    if (this.state !== 'cover' || (this.peekPhase !== 'tell' && this.peekPhase !== 'out' && this.peekPhase !== 'fire')) return;
+    this.pinnedByRook = true;
+    this.startPeekBack();
+  }
+
+  /**
+   * On a flank or an advance: it walks to its spot, facing the way it goes, without firing. A flank goes at the flank
+   * speed and is called off if Rook sees it for a moment (it takes cover as usual from where it is); on arrival it comes
+   * out firing (the flank attack). An advance goes at its walking speed under covering fire and does not turn back; on
+   * arrival it holds and peeks as usual.
+   */
+  private move(dtSec: number): void {
+    const flanking = this.state === 'flank';
+    this.flankSpottedSec = flanking && this.rookSeesIt ? this.flankSpottedSec + dtSec : 0;
     if (this.flankSpottedSec >= squadConfig.spottedSec) {
       this.giveUpWalk(); // spotted: lets the spot go and looks for cover straight away
       return;
@@ -550,6 +631,7 @@ export class StandInEnemy implements Target {
     if (toSpotM <= standInConfig.coverArriveM) {
       this.coverTimerSec = 0; // check the spot still hides it straight away
       this.setState('cover');
+      if (!flanking) return;
       // The flank attack: no hold first; it peeks at once (the tell still warns Rook) and stays out firing.
       this.peekTimerSec = 0;
       this.pressing = true;
@@ -557,7 +639,8 @@ export class StandInEnemy implements Target {
       this.pressUnseenSec = 0;
       return;
     }
-    if (!this.walkRoute(dtSec, this.coverSpot, this.values.flankSpeedMps)) this.giveUpWalk();
+    const speedMps = flanking ? this.values.flankSpeedMps : this.values.walkSpeedMps;
+    if (!this.walkRoute(dtSec, this.coverSpot, speedMps)) this.giveUpWalk();
   }
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
@@ -641,6 +724,8 @@ export class StandInEnemy implements Target {
       }
       this.engaged = false;
       this.faceLastKnown(dtSec); // it watches where Rook was, never turning its back on him (decision 213)
+      if (this.suppressing && !this.hooks.keepSuppressing(this)) this.endSuppress(); // the move it was to cover is over
+      if (this.suppressing) this.peekTimerSec = Math.min(this.peekTimerSec, 0); // suppressing: out again at once
       this.peekTimerSec -= dtSec;
       if (this.peekTimerSec > 0) return;
       // A peek is a burst: it needs a firing slot from the tell on. With none free it stays in and asks again shortly.
@@ -682,6 +767,11 @@ export class StandInEnemy implements Target {
     const way = choices[Math.min(Math.floor(this.random() * choices.length), choices.length - 1)];
     this.peekSide.set(way * Math.cos(point.facingYawRad), 0, way * -Math.sin(point.facingYawRad)); // 0 rises: no step
     this.hooks.peekTell(this);
+    if (this.suppressing) {
+      this.pressing = true; // suppressing stays out, like the flank attack
+      this.pressSec = 0;
+      this.pressUnseenSec = 0;
+    }
     this.peekPhase = 'tell';
     this.peekTimerSec = standInConfig.tellSec;
   }
@@ -693,7 +783,7 @@ export class StandInEnemy implements Target {
     this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
     // Fire at his cover only on fresh knowledge of where he is (decision 216); old knowledge, it only looks.
     const fireAtCover = this.knowsFresh && this.random() < standInConfig.hiddenFireChance;
-    this.peekMode = this.seesPlayer ? 'aimed' : fireAtCover ? 'cover' : 'look';
+    this.peekMode = this.seesPlayer ? 'aimed' : this.suppressing ? 'suppress' : fireAtCover ? 'cover' : 'look';
     this.peekRounds = 0;
     this.cooldownSec = 0; // the tell was the warning: no extra reaction pause
     this.peekTimerSec = this.values.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
@@ -724,25 +814,32 @@ export class StandInEnemy implements Target {
       this.cooldownSec = 0; // every burst needs a firing slot: keep aiming and fire as soon as one is free
       return;
     }
-    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.aimedShot(1));
+    const suppressFire = this.peekMode === 'suppress';
+    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : suppressFire ? 'suppress' : this.aimedShot(1));
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
-    if (this.peekRounds < this.values.burstRounds) return;
+    if (this.peekRounds < (suppressFire ? squadConfig.suppressBurstRounds : this.values.burstRounds)) return;
     this.contacted = true; // a whole burst fired: the warning has been given
     if (!this.pressing) {
       this.startPeekBack();
       return;
     }
-    // The flank attack goes on: the slot goes back between bursts, and the next burst only fires at Rook it can see.
+    // The flank attack or the suppressing goes on: the slot goes back between bursts. The next burst fires at Rook if it
+    // sees him; otherwise a suppressor pins his cover again, and a flank attacker only looks.
     this.giveSlotBack();
     this.peekRounds = 0;
-    this.cooldownSec += standInConfig.burstPauseSec - standInConfig.roundIntervalSec;
-    this.peekMode = this.seesPlayer ? 'aimed' : 'look';
+    const pauseSec = this.suppressing ? squadConfig.suppressBurstPauseSec : standInConfig.burstPauseSec;
+    this.cooldownSec += pauseSec - standInConfig.roundIntervalSec;
+    this.peekMode = this.seesPlayer ? 'aimed' : this.suppressing ? 'suppress' : 'look';
   }
 
-  /** In a flank attack: true once it has been out long enough, or has not seen Rook for a moment. */
+  /**
+   * Out in a flank attack or suppressing: true once it should go back in. A flank attack ends after its time, or once it
+   * has not seen Rook for a moment; suppressing ends when the squad says the move it covers is over, or after its time.
+   */
   private pressOver(dtSec: number): boolean {
     this.pressSec += dtSec;
+    if (this.suppressing) return !this.hooks.keepSuppressing(this) || this.pressSec >= squadConfig.suppressMaxSec;
     this.pressUnseenSec = this.seesPlayer ? 0 : this.pressUnseenSec + dtSec;
     return this.pressSec >= squadConfig.flankPressMaxSec || this.pressUnseenSec >= squadConfig.flankPressLostSightSec;
   }
@@ -751,6 +848,7 @@ export class StandInEnemy implements Target {
     this.peekPhase = 'back';
     this.peekTimerSec = standInConfig.peekBackSec;
     this.pressing = false; // a flank attack ends when it goes back in
+    this.endSuppress(); // and so does suppressing
   }
 
   /** Back to holding, for a random while. */
@@ -761,8 +859,10 @@ export class StandInEnemy implements Target {
     this.riseShare = 0;
     const { peekHoldMinSec, peekHoldMaxSec, woundedHoldScale } = standInConfig;
     const holdSec = peekHoldMinSec + this.random() * Math.max(peekHoldMaxSec - peekHoldMinSec, 0);
-    // Wounded, or with its squad disorganised (its leader down), it stays tucked in longer.
-    this.peekTimerSec = holdSec * (this.wounded ? woundedHoldScale : 1) * (this.hooks.disorganised() ? squadConfig.disorderHoldScale : 1);
+    // Wounded, with its squad disorganised (its leader down), or pinned by Rook's fire, it stays tucked in longer.
+    const scale = (this.wounded ? woundedHoldScale : 1) * (this.hooks.disorganised() ? squadConfig.disorderHoldScale : 1);
+    this.peekTimerSec = holdSec * scale * (this.pinnedByRook ? squadConfig.pinnedHoldScale : 1);
+    this.pinnedByRook = false;
   }
 
   /** How far out it is. Rising over low cover: it stands up. Stepping out: its feet move from the spot toward the open side. */
@@ -930,6 +1030,8 @@ export class StandInEnemy implements Target {
     this.lastKnownAgeSec = Infinity;
     this.grenadeSeen = false;
     this.giveSlotBack();
+    this.endSuppress();
+    this.pinnedByRook = false;
     this.contacted = false;
     this.path.length = 0;
     this.pathIndex = 0;
@@ -938,6 +1040,8 @@ export class StandInEnemy implements Target {
   private setState(state: StandInState): void {
     if (this.state === state) return;
     if (this.state === 'flank') this.hooks.flankOver(this); // however a flank ends, the squad hears of it
+    if (this.state === 'advance') this.hooks.advanceOver(this); // and an advance
+    this.endSuppress(); // suppressing only lives inside one stay in cover
     this.state = state;
     this.stateSec = 0;
     this.walkGoal.set(Infinity, 0, Infinity); // a walk only counts within one state

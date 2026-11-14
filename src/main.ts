@@ -166,6 +166,15 @@ const standIns = greyboxStandIns.map((spawn) => {
 const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
 /** Dev readout: why the last flank attempt found nothing, or null. */
 let flankFailure: string | null = null;
+/** The stand-ins that could pin Rook's cover now (4.9), leaving out `mover`. */
+const coverers = (mover: StandInEnemy | null): StandInEnemy[] =>
+  activeEnemies.filter((enemy) => enemy !== mover && enemy.canSuppress && (worldOf.get(enemy)?.canSuppressFrom(enemy) ?? false));
+// Suppressing fire on one side of Rook's cover pins that side (the exposure meter); his own near misses pin enemies (4.9).
+weaponEvents.on('cover:pinned', ({ anchor, side }) => exposure.pin(anchor, side));
+weaponEvents.on('shot:landed', ({ shooter, muzzle, end }) => {
+  if (shooter !== 'player') return;
+  for (const enemy of activeEnemies) if (worldOf.get(enemy)?.nearMiss(enemy, muzzle, end)) enemy.pinDown();
+});
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
@@ -410,7 +419,8 @@ const loop = new Loop(
     camera.getWorldDirection(quarry.forward);
     // The squad times how long Rook holds his spot while it knows where he is, and sends a flanker when he holds it too long.
     const squadKnows = activeEnemies.some((enemy) => enemy.awake && enemy.knowsFresh);
-    squad.update(stepSec, squadKnows ? player.position : null);
+    const rookHidden = glimpses.length > 0 && glimpses.every((glimpse) => glimpse.visibleShare <= 0); // as of the last update
+    squad.update(stepSec, squadKnows ? player.position : null, rookHidden);
     if (squad.flankDue) {
       // The job goes to the enemy itself: that is who tells the squad when its flank is over.
       const candidates = activeEnemies.filter((enemy) => enemy.canFlank);
@@ -419,11 +429,28 @@ const loop = new Loop(
         (enemy) => worldOf.get(enemy)?.planFlank(enemy) ?? null,
         (enemy) => enemy.role === 'flanker', // flankers first; the others only if no flanker can (decision 217)
       );
-      job?.member.beginFlank(job.plan.point);
+      if (job) {
+        job.member.beginFlank(job.plan.point);
+        // Covering fire for the flank if someone is free (decision 225); the flank does not wait for it.
+        squad.assignCover(coverers(job.member), (enemy) => enemy.role === 'heavy')?.beginSuppress();
+      }
       // For the dev readout: why the attempt found nothing (the spot rules, as the first candidate saw them).
       const first = candidates.find((enemy) => enemy.role === 'flanker') ?? candidates[0];
       const rejects = first ? worldOf.get(first)?.flankRejects : undefined;
       flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
+    }
+    // Suppress and advance (4.9): while Rook hides, one moves up to closer cover while another pins his cover.
+    if (squad.playDue) {
+      const play = squad.assignAdvance(
+        activeEnemies.filter((enemy) => enemy.canAdvance && enemy.role !== 'flanker'), // flankers flank
+        (enemy) => worldOf.get(enemy)?.planAdvance(enemy) ?? null,
+        coverers(null),
+        (enemy) => enemy.role === 'heavy', // the heavy lays down the covering fire first
+      );
+      if (play) {
+        play.advancer.member.beginAdvance(play.advancer.plan.point);
+        play.suppressor.beginSuppress();
+      }
     }
     glimpses.length = 0;
     for (const { enemy, world, view } of activeStandIns) {
@@ -431,7 +458,7 @@ const loop = new Loop(
       view.update();
       glimpses.push(world.glimpse(enemy, stepSec));
     }
-    exposure.update(stepSec, glimpses, player.stance.stance === 'crouching');
+    exposure.update(stepSec, glimpses, player.stance.stance === 'crouching', camera.position);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.

@@ -32,6 +32,8 @@ export interface StandInQuarry {
   readonly movingFast: boolean;
 }
 
+/** Rook's near miss checks a stand-in's chest at this share of its height (with its head). */
+const coverChestShare = 0.6;
 /** A miss tries this many aim points, looking for one that strikes a surface near Rook. */
 const missTries = 4;
 /** A flank route is checked for being in Rook's view at points this far apart. */
@@ -97,6 +99,8 @@ export class StandInWorld implements StandInHooks {
   private readonly hips = new Vector3();
   private readonly peekEyes = new Vector3();
   private readonly sample = new Vector3();
+  private readonly pinSide = new Vector3();
+  private readonly enemyPoint = new Vector3();
   /** What the last flank plan turned down (dev readout). */
   readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
@@ -147,6 +151,93 @@ export class StandInWorld implements StandInHooks {
 
   disorganised(): boolean {
     return this.squad.disorganised;
+  }
+
+  keepSuppressing(enemy: StandInEnemy): boolean {
+    return this.squad.keepSuppressing(enemy);
+  }
+
+  suppressOver(enemy: StandInEnemy): void {
+    this.squad.suppressOver(enemy);
+  }
+
+  advanceOver(enemy: StandInEnemy): void {
+    this.squad.advanceOver(enemy);
+  }
+
+  /**
+   * The best spot to move up to (4.9), or null: a free cover point, not its own, that hides it from Rook (by its own
+   * prop), at least the advance gain closer to him than where it is but not too close, out of a live grenade's blast, and
+   * reachable. The shortest walk wins. The move is covered by a squadmate's fire, so the route may be in his view.
+   */
+  planAdvance(enemy: StandInEnemy): FlankPlan | null {
+    const { position, eyes } = this.quarry;
+    const nowM = Math.hypot(enemy.xM - position.x, enemy.zM - position.z);
+    let best: FlankPlan | null = null;
+    for (const point of this.coverPoints.points) {
+      const holder = this.coverPoints.claimedBy(point);
+      if (point === enemy.cover || (holder && holder !== enemy)) continue;
+      const toM = Math.hypot(point.xM - position.x, point.zM - position.z);
+      if (toM > nowM - squadConfig.advanceMinGainM || toM < squadConfig.advanceClosestM) continue;
+      if (!this.coverPoints.hides(point, eyes)) continue;
+      const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
+      if (!Number.isFinite(walk)) continue;
+      if (!best || walk < best.cost) best = { point, cost: walk };
+    }
+    return best;
+  }
+
+  /**
+   * True if it could pin Rook's cover from its spot: from one of its peek positions, a round aimed at either edge of his
+   * cover would land near it (within the near-surface distance) or reach it.
+   */
+  canSuppressFrom(enemy: StandInEnemy): boolean {
+    const point = enemy.cover;
+    if (!point || !enemy.knowsWhere) return false;
+    for (const way of peekWays(point)) {
+      peekEyesAt(point, way, this.peekEyes);
+      for (const side of [1, -1]) {
+        this.edgeAim(this.peekEyes, enemy.lastKnown, side, this.aim);
+        const distanceM = this.peekEyes.distanceTo(this.aim);
+        this.direction.subVectors(this.aim, this.peekEyes).divideScalar(distanceM);
+        const hitM = this.collision.rayDistance(this.peekEyes, this.direction, distanceM);
+        if (hitM === Infinity || distanceM - hitM <= exposureConfig.missNearSurfaceM) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Where suppressing fire from `from` aims (4.9): chest height at the edge of Rook's cover, the suppress offset to one
+   * side of where he hides, square to the line of fire. `side` 1 or -1 picks the side; `out` gets the point.
+   */
+  private edgeAim(from: Vector3, hide: Vector3, side: number, out: Vector3): Vector3 {
+    this.edgeSide(from, hide, side, this.pinSide);
+    out.set(hide.x, this.quarry.position.y + this.quarry.eyeHeightNowM * standInConfig.aimHeightShareOfEyes, hide.z);
+    return out.addScaledVector(this.pinSide, squadConfig.suppressEdgeOffsetM);
+  }
+
+  /** The way to one side of `hide` as seen from `from` (horizontal, unit), into `out`. */
+  private edgeSide(from: Vector3, hide: Vector3, side: number, out: Vector3): Vector3 {
+    const dx = hide.x - from.x;
+    const dz = hide.z - from.z;
+    const lengthM = Math.hypot(dx, dz) || 1;
+    return out.set((-dz / lengthM) * side, 0, (dx / lengthM) * side);
+  }
+
+  /**
+   * True if a round of Rook's (from `muzzle` to `end`) passed or landed within the pin distance of this stand-in's head or
+   * chest (4.9, the Suppressed state).
+   */
+  nearMiss(enemy: StandInEnemy, muzzle: Vector3, end: Vector3): boolean {
+    this.bulletPath.set(muzzle, end);
+    const pinM = squadConfig.pinnedByFireM;
+    for (const heightM of [enemy.heightM - dummyConfig.headRadiusM, enemy.heightM * coverChestShare]) {
+      this.enemyPoint.set(enemy.xM, heightM, enemy.zM);
+      this.bulletPath.closestPointToPoint(this.enemyPoint, true, this.target);
+      if (this.target.distanceTo(this.enemyPoint) <= pinM) return true;
+    }
+    return false;
   }
 
   downed(enemy: StandInEnemy): void {
@@ -416,6 +507,11 @@ export class StandInWorld implements StandInHooks {
     );
     this.chest(this.aim);
     if (shot === 'cover' && enemy.knowsWhere) this.aim.set(enemy.lastKnown.x, this.aim.y - this.quarry.position.y, enemy.lastKnown.z);
+    if (shot === 'suppress') {
+      // Suppressing fire at one edge of his cover; that side is pinned for a moment (the exposure meter hears of it).
+      this.edgeAim(this.muzzle, enemy.lastKnown, enemy.suppressSideSign, this.aim);
+      this.events.emit('cover:pinned', { anchor: enemy.lastKnown, side: this.pinSide });
+    }
     let onSurface = false;
     if (shot === 'hit') {
       this.end.copy(this.aim);

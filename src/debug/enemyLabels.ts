@@ -5,6 +5,7 @@ const letters = 'ABCDEFGH';
 const idleColour = 0xffffff;
 const firingColour = 0xff9a2e;
 const flankingColour = 0x4aa8ff;
+const suppressingColour = 0xb36bff;
 const labelSizeM = 0.35;
 const aboveHeadM = 0.35;
 const texturePx = 64;
@@ -29,7 +30,8 @@ function letterTexture(letter: string): THREE.CanvasTexture {
 
 // Dev-only overlay for 4.6 (architecture.md, "enemy state labels"): a letter floating over each stand-in (A, B, C, D, as
 // in the readout), seen through walls, orange while it holds one of the squad's firing slots (so you can see that only
-// two fire at once), blue while it is flanking (4.7). Hidden until the dev panel tick shows it.
+// two fire at once), blue while it is flanking or moving up (4.7, 4.9), purple while it pins Rook's cover (4.9). Hidden
+// until the dev panel tick shows it.
 export class EnemyLabels {
   private readonly sprites: THREE.Sprite[] = [];
   shown = false;
@@ -57,7 +59,8 @@ export class EnemyLabels {
       sprite.visible = this.shown && standIn !== undefined;
       if (!sprite.visible) return;
       sprite.position.set(standIn.xM, standIn.heightM + aboveHeadM, standIn.zM);
-      const colour = standIn.state === 'flank' ? flankingColour : this.holdsSlot(standIn) ? firingColour : idleColour;
+      const moving = standIn.state === 'flank' || standIn.state === 'advance';
+      const colour = moving ? flankingColour : standIn.isSuppressing ? suppressingColour : this.holdsSlot(standIn) ? firingColour : idleColour;
       sprite.material.color.setHex(colour);
     });
   }

@@ -54,6 +54,8 @@ export type WeaponEvents = {
   'shot:landed': ShotLanded;
   /** An enemy fired a round from its muzzle at `position` (a reused vector). For its gunshot sound. */
   'enemy:fired': { position: Vector3 };
+  /** Suppressing fire landed on one side of Rook's cover (4.9): `anchor` is where he hides, `side` points to that side. */
+  'cover:pinned': { anchor: Vector3; side: Vector3 };
   /** An enemy round passed close by Rook's head without hitting him (4.5): `position` is the nearest point of its path. */
   'shot:near-miss': { position: Vector3; distanceM: number; /** His exposure then, 0 to 1: the crack is louder as it rises. */ exposure: number };
   /** An enemy is about to peek out of cover (the tell, 4.4): a sound from `position` (a reused vector) warns the player. */

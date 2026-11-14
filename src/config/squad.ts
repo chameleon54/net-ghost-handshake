@@ -31,6 +31,28 @@ export const squadConfigDefaults = {
   disorderSlots: 1,
   /** ...and its members hold this many times longer between peeks. No flank starts meanwhile. */
   disorderHoldScale: 1.5,
+  // Suppress and advance (4.9, decision 231)
+  /** While Rook hides, a play starts at most this often: one moves up to closer cover while another pins his cover. */
+  advanceEverySec: 10,
+  /** With no advance spot or nobody to cover it, it tries again after this long. */
+  playRetrySec: 2,
+  /** An advance spot is at least this much closer to Rook than where the advancer is... */
+  advanceMinGainM: 2,
+  /** ...and no closer to him than this. */
+  advanceClosestM: 3,
+  /** Suppressing fire: rounds per burst, and the pause between bursts. */
+  suppressBurstRounds: 8,
+  suppressBurstPauseSec: 0.6,
+  /** Suppressing fire aims this far to one side of where Rook hides (the edge of his cover). */
+  suppressEdgeOffsetM: 0.6,
+  /** A suppressor stays out at most this long... */
+  suppressMaxSec: 8,
+  /** ...and stops this long after the move it covers is over. */
+  suppressAfterMoveSec: 1,
+  /** Rook pins an enemy (the Suppressed state): a round of his passing or landing within this distance of it while it is out... */
+  pinnedByFireM: 1,
+  /** ...sends it back into cover, holding this many times longer. */
+  pinnedHoldScale: 1.5,
   /** The flank attack (decision 227): on arrival it peeks at once and stays out firing for at most this long... */
   flankPressMaxSec: 6,
   /** ...or until it has not seen Rook for this long (or he hurts it). */
