@@ -468,6 +468,7 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
+    { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
     { key: 'sightChecksPerSec', label: 'Sight checks per s', min: 1, max: 30, step: 1 },
     { key: 'reactionSec', label: 'Reaction before firing (s)', min: 0, max: 3, step: 0.05 },
     { key: 'aimToleranceDeg', label: 'Fires when facing within (deg)', min: 1, max: 90, step: 1 },

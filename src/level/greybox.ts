@@ -8,6 +8,8 @@ export interface GreyboxLevel {
   group: THREE.Group;
   /** The same boxes as collision, so what you see is what you bump into. */
   collision: LevelCollision;
+  /** Every box plus the floor, as one set of triangles: what the navigation mesh is built from (4.2). */
+  navigationGeometry: THREE.BufferGeometry;
 }
 
 const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33 } as const;
@@ -63,5 +65,9 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom): GreyboxLe
   if (!merged) throw new Error('Could not merge the room geometry for collision');
   const climbableBoxes = boxes.filter(isClimbable);
   const climbable = climbableBoxes.length > 0 ? mergeGeometries(climbableBoxes.map(boxGeometry), false) : null;
-  return { group, collision: new LevelCollision(merged, climbable) };
+  // The navigation mesh needs the floor too (collision treats height 0 as the floor instead).
+  const floorGeometry = new THREE.PlaneGeometry(greyboxRoomSize.widthM, greyboxRoomSize.depthM).rotateX(-Math.PI / 2);
+  const navigationGeometry = mergeGeometries([...boxes.map(boxGeometry), floorGeometry], false);
+  if (!navigationGeometry) throw new Error('Could not merge the room geometry for navigation');
+  return { group, collision: new LevelCollision(merged, climbable), navigationGeometry };
 }

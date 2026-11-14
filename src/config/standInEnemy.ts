@@ -10,6 +10,8 @@ export const standInConfigDefaults = {
   stopRangeM: 8,
   /** It never walks closer than this, even without sight, so it does not stand inside Rook. */
   closestM: 1,
+  /** How often it plans a fresh route to Rook while walking (4.2). */
+  repathIntervalSec: 0.5,
   /** How often it checks whether it can see Rook (perception does not run every update). */
   sightChecksPerSec: 5,
   /** Pause after it first gets sight before the first burst. */

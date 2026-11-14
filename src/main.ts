@@ -5,6 +5,7 @@ import { Loop } from './core/loop';
 import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
+import { Navigation } from './level/navigation';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
@@ -82,6 +83,8 @@ scene.add(sun);
 
 const level = buildGreybox();
 scene.add(level.group);
+// The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
+const navigation = await Navigation.create(level.navigationGeometry);
 const player = new Player(level.collision);
 
 // Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
@@ -99,10 +102,11 @@ const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
 const dummies = greyboxDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
-// The stand-in enemy (4.1): temporary, it walks at Rook and shoots. Its hits go to his health (made further down).
+// The stand-in enemy (4.1): temporary, it heads for Rook along the navigation mesh (4.2) and shoots. Its hits go to his
+// health (made further down).
 const standIn = new StandInEnemy(
   greyboxStandIn,
-  new StandInWorld(weaponEvents, level.collision, player, (amount) => playerHealth.damage(amount, 'enemy')),
+  new StandInWorld(weaponEvents, level.collision, navigation, player, (amount) => playerHealth.damage(amount, 'enemy')),
 );
 const standInView = new StandInView(standIn);
 scene.add(standInView.group);
@@ -228,7 +232,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn, navigation });
   });
 }
 

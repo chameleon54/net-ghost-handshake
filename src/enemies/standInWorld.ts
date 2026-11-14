@@ -5,6 +5,7 @@ import { rifleConfig } from '../config/rifle';
 import { standInConfig } from '../config/standInEnemy';
 import type { EventBus } from '../core/events';
 import { createRayHit, type LevelCollision } from '../level/collision';
+import type { Navigation } from '../level/navigation';
 import type { WeaponEvents } from '../weapons/events';
 import type { StandInEnemy, StandInHooks } from './standInEnemy';
 
@@ -15,7 +16,7 @@ export interface StandInQuarry {
   readonly eyeHeightNowM: number;
 }
 
-// The stand-in's real senses and gun: rays through the level for sight, the level's collision for walking, and the
+// The stand-in's real senses and gun: rays through the level for sight, the navigation mesh and collision for walking, and the
 // bullet itself. A round's hit or miss is already decided; this only places it. A hit lands on Rook's chest and hurts him;
 // a miss flies past him 0.3 to 1.5 m off and ends on whatever is behind (enemies.md, "deliberate misses"). Both send
 // `shot:landed`, so the tracers, bullet marks and impact sounds work as they do for Rook's own shots.
@@ -33,6 +34,7 @@ export class StandInWorld implements StandInHooks {
   constructor(
     private readonly events: EventBus<WeaponEvents>,
     private readonly collision: LevelCollision,
+    private readonly navigation: Navigation,
     private readonly quarry: StandInQuarry,
     /** Hurts Rook. */
     private readonly damagePlayer: (amount: number) => void,
@@ -47,6 +49,10 @@ export class StandInWorld implements StandInHooks {
     if (this.clearLine(this.eyes, this.target)) return true;
     this.chest(this.target);
     return this.clearLine(this.eyes, this.target);
+  }
+
+  findPath(from: Vector3, to: Vector3, out: Vector3[]): boolean {
+    return this.navigation.findPath(from, to, out);
   }
 
   pushOut(feet: Vector3): void {

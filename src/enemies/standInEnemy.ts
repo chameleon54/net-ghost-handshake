@@ -13,16 +13,18 @@ export interface StandInHooks {
   canSeePlayer(enemy: StandInEnemy): boolean;
   /** Pushes its feet out of walls and props, so it slides along them. Changes `feet`. */
   pushOut(feet: Vector3): void;
+  /** A walkable route from `from` to `to`, written into `out` (the first point is the start). Leaves `out` empty if there is none. */
+  findPath(from: Vector3, to: Vector3, out: Vector3[]): boolean;
   /** One round leaves its gun; `hits` says whether it lands on Rook (decided here, at the moment of firing). */
   fire(enemy: StandInEnemy, hits: boolean): void;
 }
 
 const degToRad = Math.PI / 180;
 
-// A temporary enemy (milestone 4.1, decision 197): it walks straight at Rook and shoots, only to prove damage, health and
-// death. It breaks the "no enemy walks mindlessly" rule on purpose; pathfinding (4.2), cover (4.3), peeking (4.4) and the
-// miss model (4.5) replace it. It starts idle, wakes on a noise it hears or a hit, and from then on always knows where
-// Rook is. No drawing code here.
+// A temporary enemy (milestone 4.1, decision 197): it heads for Rook and shoots, only to prove damage, health and death.
+// It breaks the "no enemy walks mindlessly" rule on purpose; cover (4.3), peeking (4.4) and the miss model (4.5) replace
+// it. It starts idle, wakes on a noise it hears or a hit, and from then on always knows where Rook is. Since 4.2 it
+// follows a route on the navigation mesh, so it walks around walls and props. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -41,6 +43,10 @@ export class StandInEnemy implements Target {
   /** Game time since the last damaging hit, for the hit budget. */
   private sinceHitSec = Infinity;
   private readonly ears = new Vector3();
+  private readonly path: Vector3[] = [];
+  /** The point of `path` it is walking to. */
+  private pathIndex = 0;
+  private repathTimerSec = 0;
 
   constructor(
     private readonly spawn: { readonly xM: number; readonly zM: number; readonly yawRad: number },
@@ -64,6 +70,15 @@ export class StandInEnemy implements Target {
 
   get awake(): boolean {
     return this.state === 'approach' || this.state === 'shoot';
+  }
+
+  /** The part of its route still ahead (from where it stands), for the dev overlay. Empty when it is not walking. */
+  routeAhead(out: Vector3[]): Vector3[] {
+    out.length = 0;
+    if (this.state !== 'approach') return out;
+    out.push(this.feet);
+    for (let i = this.pathIndex; i < this.path.length; i++) out.push(this.path[i]);
+    return out;
   }
 
   /** 0 when standing, 1 when flat. Drives the tip-over drawing. */
@@ -133,7 +148,6 @@ export class StandInEnemy implements Target {
     const dx = player.x - this.feet.x;
     const dz = player.z - this.feet.z;
     const distanceM = Math.hypot(dx, dz);
-    const facingErrorRad = this.turnToward(dx, dz, dtSec);
 
     if (this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
       if (this.state !== 'shoot') {
@@ -142,18 +156,49 @@ export class StandInEnemy implements Target {
         this.roundsInBurst = 0;
       }
       // The reaction pause only counts down once it faces Rook, so it never fires sideways.
+      const facingErrorRad = this.turnToward(dx, dz, dtSec);
       if (facingErrorRad <= standInConfig.aimToleranceDeg * degToRad) this.shoot(dtSec);
       return;
     }
 
-    this.setState('approach');
-    if (distanceM > standInConfig.closestM) {
-      const stepM = Math.min(standInConfig.walkSpeedMps * dtSec, distanceM - standInConfig.closestM);
-      this.feet.x += (dx / distanceM) * stepM;
-      this.feet.z += (dz / distanceM) * stepM;
-      this.hooks.pushOut(this.feet);
-      this.feet.y = 0;
+    if (this.state !== 'approach') {
+      this.setState('approach');
+      this.repathTimerSec = 0; // a fresh route from here
     }
+    if (distanceM > standInConfig.closestM) this.walkRoute(dtSec, player);
+  }
+
+  /** Walks along its route toward Rook at walk speed, planning a fresh one every so often, facing the way it goes. */
+  private walkRoute(dtSec: number, player: Vector3): void {
+    this.repathTimerSec -= dtSec;
+    if (this.repathTimerSec <= 0) {
+      this.hooks.findPath(this.feet, player, this.path);
+      this.pathIndex = 1; // the first point is where it stands
+      this.repathTimerSec = standInConfig.repathIntervalSec;
+    }
+    if (this.pathIndex < this.path.length) {
+      const next = this.path[this.pathIndex];
+      this.turnToward(next.x - this.feet.x, next.z - this.feet.z, dtSec);
+    }
+    let stepM = standInConfig.walkSpeedMps * dtSec;
+    while (stepM > 0 && this.pathIndex < this.path.length) {
+      const next = this.path[this.pathIndex];
+      const toX = next.x - this.feet.x;
+      const toZ = next.z - this.feet.z;
+      const toM = Math.hypot(toX, toZ);
+      if (toM <= stepM) {
+        this.feet.x = next.x;
+        this.feet.z = next.z;
+        stepM -= toM;
+        this.pathIndex++;
+      } else {
+        this.feet.x += (toX / toM) * stepM;
+        this.feet.z += (toZ / toM) * stepM;
+        stepM = 0;
+      }
+    }
+    this.hooks.pushOut(this.feet); // a safety net: the route already keeps clear of walls
+    this.feet.y = 0;
   }
 
   private shoot(dtSec: number): void {
@@ -187,6 +232,7 @@ export class StandInEnemy implements Target {
     this.setState('approach');
     this.sightTimerSec = 0; // look straight away
     this.seesPlayer = false;
+    this.repathTimerSec = 0;
   }
 
   private placeAtSpawn(): void {
@@ -194,6 +240,8 @@ export class StandInEnemy implements Target {
     this.yawRad = this.spawn.yawRad;
     this.health = new Health(standInConfig.healthPoints);
     this.sinceHitSec = Infinity;
+    this.path.length = 0;
+    this.pathIndex = 0;
   }
 
   private setState(state: StandInState): void {

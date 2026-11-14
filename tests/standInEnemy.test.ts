@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
 import { EventBus } from '../src/core/events';
@@ -6,6 +6,8 @@ import { StandInEnemy, type StandInHooks } from '../src/enemies/standInEnemy';
 import { StandInWorld } from '../src/enemies/standInWorld';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { buildGreybox } from '../src/level/greybox';
+import { Navigation } from '../src/level/navigation';
+import { greyboxRoom } from '../src/data/greyboxRoom';
 import type { Noise } from '../src/stealth/noise';
 import type { WeaponEvents } from '../src/weapons/events';
 
@@ -14,12 +16,18 @@ const spawn = { xM: 0, zM: 0, yawRad: 0 }; // faces north (-z)
 
 /** A stand-in with fake senses. `roll` is what its random number gives: below the hit chance hits, above it misses. */
 function setup(roll = 0.99) {
-  const world = { sees: true, clockSec: 0 };
+  /** `route` (if set) replaces the straight line the fake navigation gives: the points after the start. */
+  const world = { sees: true, clockSec: 0, route: null as Vector3[] | null };
   const shots: { atSec: number; hits: boolean }[] = [];
   const hooks: StandInHooks = {
     canSeePlayer: () => world.sees,
     pushOut: () => {},
     fire: (_enemy, hits) => shots.push({ atSec: world.clockSec, hits }),
+    findPath: (from, to, out) => {
+      out.length = 0;
+      out.push(from.clone(), ...(world.route ?? [to]).map((p) => p.clone()));
+      return true;
+    },
   };
   const enemy = new StandInEnemy(spawn, hooks, () => roll);
   const run = (player: Vector3, seconds: number) => {
@@ -93,12 +101,39 @@ describe('StandInEnemy walking and shooting', () => {
     expect(enemy.feet.distanceTo(stoppedAt)).toBe(0);
   });
 
-  it('never walks closer than its closest distance', () => {
+  it('never walks closer than its closest distance (give or take one step)', () => {
     const { enemy, world, run } = setup();
     world.sees = false;
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -3), 3);
-    expect(Math.abs(enemy.feet.z - -3)).toBeCloseTo(standInConfig.closestM, 5);
+    const stepM = standInConfig.walkSpeedMps * dtSec;
+    expect(Math.abs(enemy.feet.z - -3)).toBeGreaterThan(standInConfig.closestM - stepM - 1e-9);
+    expect(Math.abs(enemy.feet.z - -3)).toBeLessThanOrEqual(standInConfig.closestM + 1e-9);
+  });
+
+  it('follows its route point by point, facing the way it walks', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.route = [new Vector3(2, 0, 0), new Vector3(2, 0, -6)]; // east first, then north
+    enemy.hit('body', 1);
+    run(new Vector3(2, 0, -6), 0.4); // 1 m along the first leg
+    expect(enemy.feet.x).toBeGreaterThan(0.5);
+    expect(enemy.feet.z).toBeCloseTo(0, 5);
+    expect(Math.sin(enemy.yawRad)).toBeLessThan(-0.9); // facing east (yaw -90 degrees)
+    run(new Vector3(2, 0, -6), 1.2); // round the corner
+    expect(enemy.feet.x).toBeCloseTo(2, 5);
+    expect(enemy.feet.z).toBeLessThan(-0.5);
+    const routeAhead = enemy.routeAhead([]);
+    expect(routeAhead[0]).toBe(enemy.feet);
+    expect(routeAhead[routeAhead.length - 1].toArray()).toEqual([2, 0, -6]);
+  });
+
+  it('shows no route while it stands and fires', () => {
+    const { enemy, run } = setup();
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 0.2);
+    expect(enemy.state).toBe('shoot');
+    expect(enemy.routeAhead([])).toHaveLength(0);
   });
 
   it('waits its reaction time, then fires bursts with the set gaps', () => {
@@ -181,6 +216,10 @@ describe('StandInEnemy death and reset', () => {
 });
 
 describe('StandInWorld', () => {
+  let navigation: Navigation;
+  beforeAll(async () => {
+    navigation = await Navigation.create(buildGreybox().navigationGeometry);
+  });
   const farProp: RoomBox = { kind: 'prop', xM: 50, zM: 50, widthM: 1, depthM: 1, heightM: 1 };
   const backWall: RoomBox = { kind: 'wall', xM: 0, zM: 5, widthM: 20, depthM: 0.3, heightM: 8 }; // behind the player, tall enough to catch high misses
   const player = { position: new Vector3(0, 0, 0), eyeHeightNowM: 1.6 };
@@ -193,7 +232,7 @@ describe('StandInWorld', () => {
     events.on('shot:landed', (s) => landed.push({ muzzle: s.muzzle.clone(), end: s.end.clone(), hit: s.hit, shooter: s.shooter }));
     events.on('enemy:fired', ({ position }) => fired.push(position.clone()));
     const { collision } = buildGreybox([farProp, ...boxes]);
-    const world = new StandInWorld(events, collision, player, (amount) => damage.push(amount));
+    const world = new StandInWorld(events, collision, navigation, player, (amount) => damage.push(amount));
     const enemy = new StandInEnemy({ xM: 0, zM: -8, yawRad: Math.PI }, world); // 8 m north, facing south at him
     return { world, enemy, damage, landed, fired };
   };
@@ -231,5 +270,25 @@ describe('StandInWorld', () => {
       expect(passM).toBeLessThanOrEqual(standInConfig.missMaxOffsetM + 1e-6);
       expect(shot.hit).toBe(true); // the back wall or the floor
     }
+  });
+});
+
+describe('the stand-in in the real test room (4.2)', () => {
+  it('walks around the pillar to find the player hiding behind it, and never through it', async () => {
+    const level = buildGreybox();
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const player = { position: new Vector3(0, 0, 1.5), eyeHeightNowM: 1.6 }; // just south of the pillar
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, player, () => {});
+    const enemy = new StandInEnemy({ xM: 0, zM: -2, yawRad: Math.PI }, world, () => 0.99); // just north of it
+    const pillar = greyboxRoom[6];
+    expect(world.canSeePlayer(enemy)).toBe(false); // the pillar hides him
+    enemy.hit('body', 1);
+    for (let i = 0; i < 4 / dtSec && enemy.state !== 'shoot'; i++) {
+      enemy.update(dtSec, player.position);
+      const inside = Math.abs(enemy.xM - pillar.xM) < pillar.widthM / 2 + 0.2 && Math.abs(enemy.zM - pillar.zM) < pillar.depthM / 2 + 0.2;
+      expect(inside, `inside the pillar at ${enemy.xM}, ${enemy.zM}`).toBe(false);
+    }
+    expect(enemy.state).toBe('shoot'); // it got round far enough to see him
+    expect(Math.abs(enemy.xM)).toBeGreaterThan(0.3); // by stepping to the side
   });
 });

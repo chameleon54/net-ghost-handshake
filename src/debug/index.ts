@@ -9,6 +9,8 @@ import { pistolConfig, pistolConfigDefaults } from '../config/pistol';
 import { rifleConfig, rifleConfigDefaults } from '../config/rifle';
 import { standInConfig, standInConfigDefaults } from '../config/standInEnemy';
 import type { StandInEnemy } from '../enemies/standInEnemy';
+import type { Navigation } from '../level/navigation';
+import { NavOverlay } from './navOverlay';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -54,6 +56,7 @@ interface Parts {
   /** Every sound the game plays goes through it, so the captions can list them. */
   soundTap: SoundTap;
   standIn: StandInEnemy;
+  navigation: Navigation;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -64,7 +67,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -216,6 +219,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   standInPanel.close();
   standInPanel.add(standIn, 'frozen').name('Freeze (stands still, holds fire)');
   standInPanel.add({ respawn: () => standIn.reset() }, 'respawn').name('Respawn (idle, at its spot)');
+  const navOverlay = new NavOverlay(scene, navigation, standIn);
+  standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
+  standInPanel.add(navOverlay, 'pathShown').name('Show stand-in route');
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const grenadePanel = gui.addFolder(grenadeFolder.title);
@@ -318,6 +324,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
 
       if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
       updateReadouts(dtSec);
+      navOverlay.update();
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);
