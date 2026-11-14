@@ -242,7 +242,7 @@ describe('StandInEnemy and cover (4.3)', () => {
   const lowSpot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: 0 };
   const highSpot: CoverPoint = { xM: 3, zM: 0, height: 'high', facingYawRad: Math.PI / 2 };
 
-  it('walks to its cover spot standing, then crouches behind low cover, faces it, and holds without firing', () => {
+  it('walks to its cover spot standing, then crouches behind low cover, faces where Rook was, and holds without firing', () => {
     const { enemy, world, shots, run } = setup();
     world.sees = false;
     world.cover = lowSpot;
@@ -255,7 +255,7 @@ describe('StandInEnemy and cover (4.3)', () => {
     expect(enemy.feet.distanceTo(new Vector3(0, 0, -3))).toBeLessThan(standInConfig.coverArriveM);
     expect(enemy.crouched).toBe(true);
     expect(enemy.heightM).toBe(standInConfig.crouchHeightM);
-    expect(Math.cos(enemy.yawRad)).toBeGreaterThan(0.99); // facing its cover (north)
+    expect(Math.cos(enemy.yawRad)).toBeLessThan(-0.99); // facing where Rook was (south), not the cover's stored direction (decision 213)
     run(new Vector3(0, 0, 10), 3);
     expect(enemy.state).toBe('cover');
     expect(shots).toHaveLength(0);
@@ -320,6 +320,45 @@ describe('StandInEnemy and cover (4.3)', () => {
     expect(enemy.cover).toBeNull();
     enemy.reset();
     expect(world.releases).toBe(before + 2);
+  });
+});
+
+describe('StandInEnemy remembering where Rook was (4.4 follow-up)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'high', facingYawRad: 0, lean: 'both' }; // its cover is to its north
+
+  it('hearing a noise and seeing Rook each set where it last knew he was', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    enemy.hear(noiseAt(new Vector3(9, 1.6, 2), 30));
+    expect(enemy.knowsWhere).toBe(true);
+    expect(enemy.lastKnown.toArray()).toEqual([9, 0, 2]);
+    world.sees = true;
+    run(new Vector3(-12, 0, 5), dtSec);
+    expect(enemy.lastKnown.toArray()).toEqual([-12, 0, 5]);
+  });
+
+  it('holding cover, it faces where it last knew Rook was, not the cover, and keeps facing there when he moves unseen', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.cover = spot;
+    enemy.hear(noiseAt(new Vector3(12, 1.6, -3), 30)); // heard due east of its spot, 12 m away
+    run(new Vector3(12, 0, -3), 2.5);
+    expect(enemy.state).toBe('cover');
+    expect(Math.sin(enemy.yawRad)).toBeLessThan(-0.99); // facing east (yaw -90 degrees), not north at its cover
+    run(new Vector3(-12, 0, 10), 1); // he slips away west, unseen
+    expect(Math.sin(enemy.yawRad)).toBeLessThan(-0.99); // it still watches where he was
+    expect(enemy.lastKnown.x).toBe(12);
+  });
+
+  it('forgets on a reset, and starts from where Rook is when woken by a hit', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    enemy.hear(noiseAt(new Vector3(9, 1.6, 2), 30));
+    enemy.reset();
+    expect(enemy.knowsWhere).toBe(false);
+    enemy.hit('body', 1);
+    run(new Vector3(-4, 0, 6), dtSec);
+    expect(enemy.lastKnown.toArray()).toEqual([-4, 0, 6]);
   });
 });
 
@@ -542,6 +581,15 @@ describe('StandInWorld', () => {
     expect(landed[0].hit).toBe(false); // no bullet mark on the player
     expect(landed[0].end.toArray()).toEqual([0, 1.6 * standInConfig.aimHeightShareOfEyes, 0]);
     expect(fired[0].z).toBeCloseTo(-8 + standInConfig.muzzleForwardM, 5); // the muzzle is in front of it, toward him
+  });
+
+  it('a shot at his cover aims at where it last knew he was, not where he really is', () => {
+    const wide = setupWorld([{ kind: 'wall', xM: 0, zM: -1, widthM: 12, depthM: 0.3, heightM: 3 }]);
+    wide.enemy.hear(noiseAt(new Vector3(3, 1.6, 0), 30)); // it heard him 3 m east of where he really stands
+    wide.world.fire(wide.enemy, 'cover');
+    expect(wide.landed[0].hit).toBe(true);
+    expect(wide.landed[0].end.x).toBeGreaterThan(2); // toward x 3, not x 0
+    expect(wide.damage).toHaveLength(0);
   });
 
   it('a shot at his cover aims straight at his chest and strikes what hides him, without hurting him', () => {

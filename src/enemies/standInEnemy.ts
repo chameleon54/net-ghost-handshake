@@ -63,6 +63,10 @@ export class StandInEnemy implements Target {
   crouched = false;
   /** Dev panel testing aid: stands still and holds fire (it can still be shot and fall). */
   frozen = false;
+  /** Where it last knew Rook was (his feet): where it last saw him, or last heard him (decision 213). */
+  readonly lastKnown = new Vector3();
+  /** False until it has seen or heard him since it (re)spawned. */
+  knowsWhere = false;
   private stateSec = 0;
   private seesPlayer = false;
   private sightTimerSec = 0;
@@ -168,11 +172,14 @@ export class StandInEnemy implements Target {
     this.setState('idle');
   }
 
-  /** A noise Rook made: if it carries to its ears, it wakes up. */
+  /** A noise Rook made: if it carries to its ears, it now knows he was there, and it wakes up if it was idle. */
   hear(noise: Noise): void {
-    if (this.state !== 'idle') return;
+    if (this.state === 'falling' || this.state === 'down') return;
     this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
-    if (hearsNoise(noise, this.ears)) this.wake();
+    if (!hearsNoise(noise, this.ears)) return;
+    this.lastKnown.set(noise.position.x, 0, noise.position.z);
+    this.knowsWhere = true;
+    if (this.state === 'idle') this.wake();
   }
 
   hit(zone: HitZone, bodyDamage: number): boolean {
@@ -218,6 +225,11 @@ export class StandInEnemy implements Target {
     if (this.sightTimerSec <= 0) {
       this.seesPlayer = this.hooks.canSeePlayer(this);
       this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
+    }
+    // Seeing him tells it where he is. Woken by a hit, or just up again, it starts from where he is too.
+    if (this.seesPlayer || !this.knowsWhere) {
+      this.lastKnown.set(player.x, 0, player.z);
+      this.knowsWhere = true;
     }
     this.checkCover(dtSec);
     const dx = player.x - this.feet.x;
@@ -356,7 +368,7 @@ export class StandInEnemy implements Target {
         return;
       }
       this.engaged = false;
-      this.turnToward(-Math.sin(point.facingYawRad), -Math.cos(point.facingYawRad), dtSec);
+      this.faceLastKnown(dtSec); // it watches where Rook was, never turning its back on him (decision 213)
       this.peekTimerSec -= dtSec;
       if (this.peekTimerSec <= 0) this.startTell(point);
       return;
@@ -366,7 +378,7 @@ export class StandInEnemy implements Target {
       this.peekFire(dtSec, dx, dz);
       return;
     }
-    this.turnToward(dx, dz, dtSec); // it faces Rook as it comes out
+    this.faceLastKnown(dtSec); // it comes out facing where Rook was
     if (this.peekPhase === 'tell') {
       this.setPeekShare(point, standInConfig.tellShare * progressOf(this.peekTimerSec, standInConfig.tellSec));
       if (this.peekTimerSec <= 0) {
@@ -419,7 +431,8 @@ export class StandInEnemy implements Target {
 
   /** Out of cover: fires one burst (or looks for as long as one would take), then goes back in. */
   private peekFire(dtSec: number, dx: number, dz: number): void {
-    const facingErrorRad = this.turnToward(dx, dz, dtSec);
+    // It aims at Rook when it sees him; otherwise at where it last knew he was (decision 213).
+    const facingErrorRad = this.peekMode === 'aimed' ? this.turnToward(dx, dz, dtSec) : this.faceLastKnown(dtSec);
     if (this.peekMode === 'look') {
       if (this.peekTimerSec <= 0) this.startPeekBack();
       return;
@@ -534,6 +547,11 @@ export class StandInEnemy implements Target {
     }
   }
 
+  /** Turns toward where it last knew Rook was. Returns how far off it still faces, in radians. */
+  private faceLastKnown(dtSec: number): number {
+    return this.turnToward(this.lastKnown.x - this.feet.x, this.lastKnown.z - this.feet.z, dtSec);
+  }
+
   /** Turns toward the direction (dx, dz) at its turn speed. Returns how far off it still faces, in radians. */
   private turnToward(dx: number, dz: number, dtSec: number): number {
     const wantedRad = Math.atan2(-dx, -dz); // yaw 0 faces -z
@@ -571,6 +589,7 @@ export class StandInEnemy implements Target {
     this.crouched = false;
     this.engaged = false;
     this.burstsDone = 0;
+    this.knowsWhere = false;
     this.sinceHitSec = Infinity;
     this.path.length = 0;
     this.pathIndex = 0;

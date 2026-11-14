@@ -97,8 +97,8 @@ export class StandInWorld implements StandInHooks {
   }
 
   /**
-   * A hit lands on Rook's chest and hurts him. A miss flies 0.3 to 1.5 m past him. A shot at his cover aims straight at
-   * his chest while he is hidden, so it strikes whatever hides him (decision 207).
+   * A hit lands on Rook's chest and hurts him. A miss flies 0.3 to 1.5 m past him. A shot at his cover aims at chest
+   * height where it last knew he was, so it strikes whatever hides him there (decisions 207 and 213).
    */
   fire(enemy: StandInEnemy, shot: StandInShot): void {
     const facingX = -Math.sin(enemy.yawRad);
@@ -109,6 +109,7 @@ export class StandInWorld implements StandInHooks {
       enemy.zM + facingZ * standInConfig.muzzleForwardM,
     );
     this.chest(this.aim);
+    if (shot === 'cover' && enemy.knowsWhere) this.aim.set(enemy.lastKnown.x, this.aim.y - this.quarry.position.y, enemy.lastKnown.z);
     let onSurface = false;
     if (shot === 'hit') {
       this.end.copy(this.aim);
