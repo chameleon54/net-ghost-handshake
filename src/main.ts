@@ -34,7 +34,9 @@ import { StandInEnemy } from './enemies/standInEnemy';
 import { StandInView } from './enemies/standInView';
 import { StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
-import { greyboxStandIn } from './data/greyboxEnemies';
+import { greyboxStandIns } from './data/greyboxEnemies';
+import { squadConfig } from './config/squad';
+import { SquadCoordinator } from './squad/squadCoordinator';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
 import { ImpactSparks } from './fx/impactSparks';
@@ -141,21 +143,32 @@ const quarry = {
     return player.isSprinting || player.stance.stance === 'sliding';
   },
 };
-const standInWorld = new StandInWorld(
-  weaponEvents,
-  level.collision,
-  navigation,
-  coverPoints,
-  quarry,
-  (amount, from) => playerHealth.damage(amount, 'enemy', from),
-  () => grenades.livePositions(), // the grenade system is made further down
-);
-const standIn = new StandInEnemy(greyboxStandIn, standInWorld);
-const standInView = new StandInView(standIn);
-scene.add(standInView.group);
-weaponEvents.on('noise:made', (noise) => standIn.hear(noise));
-// Everything the player's bullets, knife and grenades can hurt.
-const targets: Target[] = [...dummies, standIn];
+// Since 4.6 there are four, a squad: the coordinator hands out firing slots and keeps one hit budget for all of them.
+// Each has its own world (it remembers where it last saw Rook from). The dev panel's count says how many are in the room.
+const squad = new SquadCoordinator();
+const standIns = greyboxStandIns.map((spawn) => {
+  const world = new StandInWorld(
+    weaponEvents,
+    level.collision,
+    navigation,
+    coverPoints,
+    quarry,
+    (amount, from) => playerHealth.damage(amount, 'enemy', from),
+    () => grenades.livePositions(), // the grenade system is made further down
+    Math.random,
+    squad,
+  );
+  const enemy = new StandInEnemy(spawn, world);
+  const view = new StandInView(enemy);
+  scene.add(view.group);
+  return { enemy, world, view };
+});
+/** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
+const activeStandIns: typeof standIns = [];
+const activeEnemies: StandInEnemy[] = [];
+weaponEvents.on('noise:made', (noise) => activeEnemies.forEach((enemy) => enemy.hear(noise)));
+// Everything the player's bullets, knife and grenades can hurt. Filled by `placeSquad`, which changes it in place.
+const targets: Target[] = [];
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, targets);
 const tracers = new Tracers(scene, weaponEvents);
@@ -180,7 +193,29 @@ const inspectKey = new HoldTap();
 const bulletMarks = new BulletMarks(scene, weaponEvents);
 // Grenades: G throws one (the thrower holds the rules), the system flies it and works out the blast, and the effects listen.
 const thrower = new GrenadeThrower(weaponEvents);
-const blastTargets = targets.map((target) => dummyBlastTarget(target, weaponEvents));
+const blastTargets: ReturnType<typeof dummyBlastTarget>[] = [];
+
+/**
+ * Puts the squad back: every stand-in idle at its spawn, the first `standInCount` of them in the room (seen, hit, heard,
+ * updated), the rest hidden; and the hit and blast target lists to match. At start, restart and the dev panel's Respawn.
+ */
+function placeSquad(): void {
+  const count = Math.min(Math.max(Math.round(squadConfig.standInCount), 1), standIns.length);
+  activeStandIns.length = 0;
+  standIns.forEach((standIn, i) => {
+    standIn.enemy.reset();
+    standIn.view.group.visible = i < count;
+    if (i < count) activeStandIns.push(standIn);
+  });
+  activeEnemies.length = 0;
+  activeEnemies.push(...activeStandIns.map((standIn) => standIn.enemy));
+  targets.length = 0;
+  targets.push(...dummies, ...activeEnemies);
+  blastTargets.length = 0;
+  blastTargets.push(...targets.map((target) => dummyBlastTarget(target, weaponEvents)));
+  squad.reset();
+}
+placeSquad();
 const playerHealth = new PlayerHealth(weaponEvents);
 const heals = new HealItems(weaponEvents, playerHealth);
 const playerBlastTarget = {
@@ -247,7 +282,7 @@ function restart(): void {
   heals.reset();
   grenades.clear();
   dummies.forEach((dummy) => dummy.reset());
-  standIn.reset();
+  placeSquad();
   coverPoints.clearClaims();
   bulletMarks.clear();
   tracers.clear();
@@ -279,7 +314,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn, navigation, coverPoints, camera, exposure, hitChance: () => standInWorld.hitChance() });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance() });
   });
 }
 
@@ -370,9 +405,13 @@ const loop = new Loop(
       dummyViews[i].update();
     });
     camera.getWorldDirection(quarry.forward);
-    standIn.update(stepSec, player.position);
-    standInView.update();
-    glimpses[0] = standInWorld.glimpse(standIn, stepSec);
+    squad.update(stepSec);
+    glimpses.length = 0;
+    for (const { enemy, world, view } of activeStandIns) {
+      enemy.update(stepSec, player.position);
+      view.update();
+      glimpses.push(world.glimpse(enemy, stepSec));
+    }
     exposure.update(stepSec, glimpses, player.stance.stance === 'crouching');
   },
   (alpha) => {

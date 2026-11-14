@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
+import { squadConfig } from '../src/config/squad';
+import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
 import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
 import { StandInWorld } from '../src/enemies/standInWorld';
@@ -22,7 +24,7 @@ const spawn = { xM: 0, zM: 0, yawRad: 0 }; // faces north (-z)
 const fakeHitChance = 0.3;
 
 /** A stand-in with fake senses. `roll` is what its random number gives: below the hit chance hits, above it misses. */
-function setup(roll = 0.99) {
+function setup(roll = 0.99, squad = new SquadCoordinator()) {
   /**
    * `route` (if set) replaces the straight line the fake navigation gives: the points after the start. `cover` is what
    * the fake cover service offers (none by default, so it behaves as in 4.1), and `coverHides` whether that spot still hides it.
@@ -85,16 +87,22 @@ function setup(roll = 0.99) {
     releaseCover: () => world.releases++,
     hitChance: () => world.hitChance,
     rookSees: () => world.rookSees,
+    requestSlot: (e) => squad.requestSlot(e),
+    releaseSlot: (e) => squad.releaseSlot(e),
+    mayHit: () => squad.mayHit(),
+    hitLanded: () => squad.hitLanded(),
   };
   const enemy = new StandInEnemy(spawn, hooks, () => roll);
+  /** Runs this stand-in alone (its squad's clock too). */
   const run = (player: Vector3, seconds: number) => {
     const steps = Math.round(seconds / dtSec);
     for (let i = 0; i < steps; i++) {
       world.clockSec += dtSec;
+      squad.update(dtSec);
       enemy.update(dtSec, player);
     }
   };
-  return { enemy, world, shots, run };
+  return { enemy, world, shots, run, squad };
 }
 
 const noiseAt = (position: Vector3, radiusM: number): Noise => ({ kind: 'footstep', position, radiusM });
@@ -179,6 +187,88 @@ describe('StandInEnemy first contact and hit chance (4.5)', () => {
     run(new Vector3(0, 0, -5), 4);
     expect(shots.length).toBeGreaterThan(0);
     expect(shots.every((s) => !s.hits)).toBe(true);
+  });
+});
+
+describe('StandInEnemy in a squad (4.6)', () => {
+  const rook = new Vector3(0, 0, -5);
+  /** Takes every firing slot for other squad members. */
+  const fill = (squad: SquadCoordinator) => {
+    const others = Array.from({ length: squadConfig.firingSlots }, () => ({}));
+    for (const other of others) expect(squad.requestSlot(other)).toBe(true);
+    return others;
+  };
+
+  it('with every firing slot taken it keeps aiming but holds fire, and fires once one is free', () => {
+    const { enemy, shots, run, squad } = setup();
+    const others = fill(squad);
+    enemy.hit('body', 1);
+    run(rook, 2);
+    expect(enemy.state).toBe('shoot');
+    expect(shots).toHaveLength(0);
+    squad.releaseSlot(others[0]);
+    run(rook, dtSec * 2);
+    expect(shots).toHaveLength(1);
+    expect(squad.holdsSlot(enemy)).toBe(true); // in the middle of its burst
+  });
+
+  it('gives its slot back when the burst ends, and when it is frozen or falls mid-burst', () => {
+    const ended = setup();
+    ended.enemy.hit('body', 1);
+    ended.run(rook, standInConfig.reactionSec + standInConfig.burstRounds * standInConfig.roundIntervalSec + 0.1);
+    expect(ended.shots).toHaveLength(standInConfig.burstRounds);
+    expect(ended.squad.slotsHeld).toBe(0); // between bursts
+
+    for (const stop of ['freeze', 'fall'] as const) {
+      const { enemy, shots, run, squad } = setup();
+      enemy.hit('body', 1);
+      for (let i = 0; i < 5 / dtSec && shots.length === 0; i++) run(rook, dtSec);
+      expect(squad.holdsSlot(enemy)).toBe(true);
+      if (stop === 'freeze') enemy.frozen = true;
+      else enemy.kill();
+      run(rook, dtSec);
+      expect(squad.slotsHeld, stop).toBe(0);
+    }
+  });
+
+  it('a peek with no free slot stays in cover and asks again; it comes out once a slot is free', () => {
+    const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI };
+    const far = new Vector3(0, 0, 10);
+    const { enemy, world, run, squad } = setup();
+    world.sees = false;
+    world.cover = spot;
+    enemy.hit('body', 1);
+    run(far, 1.5);
+    expect(enemy.state).toBe('cover');
+    world.tells.length = 0;
+    const others = fill(squad);
+    run(far, standInConfig.peekHoldMaxSec * standInConfig.woundedHoldScale + 1);
+    expect(world.tells).toHaveLength(0);
+    expect(enemy.peekOut).toBe(0);
+    squad.releaseSlot(others[0]);
+    run(far, squadConfig.slotRetrySec + 0.1);
+    expect(world.tells).toHaveLength(1);
+    expect(squad.holdsSlot(enemy)).toBe(true);
+  });
+
+  it('four stand-ins in the open: never more than two hold slots, every one gets to fire, and no two hits on Rook within 0.5 s', () => {
+    const squad = new SquadCoordinator();
+    const members = Array.from({ length: 4 }, () => setup(0, squad)); // every roll would hit
+    for (const member of members) member.enemy.hit('body', 1);
+    let mostHeld = 0;
+    for (let i = 0; i < 10 / dtSec; i++) {
+      squad.update(dtSec);
+      for (const member of members) {
+        member.world.clockSec += dtSec;
+        member.enemy.update(dtSec, rook);
+      }
+      mostHeld = Math.max(mostHeld, squad.slotsHeld);
+    }
+    expect(mostHeld).toBe(squadConfig.firingSlots);
+    for (const member of members) expect(member.shots.length).toBeGreaterThan(0);
+    const hits = members.flatMap((m) => m.shots.filter((s) => s.hits).map((s) => s.atSec)).sort((a, b) => a - b);
+    expect(hits.length).toBeGreaterThan(3);
+    for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
   });
 });
 
@@ -269,7 +359,7 @@ describe('StandInEnemy walking and shooting', () => {
     run(new Vector3(0, 0, -5), 4);
     const hits = shots.filter((s) => s.hits).map((s) => s.atSec);
     expect(hits.length).toBeGreaterThan(1);
-    for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(standInConfig.hitGapSec - 1e-9);
+    for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
     expect(shots.slice(0, standInConfig.burstRounds).map((s) => s.hits)).toEqual([true, false, false]);
   });
 

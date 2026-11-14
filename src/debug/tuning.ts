@@ -14,6 +14,7 @@ import type { RifleConfig } from '../config/rifle';
 import type { StandInConfig } from '../config/standInEnemy';
 import type { CoverConfig } from '../config/cover';
 import type { ExposureConfig } from '../config/exposure';
+import type { SquadConfig } from '../config/squad';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -49,6 +50,7 @@ type HealthFxKey = keyof HealthFxConfig;
 type StandInKey = keyof StandInConfig;
 type CoverKey = keyof CoverConfig;
 type ExposureKey = keyof ExposureConfig;
+type SquadKey = keyof SquadConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -507,7 +509,6 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
     { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
     { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
-    { key: 'hitGapSec', label: 'Hit budget: one hit per (s)', min: 0, max: 3, step: 0.05 },
     { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
   ],
@@ -545,6 +546,16 @@ export const exposureFolder: Folder<ExposureKey> = {
     { key: 'crackRadiusM', label: 'Bullet crack within (m of your head)', min: 0, max: 6, step: 0.25 },
     { key: 'crackQuietVolume', label: 'Bullet crack volume at exposure 0', min: 0, max: 1, step: 0.05 },
     { key: 'checksPerSec', label: 'Exposure checks per s', min: 1, max: 60, step: 1 },
+  ],
+};
+
+export const squadFolder: Folder<SquadKey> = {
+  title: 'Squad',
+  sliders: [
+    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 4, step: 1 },
+    { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
+    { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
+    { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },
   ],
 };
 

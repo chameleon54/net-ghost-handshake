@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
 import { grenadeConfig } from '../config/grenade';
+import { squadConfig } from '../config/squad';
 import { standInConfig } from '../config/standInEnemy';
 import type { CoverPoint } from '../level/cover';
 import { hearsNoise, type Noise, type NoiseKind } from '../stealth/noise';
@@ -57,6 +58,14 @@ export interface StandInHooks {
   hitChance(enemy: StandInEnemy): number;
   /** True if Rook can see it right now: it is on his screen and nothing blocks the view (for the first-contact rule). */
   rookSees(enemy: StandInEnemy): boolean;
+  /** Asks the squad coordinator for a firing slot (4.6): true if it holds one now. */
+  requestSlot(enemy: StandInEnemy): boolean;
+  /** Gives its firing slot back. */
+  releaseSlot(enemy: StandInEnemy): void;
+  /** True if the squad's hit budget lets a round hit Rook now. */
+  mayHit(): boolean;
+  /** A round hit Rook: the squad's hit budget is spent for a while. */
+  hitLanded(): void;
 }
 
 const degToRad = Math.PI / 180;
@@ -74,7 +83,8 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // firing; if its cover fails at range it answers with a burst before moving. Wounded, it stops standing its ground and
 // pulls back into cover, peeking less; it runs out of the blast of a grenade it sees (decision 214). If no cover hides
 // it, it falls back to heading for Rook and firing when it sees him. Since 4.5 its hit chance comes from Rook's exposure
-// meter, and before first contact (he has not seen it) its first burst always misses, as a warning. No drawing code here.
+// meter, and before first contact (he has not seen it) its first burst always misses, as a warning. Since 4.6 it is one of
+// a squad: it fires only while it holds a firing slot, and the squad shares the hit budget. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -109,8 +119,8 @@ export class StandInEnemy implements Target {
   private grenadeReactSec = 0;
   private readonly grenadeAt = new Vector3();
   private readonly fleeSpot = new Vector3();
-  /** Game time since the last damaging hit, for the hit budget. */
-  private sinceHitSec = Infinity;
+  /** True while it holds one of the squad's firing slots (4.6). */
+  private hasSlot = false;
   /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
@@ -274,8 +284,31 @@ export class StandInEnemy implements Target {
 
   /** Once per game update, after the player has moved. `player` is Rook's feet. */
   update(dtSec: number, player: Vector3): void {
+    this.think(dtSec, player);
+    if (this.hasSlot && !this.inBurst) this.giveSlotBack(); // a slot covers one burst, and goes back whatever ended it
+  }
+
+  /** True during a burst: firing one, or peeking out to fire one (from the tell until it starts back in). */
+  private get inBurst(): boolean {
+    if (!this.awake || this.frozen) return false;
+    const peeking = this.state === 'cover' && (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire');
+    return peeking || (this.engaged && this.roundsInBurst > 0);
+  }
+
+  /** Asks for a firing slot if it holds none. True if it holds one now. */
+  private takeSlot(): boolean {
+    if (!this.hasSlot) this.hasSlot = this.hooks.requestSlot(this);
+    return this.hasSlot;
+  }
+
+  private giveSlotBack(): void {
+    if (!this.hasSlot) return;
+    this.hooks.releaseSlot(this);
+    this.hasSlot = false;
+  }
+
+  private think(dtSec: number, player: Vector3): void {
     this.stateSec += dtSec;
-    this.sinceHitSec += dtSec;
     if (this.state === 'falling') {
       if (this.stateSec >= standInConfig.fallTimeSec) this.setState('down');
       return;
@@ -512,7 +545,10 @@ export class StandInEnemy implements Target {
       this.engaged = false;
       this.faceLastKnown(dtSec); // it watches where Rook was, never turning its back on him (decision 213)
       this.peekTimerSec -= dtSec;
-      if (this.peekTimerSec <= 0) this.startTell(point);
+      if (this.peekTimerSec > 0) return;
+      // A peek is a burst: it needs a firing slot from the tell on. With none free it stays in and asks again shortly.
+      if (this.takeSlot()) this.startTell(point);
+      else this.peekTimerSec = squadConfig.slotRetrySec;
       return;
     }
     this.peekTimerSec -= dtSec;
@@ -707,15 +743,18 @@ export class StandInEnemy implements Target {
    */
   private aimedShot(hitShare: number): StandInShot {
     if (!this.contacted) return 'miss';
-    // shortcut: the hit budget is kept per enemy; the squad coordinator (4.6) shares it across every enemy.
-    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.sinceHitSec >= standInConfig.hitGapSec;
-    if (hits) this.sinceHitSec = 0;
+    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.hooks.mayHit(); // the squad's hit budget
+    if (hits) this.hooks.hitLanded();
     return hits ? 'hit' : 'miss';
   }
 
   private shoot(dtSec: number, hitShare: number): void {
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
+    if (!this.takeSlot()) {
+      this.cooldownSec = 0; // all firing slots are busy: keep aiming and fire as soon as one is free
+      return;
+    }
     this.hooks.fire(this, this.aimedShot(hitShare));
     this.roundsInBurst++;
     if (this.roundsInBurst >= standInConfig.burstRounds) {
@@ -773,7 +812,7 @@ export class StandInEnemy implements Target {
     this.knowsWhere = false;
     this.lastKnownAgeSec = Infinity;
     this.grenadeSeen = false;
-    this.sinceHitSec = Infinity;
+    this.giveSlotBack();
     this.contacted = false;
     this.path.length = 0;
     this.pathIndex = 0;

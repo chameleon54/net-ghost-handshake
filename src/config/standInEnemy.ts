@@ -67,8 +67,6 @@ export const standInConfigDefaults = {
   burstPauseSec: 1.2,
   /** The trooper's rifle (enemies.md). */
   damagePerHit: 15,
-  /** The hit budget: at most one damaging hit within this window. It never loosens (enemies.md). */
-  hitGapSec: 0.5,
   fallTimeSec: 0.4,
   /** Time down before it gets up at its spawn spot, awake. */
   respawnDelaySec: 5,

@@ -10,6 +10,7 @@ import { createRayHit, type LevelCollision } from '../level/collision';
 import type { CoverPoint, CoverPoints } from '../level/cover';
 import type { Navigation } from '../level/navigation';
 import { hitChance, missOffsetM, type Glimpse } from '../player/exposure';
+import { SquadCoordinator } from '../squad/squadCoordinator';
 import type { WeaponEvents } from '../weapons/events';
 import type { StandInEnemy, StandInHooks, StandInShot } from './standInEnemy';
 
@@ -74,7 +75,25 @@ export class StandInWorld implements StandInHooks {
     /** Where every live grenade is right now (the grenade system's `livePositions`). */
     private readonly liveGrenades: () => readonly Vector3[] = () => [],
     private readonly random: () => number = Math.random,
+    /** The squad it belongs to (firing slots, hit budget); a squad of its own by default. */
+    private readonly squad: SquadCoordinator = new SquadCoordinator(),
   ) {}
+
+  requestSlot(enemy: StandInEnemy): boolean {
+    return this.squad.requestSlot(enemy);
+  }
+
+  releaseSlot(enemy: StandInEnemy): void {
+    this.squad.releaseSlot(enemy);
+  }
+
+  mayHit(): boolean {
+    return this.squad.mayHit();
+  }
+
+  hitLanded(): void {
+    this.squad.hitLanded();
+  }
 
   /** It sees Rook if either his head (lean included) or his chest is in clear view of its eyes. */
   canSeePlayer(enemy: StandInEnemy): boolean {

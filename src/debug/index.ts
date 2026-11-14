@@ -16,6 +16,9 @@ import type { CoverPoints } from '../level/cover';
 import { coverConfig, coverConfigDefaults } from '../config/cover';
 import { exposureConfig, exposureConfigDefaults } from '../config/exposure';
 import type { Exposure } from '../player/exposure';
+import { squadConfig, squadConfigDefaults } from '../config/squad';
+import type { SquadCoordinator } from '../squad/squadCoordinator';
+import { EnemyLabels } from './enemyLabels';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -36,7 +39,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -60,7 +63,12 @@ interface Parts {
   heals: HealItems;
   /** Every sound the game plays goes through it, so the captions can list them. */
   soundTap: SoundTap;
-  standIn: StandInEnemy;
+  /** Every stand-in (A to D), and the ones in the room now (a list the game changes in place). */
+  standIns: readonly StandInEnemy[];
+  activeStandIns: readonly StandInEnemy[];
+  squad: SquadCoordinator;
+  /** Puts the squad back at its spawns, with the count from the Squad folder. */
+  respawnSquad: () => void;
   navigation: Navigation;
   coverPoints: CoverPoints;
   /** The game camera: Rook's eyes, for the cover overlay's colours. */
@@ -78,7 +86,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -115,9 +123,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', squad: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'exposure', 'freeCamera', 'status'] as const) {
+  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'squad', 'exposure', 'freeCamera', 'status'] as const) {
     readoutFolder.add(readouts, key).listen().disable();
   }
   readoutFolder.open();
@@ -141,6 +149,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(standInConfig, standInConfigDefaults);
       resetToDefaults(coverConfig, coverConfigDefaults);
       resetToDefaults(exposureConfig, exposureConfigDefaults);
+      resetToDefaults(squadConfig, squadConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -164,6 +173,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/standInEnemy.ts': changedValues(standInConfig, standInConfigDefaults),
           'src/config/cover.ts': changedValues(coverConfig, coverConfigDefaults),
           'src/config/exposure.ts': changedValues(exposureConfig, exposureConfigDefaults),
+          'src/config/squad.ts': changedValues(squadConfig, squadConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -232,13 +242,20 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   // The stand-in enemy (4.1): its starting values, and two testing aids.
   const standInPanel = gui.addFolder(standInFolder.title);
   standInPanel.close();
-  standInPanel.add(standIn, 'frozen').name('Freeze (stands still, holds fire)');
-  standInPanel.add({ respawn: () => standIn.reset() }, 'respawn').name('Respawn (idle, at its spot)');
-  const navOverlay = new NavOverlay(scene, navigation, standIn);
+  const freeze = { frozen: false };
+  standInPanel.add(freeze, 'frozen').name('Freeze all (stand still, hold fire)').onChange((on: boolean) => {
+    for (const standIn of standIns) standIn.frozen = on;
+  });
+  standInPanel.add({ respawn: respawnSquad }, 'respawn').name('Respawn all (idle, at their spots)');
+  const navOverlay = new NavOverlay(scene, navigation, activeStandIns);
   standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
-  standInPanel.add(navOverlay, 'pathShown').name('Show stand-in route');
-  const coverOverlay = new CoverOverlay(scene, coverPoints, standIn, camera.position);
+  standInPanel.add(navOverlay, 'pathShown').name('Show stand-in routes');
+  const coverOverlay = new CoverOverlay(scene, coverPoints, activeStandIns, camera.position);
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
+  const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
+  standInPanel.add(labels, 'shown').name('Show labels (orange: firing slot)');
+  const squadPanel = standInPanel.addFolder(squadFolder.title);
+  for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();
@@ -332,7 +349,12 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
-    readouts.enemy = `${standIn.state}${standIn.crouched ? ' (crouched)' : ''}${standIn.wounded ? ' (wounded)' : ''}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
+    const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
+    readouts.enemy = activeStandIns
+      .map((s, i) => `${letter(i)} ${s.state}${s.crouched ? ' (c)' : ''}${s.wounded ? ' (w)' : ''} ${s.health.current.toFixed(0)}`)
+      .join(', ');
+    const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
+    readouts.squad = `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? `: ${firing.join(', ')}` : ''}`;
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
@@ -350,6 +372,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       updateReadouts(dtSec);
       navOverlay.update();
       coverOverlay.update(dtSec);
+      labels.update();
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);

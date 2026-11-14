@@ -19,12 +19,14 @@ const checksPerSec = 5; // the "hides from you" colours are rays, so they are no
 
 // Dev-only overlay for 4.3 and 4.4 (architecture.md, "debug overlays"): a post at each cover point, short for low cover and
 // tall for high, with an arrow toward the cover and, on high cover, a white bar toward each side a peek can step out to.
-// Green: it hides a body from you right now. Red: it does not. A yellow ring marks the spot the stand-in has chosen.
+// Green: it hides a body from you right now. Red: it does not. A yellow ring marks the spot each stand-in has chosen.
 // Hidden until the dev panel tick shows it.
 export class CoverOverlay {
   private readonly group = new THREE.Group();
   private readonly posts: THREE.Mesh[] = [];
-  private readonly ring: THREE.Mesh;
+  private readonly rings: THREE.Mesh[] = [];
+  private readonly ringGeometry = new THREE.RingGeometry(ringInnerM, ringOuterM, 24).rotateX(-Math.PI / 2);
+  private readonly ringMaterial = new THREE.MeshBasicMaterial({ color: chosenColour, side: THREE.DoubleSide });
   private readonly hidesMaterial = new THREE.MeshBasicMaterial({ color: hidesColour });
   private readonly exposedMaterial = new THREE.MeshBasicMaterial({ color: exposedColour });
   private readonly sideMaterial = new THREE.MeshBasicMaterial({ color: sideColour });
@@ -33,7 +35,8 @@ export class CoverOverlay {
   constructor(
     scene: THREE.Scene,
     private readonly cover: CoverPoints,
-    private readonly standIn: StandInEnemy,
+    /** The stand-ins in the room (the list may change). */
+    private readonly standIns: readonly StandInEnemy[],
     /** Your eyes (the camera). */
     private readonly eyes: THREE.Vector3,
   ) {
@@ -59,12 +62,6 @@ export class CoverOverlay {
       this.posts.push(post);
       this.group.add(post);
     }
-    this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(ringInnerM, ringOuterM, 24).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: chosenColour, side: THREE.DoubleSide }),
-    );
-    this.ring.position.y = liftM;
-    this.group.add(this.ring);
     this.group.visible = false;
     scene.add(this.group);
   }
@@ -81,9 +78,16 @@ export class CoverOverlay {
   /** Once per screen frame. */
   update(dtSec: number): void {
     if (!this.group.visible) return;
-    const chosen = this.standIn.cover;
-    this.ring.visible = chosen !== null;
-    if (chosen) this.ring.position.set(chosen.xM, liftM, chosen.zM);
+    while (this.rings.length < this.standIns.length) {
+      const ring = new THREE.Mesh(this.ringGeometry, this.ringMaterial);
+      this.rings.push(ring);
+      this.group.add(ring);
+    }
+    this.rings.forEach((ring, i) => {
+      const chosen = this.standIns[i]?.cover ?? null;
+      ring.visible = chosen !== null;
+      if (chosen) ring.position.set(chosen.xM, liftM, chosen.zM);
+    });
     this.timerSec -= dtSec;
     if (this.timerSec > 0) return;
     this.timerSec = 1 / checksPerSec;
