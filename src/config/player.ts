@@ -80,16 +80,26 @@ export const playerConfigDefaults = {
   mantleProbeStepM: 0.1,
   /** How far past the far edge the capsule's surface lands after a vault. */
   vaultLandingMarginM: 0.15,
-  /** How far above the top the body rises while vaulting. */
-  vaultApexClearanceM: 0.15,
-  /** Vault: rise to the top, then over. About 0.4 s in total. */
-  vaultRiseSec: 0.18,
-  vaultOverSec: 0.22,
-  /** Climbing onto a low obstacle (Space held): rise, then onto the top. About 0.4 s. */
-  climbLowTopSec: 0.2,
-  /** Climbing a tall ledge: a slow rise, then onto the top. About 0.7 s. */
-  climbRiseSec: 0.45,
-  climbTopSec: 0.25,
+  /** A vault is one smooth arc, forward and up a little. It crosses at the speed the player came in with, but never slower than this. */
+  vaultMinSpeedMps: 3.0,
+  /** A vault never takes less or more time than this (a sprint-vault is about the shortest, a standing vault the longest). */
+  vaultMinSec: 0.3,
+  vaultMaxSec: 0.6,
+  /** How far the body lifts in the middle of a vault over the highest vaultable obstacle. In first person this is the camera's bob. */
+  vaultArcHeightM: 0.4,
+  /** The same lift over the lowest obstacle (the lift grows with the obstacle's height between the two). */
+  vaultArcMinHeightM: 0.25,
+  /** A tap vaults at once; if Space is still held this long into a vault, it turns into climbing onto the obstacle instead. */
+  vaultHoldDecisionSec: 0.12,
+  /** Climbing onto a low obstacle (Space held): the time from wherever you are, up and onto the top. */
+  climbLowSec: 0.4,
+  /** Climbing a tall ledge (1.1 to 2.0 m): one smooth motion from where you are to the top. About 0.7 s. */
+  climbHighSec: 0.7,
+  /**
+   * How much the forward movement of a climb lags behind the rise. 1 is a straight diagonal; higher means you rise
+   * along the face first and pull over the edge later. Keep it at 1 or more, or the camera could pass through the obstacle's face.
+   */
+  climbForwardLag: 1.5,
 
   // Collision and spawn
   /** How many times per update the player is pushed out of walls. More resolves tight corners. */

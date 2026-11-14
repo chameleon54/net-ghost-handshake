@@ -45,6 +45,15 @@ export class StanceMachine {
     return this.settings.slideStartSpeedMps + (this.settings.slideEndSpeedMps - this.settings.slideStartSpeedMps) * progress;
   }
 
+  /** Back to standing, with no slide and no cooldown (instant restart). */
+  reset(): void {
+    this.stance = 'standing';
+    this.sprinting = false;
+    this.slideStarted = false;
+    this.slideElapsedSec = 0;
+    this.cooldownLeftSec = 0;
+  }
+
   /** `measuredSpeedMps` is how fast the player really moved last update, after walls. */
   update(input: StanceInput, dtSec: number, measuredSpeedMps: number): void {
     this.slideStarted = false;

@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { inputConfig } from '../config/input';
+import { healthConfig } from '../config/health';
 import { playerConfig } from '../config/player';
 import type { Input } from '../core/input';
 import type { LevelCollision } from '../level/collision';
+import { fallSlowSec } from './fall';
 import { HeadPlacer } from './head';
 import { easeToward, limitLean, rollForLean, wantedLean } from './lean';
 import { LedgeProbe, Mantle, type Spot } from './mantle';
@@ -26,8 +28,20 @@ export class Player {
   readonly stance = new StanceMachine();
   readonly mantle = new Mantle();
 
+  /** Share of normal walking speed, set by aiming down sights. Does not affect slides, climbs or vaults. */
+  speedScale = 1;
+
   /** True when standing on the floor or on something. */
   grounded = true;
+
+  /** Set by the game while the hands are busy (using a heal): no sprinting and no climbing or vaulting. */
+  handsBusy = false;
+
+  /** Called when the player lands after being in the air, with the downward speed. The game uses it for fall damage. */
+  onLanded: (speedMps: number) => void = () => {};
+
+  /** Seconds of slowed walking left after a hard landing. */
+  private slowLeftSec = 0;
 
   private readonly previousPosition = this.position.clone();
   private readonly velocity: Vec2 = { x: 0, z: 0 };
@@ -73,8 +87,31 @@ export class Player {
     return this.eyeHeightM;
   }
 
+  /** True while a hard landing still slows walking and forbids sprinting. */
+  get slowed(): boolean {
+    return this.slowLeftSec > 0;
+  }
+
+  /** Back to the start spot, standing still, looking the starting way (instant restart). */
+  respawn(): void {
+    this.position.set(playerConfig.startXM, 0, playerConfig.startZM);
+    this.previousPosition.copy(this.position);
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+    this.velocityYMps = 0;
+    this.grounded = true;
+    this.slowLeftSec = 0;
+    this.stance.reset();
+    this.mantle.cancel();
+    this.yawRad = playerConfig.startYawRad;
+    this.pitchRad = 0;
+    this.eyeHeightM = this.previousEyeHeightM = playerConfig.eyeHeightM;
+    this.leanOffsetM = this.previousLeanOffsetM = 0;
+  }
+
   /** One fixed-rate update: read the keys, pick a stance, move, fall, climb, get pushed out of walls. */
   fixedUpdate(dtSec: number, input: Input): void {
+    this.slowLeftSec = Math.max(this.slowLeftSec - dtSec, 0);
     this.previousPosition.copy(this.position);
     this.previousEyeHeightM = this.eyeHeightM;
     this.previousLeanOffsetM = this.leanOffsetM;
@@ -83,7 +120,7 @@ export class Player {
     const spacePressed = input.consumePress('Space');
     const crouchPressed = input.consumePress('KeyC');
 
-    if (spacePressed && this.grounded && !this.mantle.active && this.stance.stance !== 'sliding') this.tryStartMantle();
+    if (spacePressed && this.grounded && !this.handsBusy && !this.mantle.active && this.stance.stance !== 'sliding') this.tryStartMantle();
 
     if (this.mantle.active) {
       this.updateMantle(dtSec, input);
@@ -113,7 +150,7 @@ export class Player {
       {
         crouchHeld: input.isKeyDown('KeyC'),
         crouchPressed,
-        sprintHeld: input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight'),
+        sprintHeld: !this.slowed && !this.handsBusy && (input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight')),
         forwardInput: forward,
         canStand,
       },
@@ -137,7 +174,8 @@ export class Player {
         : this.stance.stance === 'crouching'
           ? playerConfig.crouchSpeedMps
           : playerConfig.moveSpeedMps;
-      accelerate(this.velocity, this.wish, maxSpeedMps, playerConfig.accelerationMps2, playerConfig.brakingMps2, dtSec);
+      const slowScale = this.slowed ? healthConfig.fallSlowSpeedShare : 1;
+      accelerate(this.velocity, this.wish, maxSpeedMps * this.speedScale * slowScale,playerConfig.accelerationMps2, playerConfig.brakingMps2, dtSec);
     }
 
     this.position.x += this.velocity.x * dtSec;
@@ -153,6 +191,8 @@ export class Player {
       playerConfig.collisionIterations,
       true,
     );
+    const wasGrounded = this.grounded;
+    const impactMps = -this.velocityYMps;
     if (this.position.y < 0) {
       this.position.y = 0;
       this.grounded = true;
@@ -163,6 +203,11 @@ export class Player {
     } else {
       this.grounded = false;
       if (contact.down && this.velocityYMps > 0) this.velocityYMps = 0;
+    }
+    // Coming down onto something after being in the air: a hard landing slows walking and may hurt (health.ts decides).
+    if (this.grounded && !wasGrounded) {
+      this.slowLeftSec = Math.max(this.slowLeftSec, fallSlowSec(impactMps));
+      this.onLanded(impactMps);
     }
 
     // Speed is whatever movement survived the walls, so pressing into a wall does not store up speed.
@@ -214,16 +259,24 @@ export class Player {
     this.leanOffsetM = limitLean(easedM, side, wallDistanceM, clearanceM);
   }
 
-  /** Turn with the mouse. Called once per screen frame. */
-  look(input: Input): void {
+  /** How far the view turned in the last `look` call: left and up are positive. The weapon sways with it. */
+  lookYawDeltaRad = 0;
+  lookPitchDeltaRad = 0;
+
+  /** Turn with the mouse. Called once per screen frame. `sensitivityScale` slows the turn while aiming. */
+  look(input: Input, sensitivityScale = 1): void {
     input.consumeMouseMove(this.mouseMove);
-    this.yawRad -= this.mouseMove.x * inputConfig.mouseSensitivityRadPerPx;
-    this.pitchRad -= this.mouseMove.y * inputConfig.mouseSensitivityRadPerPx;
+    const radPerPx = inputConfig.mouseSensitivityRadPerPx * sensitivityScale;
+    const pitchBefore = this.pitchRad;
+    this.lookYawDeltaRad = -this.mouseMove.x * radPerPx;
+    this.yawRad += this.lookYawDeltaRad;
+    this.pitchRad -= this.mouseMove.y * radPerPx;
     this.pitchRad = Math.max(-inputConfig.pitchLimitRad, Math.min(inputConfig.pitchLimitRad, this.pitchRad));
+    this.lookPitchDeltaRad = this.pitchRad - pitchBefore;
   }
 
   /** Place the camera. `alpha` blends between the last two updates so motion is smooth on fast screens. */
-  applyToCamera(camera: THREE.PerspectiveCamera, alpha: number): void {
+  applyToCamera(camera: THREE.PerspectiveCamera, alpha: number, kickPitchRad = 0, kickYawRad = 0): void {
     const wantedLeanM = this.previousLeanOffsetM + (this.leanOffsetM - this.previousLeanOffsetM) * alpha;
     const feetY = this.previousPosition.y + (this.position.y - this.previousPosition.y) * alpha;
     // The head position is checked against walls every frame with this frame's facing, so turning cannot clip it into one.
@@ -236,9 +289,10 @@ export class Player {
       this.headPosition,
     );
     camera.position.copy(this.headPosition);
+    // Weapon recoil is added on top of the mouse angles, never stored in them, so it settles back by itself.
     camera.rotation.set(
-      this.pitchRad,
-      this.yawRad,
+      this.pitchRad + kickPitchRad,
+      this.yawRad + kickYawRad,
       rollForLean(leanM, playerConfig.leanDistanceM, playerConfig.leanRollRad),
       'YXZ',
     );

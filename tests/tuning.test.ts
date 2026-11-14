@@ -1,16 +1,151 @@
 import { describe, expect, it } from 'vitest';
 import { inputConfigDefaults } from '../src/config/input';
 import { playerConfigDefaults } from '../src/config/player';
+import { audioConfigDefaults } from '../src/config/audio';
+import { grenadeConfigDefaults } from '../src/config/grenade';
+import { noiseConfigDefaults } from '../src/config/noise';
+import { casingConfigDefaults } from '../src/config/casing';
+import { dummyConfigDefaults } from '../src/config/dummy';
+import { knifeConfigDefaults } from '../src/config/knife';
+import { pistolConfigDefaults } from '../src/config/pistol';
+import { rifleConfigDefaults } from '../src/config/rifle';
+import { viewmodelConfigDefaults } from '../src/config/viewmodel';
 import {
   changedValues,
   inputFolder,
   playerFolders,
+  audioFolder,
+  grenadeFolder,
+  grenadeKeysNotOnPanel,
+  noiseFolder,
+  casingFolder,
+  dummyFolder,
+  dummyKeysNotOnPanel,
+  knifeFolder,
+  pistolFolders,
+  pistolKeysNotOnPanel,
   playerKeysNotOnPanel,
+  rifleFolders,
+  rifleKeysNotOnPanel,
+  viewmodelFolders,
+  viewmodelKeysNotOnPanel,
   resetToDefaults,
   toCodeSnippet,
 } from '../src/debug/tuning';
 
 const playerSliders = playerFolders.flatMap((folder) => folder.sliders);
+
+describe('the rifle tuning panel', () => {
+  const sliders = rifleFolders.flatMap((folder) => folder.sliders);
+
+  it('has a sensible range around every default, and every rifle value is listed or excluded on purpose', () => {
+    for (const s of sliders) {
+      expect(Object.keys(rifleConfigDefaults)).toContain(s.key);
+      expect(s.min).toBeLessThan(s.max);
+      expect(rifleConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(rifleConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...rifleKeysNotOnPanel]);
+    for (const key of Object.keys(rifleConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the pistol and knife tuning panels', () => {
+  const check = (
+    sliders: { key: string; min: number; max: number }[],
+    defaults: Record<string, number>,
+    excluded: readonly string[],
+  ) => {
+    for (const s of sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(defaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(defaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...excluded]);
+    for (const key of Object.keys(defaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  };
+
+  it('list every pistol value or exclude it on purpose', () => {
+    check(pistolFolders.flatMap((f) => f.sliders), pistolConfigDefaults, pistolKeysNotOnPanel);
+  });
+
+  it('list every knife value', () => {
+    check(knifeFolder.sliders, knifeConfigDefaults, []);
+  });
+});
+
+describe('the weapon animation tuning panel', () => {
+  it('has a sensible range around every default, and every animation value is listed or excluded on purpose', () => {
+    const sliders = viewmodelFolders.flatMap((f) => f.sliders);
+    for (const s of sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(viewmodelConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(viewmodelConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...sliders.map((s) => s.key), ...viewmodelKeysNotOnPanel]);
+    for (const key of Object.keys(viewmodelConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the noise tuning panel', () => {
+  it('lists every noise radius with a sensible range around its default', () => {
+    for (const s of noiseFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(noiseConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(noiseConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(noiseFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(noiseConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the grenade tuning panel', () => {
+  it('has a sensible range around every default, and every grenade value is listed or excluded on purpose', () => {
+    for (const s of grenadeFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(grenadeConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(grenadeConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>([...grenadeFolder.sliders.map((s) => s.key), ...grenadeKeysNotOnPanel]);
+    for (const key of Object.keys(grenadeConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the audio tuning panel', () => {
+  it('lists every audio value with a sensible range around its default', () => {
+    for (const s of audioFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(audioConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(audioConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(audioFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(audioConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the casing tuning panel', () => {
+  it('lists every casing value with a sensible range around its default', () => {
+    for (const s of casingFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(casingConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(casingConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const listed = new Set<string>(casingFolder.sliders.map((s) => s.key));
+    for (const key of Object.keys(casingConfigDefaults)) expect(listed.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the dummy tuning panel', () => {
+  it('has a sensible range around every default, and every dummy value is listed or excluded on purpose', () => {
+    for (const s of dummyFolder.sliders) {
+      expect(s.min).toBeLessThan(s.max);
+      expect(dummyConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(dummyConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...dummyFolder.sliders.map((s) => s.key), ...dummyKeysNotOnPanel]);
+    for (const key of Object.keys(dummyConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
 
 describe('the tuning panel lists', () => {
   it('only keys that exist in the config, each once', () => {

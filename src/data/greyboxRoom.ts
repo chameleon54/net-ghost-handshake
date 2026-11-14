@@ -2,11 +2,25 @@
 // Interior is 16 m (x) by 12 m (z), centred on 0,0. Heights follow the bands in level.md:
 // low cover about 1.0 m, climbable 1.1-2.0 m, wall above 2.0 m.
 
+/** What a floor or the top of a prop is made of. It decides which footstep sound plays (audio.md). */
+export type Surface = 'concrete' | 'metal' | 'tile';
+
+/** A patch of floor with its own surface. Anywhere not covered is concrete. */
+export interface FloorZone {
+  xM: number;
+  zM: number;
+  widthM: number;
+  depthM: number;
+  surface: Surface;
+}
+
 export interface RoomBox {
   kind: 'wall' | 'prop' | 'marker';
   /** Centre of the box on the floor. */
   xM: number;
   zM: number;
+  /** What the top of this box is made of, for footsteps. Leave out for the default: props metal, walls concrete. */
+  surface?: Surface;
   /** Whether Space can climb or vault it. Leave out for the default: props yes, walls no (so nobody climbs out of the room). */
   climbable?: boolean;
   /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
@@ -21,6 +35,22 @@ export function isClimbable(box: RoomBox): boolean {
 }
 
 export const greyboxRoomSize = { widthM: 16, depthM: 12 } as const;
+
+/** A flat pad on the floor that hurts whoever stands on it (milestone 3.1's test hazard). */
+export interface HazardPad {
+  xM: number;
+  zM: number;
+  widthM: number;
+  depthM: number;
+}
+
+/** The floor: concrete everywhere except these patches, so each footstep sound can be heard (milestone 3.4). */
+export const greyboxFloors: readonly FloorZone[] = [
+  { xM: -5.5, zM: 4.8, widthM: 4, depthM: 2.4, surface: 'tile' },
+  { xM: 4.7, zM: 4.6, widthM: 3, depthM: 2.8, surface: 'metal' },
+];
+
+export const greyboxHazards: readonly HazardPad[] = [{ xM: 6, zM: -0.5, widthM: 2, depthM: 2 }];
 
 export const greyboxRoom: readonly RoomBox[] = [
   // Outer walls, 0.3 m thick and 3 m tall, just outside the interior.
@@ -47,5 +77,9 @@ export const greyboxRoom: readonly RoomBox[] = [
   // For climbing: a 1.9 m platform (the highest ledge that can be climbed, limit 2.0 m)
   // and a low beam over a corridor, 1.3 m up: you fit under it crouched (1.2 m) but not standing (1.8 m).
   { kind: 'prop', xM: -2, zM: -4, widthM: 2, depthM: 2, heightM: 1.9 }, // leaves a 1 m walkway behind it; a gap narrower than the player would trap them
+  // A second 1.9 m platform stacked on the west edge of the first (x -3 to -2.3): its top is 3.8 m up, for testing falls
+  // (decision 115). Climb the first from the south at x -2 or east of it (from the west it is blocked overhead), stand on its
+  // free part, then climb this one facing west.
+  { kind: 'prop', xM: -2.65, zM: -4, yM: 1.9, widthM: 0.7, depthM: 2, heightM: 1.9 },
   { kind: 'prop', xM: 6.2, zM: -3.5, yM: 1.3, widthM: 3, depthM: 2, heightM: 0.8 },
 ];

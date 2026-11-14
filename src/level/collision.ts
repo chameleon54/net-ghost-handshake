@@ -9,6 +9,18 @@ export interface Contact {
   down: boolean;
 }
 
+/** Where a bullet ray hit. Reused between calls, so read it straight away and do not keep it. */
+export interface RayHit {
+  distanceM: number;
+  point: Vector3;
+  /** Unit vector pointing out of the surface, toward the shooter. */
+  normal: Vector3;
+}
+
+export function createRayHit(): RayHit {
+  return { distanceM: 0, point: new Vector3(), normal: new Vector3() };
+}
+
 // Static level collision: a BVH (a fast spatial index) over every wall and prop triangle.
 // The floor is not in here; the player code treats height 0 as the floor.
 // shortcut: no continuous collision. To get through a surface the capsule would have to move more than its own width (0.6 m)
@@ -45,6 +57,36 @@ export class LevelCollision {
     this.ray.direction.copy(direction);
     const hit = bvh.raycastFirst(this.ray, DoubleSide, 0, maxDistanceM);
     return hit ? hit.distance : Infinity;
+  }
+
+  /**
+   * A bullet ray: finds the first wall, prop or the floor within `maxDistanceM` and writes where into `out`.
+   * Returns false (leaving `out` alone) if nothing was hit. `direction` must be a unit vector.
+   */
+  raycast(origin: Vector3, direction: Vector3, maxDistanceM: number, out: RayHit): boolean {
+    this.ray.origin.copy(origin);
+    this.ray.direction.copy(direction);
+    const hit = this.bvh.raycastFirst(this.ray, DoubleSide, 0, maxDistanceM);
+    let found = false;
+    if (hit) {
+      out.distanceM = hit.distance;
+      out.point.copy(hit.point);
+      // A box face seen from outside has its normal toward the shooter; flip it if the ray came from behind.
+      out.normal.copy(hit.face!.normal);
+      if (out.normal.dot(direction) > 0) out.normal.negate();
+      found = true;
+    }
+    // The floor is not in the BVH (see the class comment), so test the plane y = 0 here.
+    if (direction.y < 0 && origin.y > 0) {
+      const floorDistanceM = -origin.y / direction.y;
+      if (floorDistanceM <= maxDistanceM && (!found || floorDistanceM < out.distanceM)) {
+        out.distanceM = floorDistanceM;
+        out.point.copy(direction).multiplyScalar(floorDistanceM).add(origin);
+        out.normal.set(0, 1, 0);
+        found = true;
+      }
+    }
+    return found;
   }
 
   /**
