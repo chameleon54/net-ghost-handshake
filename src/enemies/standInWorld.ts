@@ -560,6 +560,24 @@ export class StandInWorld implements StandInHooks {
     );
   }
 
+  pickNearestCover(enemy: StandInEnemy): CoverPoint | null {
+    let best: CoverPoint | null = null;
+    let bestWalkM = Infinity;
+    for (const point of this.coverPoints.points) {
+      const holder = this.coverPoints.claimedBy(point);
+      if (point === enemy.cover || (holder && holder !== enemy)) continue;
+      if (!this.coverPoints.hides(point, this.viewEyes)) continue;
+      const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
+      if (walk < bestWalkM) {
+        best = point;
+        bestWalkM = walk;
+      }
+    }
+    if (best) this.coverPoints.claim(best, enemy);
+    else this.coverPoints.release(enemy);
+    return best;
+  }
+
   coverHides(point: CoverPoint): boolean {
     return this.coverPoints.hides(point, this.viewEyes);
   }

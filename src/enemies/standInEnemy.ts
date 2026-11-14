@@ -49,6 +49,11 @@ export interface StandInHooks {
   coverHides(point: CoverPoint): boolean;
   /** Lets go of the spot it holds. */
   releaseCover(enemy: StandInEnemy): void;
+  /**
+   * The nearest free spot by walking (not its own) that hides it from Rook, claimed for it (its old one let go), or null
+   * if none does: where it heads after a flinch on the move (decision 246).
+   */
+  pickNearestCover(enemy: StandInEnemy): CoverPoint | null;
   /** The nearest live grenade it can see within `radiusM` of its feet, written into `out`. False if there is none. */
   spotGrenade(enemy: StandInEnemy, radiusM: number, out: Vector3): boolean;
   /** True if any live grenade is within `radiusM` of `point` (seen or not). */
@@ -219,6 +224,15 @@ export class StandInEnemy implements Target {
   /** On a hunt move: true if it leads the hunt (it goes at its flank speed). */
   private huntLeads = false;
   /**
+   * The flinch (decision 246): its own clock, the damage it took and when, the flinch time left, until when it cannot
+   * flinch again, and whether it is heading for cover after a flinch (panic fire).
+   */
+  private clockSec = 0;
+  private readonly recentHits: { atSec: number; damage: number }[] = [];
+  private flinchLeftSec = 0;
+  private flinchFreeAtSec = 0;
+  private panicking = false;
+  /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
    */
@@ -375,11 +389,66 @@ export class StandInEnemy implements Target {
     const killed = this.health.damage(bodyDamage);
     if (killed) this.die();
     else if (this.state === 'idle') this.wake();
-    else if (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire') {
-      this.wantsMove = true; // hurt while peeking: this spot is known, it moves on after (decision 237)
-      if (this.pressing) this.startPeekBack(); // a flank attack or suppressing: back in at once
+    else {
+      if (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire') {
+        this.wantsMove = true; // hurt while peeking: this spot is known, it moves on after (decision 237)
+        if (this.pressing) this.startPeekBack(); // a flank attack or suppressing: back in at once
+      }
+      this.countDamage(bodyDamage);
     }
     return killed;
+  }
+
+  /** True during a flinch (decision 246). */
+  get flinching(): boolean {
+    return this.flinchLeftSec > 0;
+  }
+
+  /** How far into its tip back a flinch is: 1 as it starts, easing to 0 as it ends. Drawing only. */
+  get flinchShare(): number {
+    return standInConfig.flinchSec > 0 ? Math.max(this.flinchLeftSec, 0) / standInConfig.flinchSec : 0;
+  }
+
+  /** Adds a hit to the damage within the flinch window; enough of it, and it flinches (decision 246). */
+  private countDamage(damage: number): void {
+    const hits = this.recentHits;
+    hits.push({ atSec: this.clockSec, damage });
+    while (hits.length > 0 && hits[0].atSec < this.clockSec - standInConfig.flinchWindowSec) hits.shift();
+    const totalDamage = hits.reduce((sum, hit) => sum + hit.damage, 0);
+    if (totalDamage >= this.values.flinchDamage && this.clockSec >= this.flinchFreeAtSec) this.flinch();
+  }
+
+  /**
+   * Heavy damage (decision 246): its burst is cut off and it slows for a moment. Peeking, it ducks back in, holds longer
+   * and moves on after. On the move, it drops its spot and heads for the nearest cover, firing back as it goes (panic
+   * fire); with none, it fights where it stands. Standing its ground, it only flinches; running from a grenade, not even that.
+   */
+  private flinch(): void {
+    if (this.state === 'flee') return;
+    const { flinchSec, flinchImmuneSec } = standInConfig;
+    this.recentHits.length = 0;
+    this.flinchLeftSec = flinchSec;
+    this.flinchFreeAtSec = this.clockSec + flinchSec + flinchImmuneSec;
+    this.roundsInBurst = 0; // the burst is cut off...
+    this.cooldownSec = Math.max(this.cooldownSec, flinchSec); // ...and nothing fires during the flinch
+    const peeking = this.state === 'cover' && (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire');
+    if (peeking) {
+      this.pinnedByRook = true; // its next hold is longer
+      this.wantsMove = true;
+      this.startPeekBack();
+      return;
+    }
+    const moving = ['flank', 'advance', 'hunt', 'approach', 'retreat'].includes(this.state);
+    if (!moving) return;
+    const next = this.hooks.pickNearestCover(this);
+    if (!next) {
+      this.leaveCover();
+      this.beginFight();
+      return;
+    }
+    this.setCover(next);
+    this.setState('retreat'); // a squad move it was on ends here, and the squad hears of it
+    this.panicking = true;
   }
 
   kill(): boolean {
@@ -397,6 +466,8 @@ export class StandInEnemy implements Target {
 
   /** Once per game update, after the player has moved. `player` is Rook's feet. */
   update(dtSec: number, player: Vector3): void {
+    this.clockSec += dtSec;
+    this.flinchLeftSec = Math.max(this.flinchLeftSec - dtSec, 0);
     this.think(dtSec, player);
     if (this.hasSlot && !this.inBurst) this.giveSlotBack(); // a slot covers one burst, and goes back whatever ended it
   }
@@ -496,8 +567,14 @@ export class StandInEnemy implements Target {
       // Once it holds a spot it stays holding (a peek moves it off the spot and back) until it picks another.
       const toCoverM = Math.hypot(this.coverSpot.x - this.feet.x, this.coverSpot.z - this.feet.z);
       if (this.state !== 'cover' && toCoverM > standInConfig.coverArriveM) {
-        this.startWalking();
-        if (!this.walkRoute(dtSec, this.coverSpot)) this.giveUpWalk(); // drop the spot; pick again straight away
+        // It runs between cover; the heavy walks and fires as it goes (decision 246).
+        if (this.state !== 'approach') this.startWalking(); // once: starting a walk resets its aim
+        const firing = this.firesOnTheMove;
+        if (!this.walkRoute(dtSec, this.coverSpot, this.values.runSpeedMps, !firing)) {
+          this.giveUpWalk(); // drop the spot; pick again straight away
+          return;
+        }
+        if (firing) this.fireOnTheMove(dtSec, dx, dz);
         return;
       }
       // At its spot: crouch behind low cover, hold, and peek out every so often.
@@ -729,8 +806,9 @@ export class StandInEnemy implements Target {
         }
       }
     }
+    // Every move between cover is at least a run (decision 246); flanks and the hunt's leader go at their flank speed if faster.
     const fast = flanking || (this.state === 'hunt' && this.huntLeads);
-    const speedMps = fast ? this.values.flankSpeedMps : this.values.walkSpeedMps;
+    const speedMps = fast ? Math.max(this.values.flankSpeedMps, this.values.runSpeedMps) : this.values.runSpeedMps;
     if (!this.walkRoute(dtSec, this.coverSpot, speedMps, !firing)) {
       this.giveUpWalk();
       return;
@@ -812,7 +890,10 @@ export class StandInEnemy implements Target {
     else this.startWalking();
   }
 
-  /** Backs off to its new cover, slower, facing Rook and firing while it can see him (decision 210). */
+  /**
+   * Backs off to its new cover, slower, facing Rook and firing while it can see him (decision 210). After a flinch it runs
+   * there instead, firing back less accurately (panic fire, decision 246).
+   */
   private retreat(dtSec: number, dx: number, dz: number): void {
     if (!this.coverPoint) {
       this.leaveFight();
@@ -824,11 +905,13 @@ export class StandInEnemy implements Target {
       return;
     }
     const firing = this.seesPlayer;
-    if (!this.walkRoute(dtSec, this.coverSpot, this.values.walkSpeedMps * standInConfig.retreatSpeedShare, !firing)) {
+    const { retreatSpeedShare, retreatHitChanceShare, panicHitChanceShare } = standInConfig;
+    const speedMps = this.panicking ? this.values.runSpeedMps : this.values.walkSpeedMps * retreatSpeedShare;
+    if (!this.walkRoute(dtSec, this.coverSpot, speedMps, !firing)) {
       this.giveUpWalk(); // stop backing off and check its cover
       return;
     }
-    if (firing) this.engage(dtSec, dx, dz, standInConfig.retreatHitChanceShare);
+    if (firing) this.engage(dtSec, dx, dz, this.panicking ? panicHitChanceShare : retreatHitChanceShare);
     else this.engaged = false;
   }
 
@@ -1085,7 +1168,7 @@ export class StandInEnemy implements Target {
     if (facingErrorRad <= standInConfig.aimToleranceDeg * degToRad) this.shoot(dtSec, hitShare);
   }
 
-  /** Stands up and starts walking; it never fires on the move. */
+  /** Stands up and starts walking (a heavy walking to its cover fires as it goes, decision 246). */
   private startWalking(): void {
     this.crouched = false;
     this.engaged = false;
@@ -1116,7 +1199,7 @@ export class StandInEnemy implements Target {
       const next = this.path[this.pathIndex];
       this.turnToward(next.x - this.feet.x, next.z - this.feet.z, dtSec);
     }
-    let stepM = speedMps * dtSec;
+    let stepM = speedMps * dtSec * (this.flinching ? standInConfig.flinchSpeedShare : 1);
     while (stepM > 0 && this.pathIndex < this.path.length) {
       const next = this.path[this.pathIndex];
       const toX = next.x - this.feet.x;
@@ -1229,6 +1312,9 @@ export class StandInEnemy implements Target {
     this.endSuppress();
     this.pinnedByRook = false;
     this.contacted = false;
+    this.recentHits.length = 0;
+    this.flinchLeftSec = 0;
+    this.flinchFreeAtSec = 0;
     this.path.length = 0;
     this.pathIndex = 0;
   }
@@ -1239,6 +1325,7 @@ export class StandInEnemy implements Target {
     if (this.state === 'advance') this.hooks.advanceOver(this); // and an advance
     if (this.state === 'hunt') this.hooks.huntMoveOver(this); // and a hunt move
     this.endSuppress(); // suppressing only lives inside one stay in cover
+    this.panicking = false; // panic fire lives inside one run to cover
     this.state = state;
     this.stateSec = 0;
     this.walkGoal.set(Infinity, 0, Infinity); // a walk only counts within one state

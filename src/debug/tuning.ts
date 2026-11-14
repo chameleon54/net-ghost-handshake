@@ -489,6 +489,12 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'fightSec', label: 'Fights up close for (s)', min: 0, max: 10, step: 0.1 },
     { key: 'retreatSpeedShare', label: 'Backing off: speed (share of walk)', min: 0.1, max: 1, step: 0.05 },
     { key: 'retreatHitChanceShare', label: 'Backing off: hit chance (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'flinchWindowSec', label: 'Flinch: damage counts within (s)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'flinchSec', label: 'Flinch: lasts (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'flinchSpeedShare', label: 'Flinch: moves at (share of speed)', min: 0, max: 1, step: 0.05 },
+    { key: 'flinchTiltDeg', label: 'Flinch: tips back (deg)', min: 0, max: 45, step: 1 },
+    { key: 'flinchImmuneSec', label: 'Flinch: none again for (s)', min: 0, max: 10, step: 0.1 },
+    { key: 'panicHitChanceShare', label: 'Panic fire after a flinch: hit chance (share)', min: 0, max: 1, step: 0.05 },
     { key: 'peekHoldMinSec', label: 'Peek: holds at least (s)', min: 0.2, max: 15, step: 0.1 },
     { key: 'peekHoldMaxSec', label: 'Peek: holds at most (s)', min: 0.2, max: 20, step: 0.1 },
     { key: 'tellSec', label: 'Peek: tell lasts (s)', min: 0, max: 2, step: 0.05 },
@@ -557,12 +563,14 @@ export const exposureFolder: Folder<ExposureKey> = {
 /** The sliders for one role's values (4.8); the dev panel shows one folder of these per role. */
 export const roleSliders: Slider<RoleKey>[] = [
   { key: 'healthPoints', label: 'Health (from next spawn)', min: 1, max: 500, step: 1 },
-  { key: 'walkSpeedMps', label: 'Walk speed (m/s)', min: 0.2, max: 8, step: 0.1 },
+  { key: 'walkSpeedMps', label: 'Walk speed (m/s, backing off and the 4.1 walk)', min: 0.2, max: 8, step: 0.1 },
+  { key: 'runSpeedMps', label: 'Run speed between cover (m/s)', min: 0.2, max: 8, step: 0.1 },
   { key: 'flankSpeedMps', label: 'Flank speed (m/s, 0: never flanks)', min: 0, max: 8, step: 0.1 },
   { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 12, step: 1 },
   { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
   { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
   { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'flinchDamage', label: 'Flinches at this damage within the window', min: 1, max: 300, step: 1 },
 ];
 
 /** The sliders for one aggression tier's values (4.11); the dev panel shows one folder of these per tier. */

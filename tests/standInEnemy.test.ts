@@ -70,6 +70,8 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     /** Which peeks' guns can reach Rook's cover (way, side); all by default. And whether its own cover blocks its gun. */
     coverShotFrom: null as ((way: number, side: number) => boolean) | null,
     muzzleClear: true,
+    /** Where the nearest hiding cover is after a flinch on the move (none by default). */
+    nearestCover: null as CoverPoint | null,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -126,6 +128,7 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     hunting: () => squad.hunting,
     huntMoveOver: (e) => squad.huntMoveOver(e),
     huntHoldScale: (e) => squad.huntHoldScale(e),
+    pickNearestCover: () => world.nearestCover,
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -406,7 +409,7 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(enemy.cover).toBe(flankSpot);
     run(far, 1);
     expect(enemy.state).toBe('flank');
-    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.flankSpeedMps, 0);
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps), 0); // no slower than a run (decision 246)
     expect(shots).toHaveLength(0);
     expect(world.flankOvers).toBe(0);
     run(far, 2);
@@ -519,13 +522,13 @@ describe('StandInEnemy flanking (4.7)', () => {
     step(1);
     expect(members[2].enemy.state).toBe('flank');
     expect(members.filter((m) => m.enemy.state === 'flank')).toHaveLength(1);
-    step(4); // it arrives (7 m at the flank speed)
+    step(4); // it arrives
     expect(members[2].enemy.state).toBe('cover');
     expect(squad.flanker).toBeNull();
-    step(aggressionConfig.assertive.flankWaitSec - 1);
+    step(aggressionConfig.assertive.flankWaitSec - 1.5);
     const flanksSent = () => members.reduce((sum, m) => sum + m.world.claimed.length, 0);
     expect(flanksSent()).toBe(1); // nobody sent during the wait
-    step(1.5);
+    step(2);
     expect(flanksSent()).toBe(2); // the next flank, after the wait (the cheapest plan again)
   });
 });
@@ -597,7 +600,7 @@ describe('StandInEnemy suppressing and advancing (4.9)', () => {
     expect(shots.every((s) => s.shot !== 'suppress')).toBe(true);
   });
 
-  it('advancing: walks to its spot at its walking speed, is not turned back when seen, then holds as usual', () => {
+  it('advancing: runs to its spot (decision 246), is not turned back when seen, then holds as usual', () => {
     const { enemy, world, shots, run } = holding();
     world.rookSees = true;
     const next: CoverPoint = { xM: 5, zM: -3, height: 'low', facingYawRad: Math.PI };
@@ -605,7 +608,7 @@ describe('StandInEnemy suppressing and advancing (4.9)', () => {
     enemy.beginAdvance(next);
     run(far, 1);
     expect(enemy.state).toBe('advance');
-    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 0);
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.runSpeedMps, 0);
     run(far, 2);
     expect(enemy.state).toBe('cover');
     expect(world.advanceOvers).toBe(1);
@@ -1855,14 +1858,14 @@ describe('StandInEnemy on a hunt (decision 235)', () => {
     return s;
   };
 
-  it('the leader goes at its flank speed, a follower at its walking speed', () => {
+  it('the leader goes at its flank speed (no slower than a run), a follower at its run speed', () => {
     const leader = sent('trooper', true);
     leader.run(far, 1);
     expect(leader.enemy.state).toBe('hunt');
-    expect(-leader.enemy.zM).toBeCloseTo(roleConfig.trooper.flankSpeedMps, 1);
+    expect(-leader.enemy.zM).toBeCloseTo(Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps), 1);
     const follower = sent('trooper', false);
     follower.run(far, 1);
-    expect(-follower.enemy.zM).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 1);
+    expect(-follower.enemy.zM).toBeCloseTo(roleConfig.trooper.runSpeedMps, 1);
   });
 
   it("arriving, it holds cover there and the leader's look starts", () => {
@@ -1915,5 +1918,151 @@ describe('StandInWorld on a hunt: judged from the last known spot (decision 235)
     expect(world.coverHides(crateSpot)).toBe(true); // from where the squad thinks he is
     squad.watchKnowledge(1, true, true); // found him: real eyes again
     expect(world.coverHides(crateSpot)).toBe(false);
+  });
+});
+
+describe('StandInEnemy flinching under heavy fire (decision 246)', () => {
+  const far = new Vector3(0, 0, 10);
+  const next: CoverPoint = { xM: 0, zM: -10, height: 'low', facingYawRad: 0 };
+  const shelter: CoverPoint = { xM: 12, zM: 0, height: 'low', facingYawRad: 0 };
+  const rifleHit = 15;
+  /** An awake stand-in moving up north toward `next` in the fake world, Rook out of its sight. */
+  const advancing = (role: Role = 'trooper', roll = 0.99) => {
+    const s = setup(roll, new SquadCoordinator(), role);
+    s.world.sees = false;
+    s.world.nearestCover = shelter;
+    s.enemy.hit('body', 1); // wakes it (waking does not count toward a flinch)
+    s.run(far, 1);
+    s.enemy.beginAdvance(next);
+    s.run(far, 0.5);
+    expect(s.enemy.state).toBe('advance');
+    return s;
+  };
+
+  it('two quick rifle hits on the move: it flinches, drops its spot, and heads for the nearest cover, slowed at first', () => {
+    const { enemy, world, run } = advancing();
+    enemy.hit('body', rifleHit);
+    expect(enemy.flinching).toBe(false);
+    enemy.hit('body', rifleHit);
+    expect(enemy.flinching).toBe(true);
+    expect(enemy.state).toBe('retreat');
+    expect(enemy.cover).toBe(shelter);
+    expect(world.advanceOvers).toBe(1); // the squad hears its move is over
+    let before = enemy.feet.clone();
+    run(far, 0.25);
+    expect(enemy.feet.distanceTo(before)).toBeCloseTo(roleConfig.trooper.runSpeedMps * standInConfig.flinchSpeedShare * 0.25, 1);
+    run(far, standInConfig.flinchSec);
+    expect(enemy.flinching).toBe(false);
+    before = enemy.feet.clone();
+    run(far, 0.25);
+    expect(enemy.feet.distanceTo(before)).toBeCloseTo(roleConfig.trooper.runSpeedMps * 0.25, 1); // then it runs
+  });
+
+  it('hits further apart than the window do not add up', () => {
+    const { enemy, run } = advancing();
+    enemy.hit('body', rifleHit);
+    run(far, standInConfig.flinchWindowSec + 0.1);
+    enemy.hit('body', rifleHit);
+    expect(enemy.flinching).toBe(false);
+    expect(enemy.state).toBe('advance');
+  });
+
+  it('no stun lock: no second flinch until a while after one ends', () => {
+    const { enemy, run } = advancing();
+    enemy.hit('body', 2 * rifleHit);
+    expect(enemy.flinching).toBe(true);
+    run(far, standInConfig.flinchSec + 0.1);
+    enemy.hit('body', 2 * rifleHit);
+    expect(enemy.flinching).toBe(false);
+    run(far, standInConfig.flinchImmuneSec);
+    enemy.hit('body', 2 * rifleHit);
+    expect(enemy.flinching).toBe(true);
+  });
+
+  it('the heavy needs its own, larger flinch damage', () => {
+    const { enemy } = advancing('heavy');
+    enemy.hit('body', rifleHit);
+    enemy.hit('body', rifleHit);
+    expect(enemy.flinching).toBe(roleConfig.heavy.flinchDamage <= 2 * rifleHit);
+    enemy.hit('body', rifleHit);
+    enemy.hit('body', rifleHit);
+    expect(enemy.flinching).toBe(true);
+  });
+
+  it('with no cover that hides it, it fights where it stands', () => {
+    const { enemy, world } = advancing();
+    world.nearestCover = null;
+    enemy.hit('body', 2 * rifleHit);
+    expect(enemy.state).toBe('fight');
+  });
+
+  it('panic fire: on its way to cover it fires back when it sees Rook, at a quarter of the hit chance', () => {
+    // The roll (0.1) is under the backing-off hit chance (0.3 x 0.5) but over the panic one (0.3 x 0.25).
+    const { enemy, world, shots, run } = advancing('trooper', 0.1);
+    world.rookSees = true; // first contact made: its rounds may hit
+    run(far, dtSec * 2);
+    enemy.hit('body', 2 * rifleHit);
+    world.sees = true;
+    shots.length = 0;
+    run(far, 1.2);
+    expect(enemy.state).toBe('retreat');
+    expect(shots.length).toBeGreaterThan(0);
+    expect(shots.every((s) => !s.hits)).toBe(true);
+  });
+
+  it('peeking: it ducks straight back into cover and fires nothing more', () => {
+    const s = setup();
+    s.world.sees = false;
+    s.world.seenWhenOut = true;
+    s.world.cover = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+    s.enemy.hit('body', 1);
+    for (let i = 0; i < 600 && s.enemy.peekOut < 1; i++) s.run(far, dtSec);
+    expect(s.enemy.peekOut).toBe(1);
+    s.enemy.hit('body', 2 * rifleHit);
+    expect(s.enemy.flinching).toBe(true);
+    s.shots.length = 0;
+    s.run(far, standInConfig.peekBackSec + dtSec * 2);
+    expect(s.enemy.peekOut).toBe(0);
+    expect(s.shots).toHaveLength(0);
+  });
+
+  it('running from a grenade: no flinch, it keeps running', () => {
+    const { enemy, world, run } = advancing();
+    world.grenade = enemy.feet.clone();
+    run(far, standInConfig.grenadeReactionSec + 0.2);
+    expect(enemy.state).toBe('flee');
+    enemy.hit('body', 2 * rifleHit);
+    expect(enemy.flinching).toBe(false);
+    expect(enemy.state).toBe('flee');
+  });
+
+  it('the heavy fires while it walks to cover it picked itself; others run there without firing', () => {
+    const rook = new Vector3(0, 0, 30); // beyond standing-its-ground range
+    for (const role of ['heavy', 'trooper'] as const) {
+      const s = setup(0.99, new SquadCoordinator(), role);
+      s.world.cover = { xM: 0, zM: -20, height: 'low', facingYawRad: 0 };
+      s.enemy.hit('body', 1);
+      s.run(rook, 2);
+      expect(s.enemy.state, role).toBe('approach');
+      expect(s.shots.length > 0, role).toBe(role === 'heavy');
+    }
+  });
+});
+
+describe('StandInWorld: the nearest hiding cover after a flinch (decision 246)', () => {
+  // Rook at (0, 4); the stand-in at (0, -4). Two crates hide a spot each from him; the one by the stand-in is nearer.
+  const nearCrate: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 1, depthM: 1, heightM: 1 };
+  const nearSpot: CoverPoint = { xM: 0, zM: -1.95, height: 'low', facingYawRad: Math.PI };
+  const farCrate: RoomBox = { kind: 'prop', xM: 5, zM: 1, widthM: 1, depthM: 1, heightM: 1 };
+  const farSpot: CoverPoint = { xM: 5, zM: 0.05, height: 'low', facingYawRad: Math.PI };
+
+  it('picks the hiding spot with the shortest walk, and claims it', async () => {
+    const level = buildGreybox([nearCrate, farCrate]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const cover = new CoverPoints([farSpot, nearSpot], level.collision);
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rookAt(0, 4), () => {});
+    const enemy = new StandInEnemy({ xM: 0, zM: -4, yawRad: 0 }, world);
+    expect(world.pickNearestCover(enemy)).toBe(nearSpot);
+    expect(cover.claimedBy(nearSpot)).toBe(enemy);
   });
 });

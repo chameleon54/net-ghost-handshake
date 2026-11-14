@@ -24,6 +24,18 @@ export const standInConfigDefaults = {
   retreatSpeedShare: 0.6,
   /** And its hit chance (from Rook's exposure, 4.5) is this share of the usual while it moves. */
   retreatHitChanceShare: 0.5,
+  // The flinch (decision 246). How much damage makes it flinch is per role (roles.ts).
+  /** The damage it took within this window counts toward a flinch. */
+  flinchWindowSec: 0.5,
+  /** A flinch lasts this long: its burst is cut off and it moves at a share of its speed... */
+  flinchSec: 0.5,
+  flinchSpeedShare: 0.5,
+  /** ...and it tips back this far (drawing only). */
+  flinchTiltDeg: 10,
+  /** After a flinch ends it cannot flinch again for this long (no stun lock). */
+  flinchImmuneSec: 1,
+  /** Heading for cover after a flinch, it fires back when it sees Rook at this share of the usual hit chance (panic fire). */
+  panicHitChanceShare: 0.25,
   /** Peeks (4.4): in cover it holds between these many seconds (random each time) before peeking out. */
   peekHoldMinSec: 2.5,
   peekHoldMaxSec: 4.5,
