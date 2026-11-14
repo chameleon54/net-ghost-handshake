@@ -37,6 +37,8 @@ import type { Target } from './enemies/target';
 import { greyboxStandIn } from './data/greyboxEnemies';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
+import { ImpactSparks } from './fx/impactSparks';
+import { Exposure, type Glimpse } from './player/exposure';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
 import { grenadeConfig } from './config/grenade';
@@ -116,25 +118,39 @@ const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
 // The stand-in enemy (4.1): temporary, it walks the navigation mesh (4.2) to cover that hides it from Rook (4.3) and
 // shoots when it sees him. Its hits go to his health (made further down). It sees from Rook's real eyes, lean included.
+// Rook's hidden exposure meter (4.5) sets its hit chance; what the stand-in sees of him fills it.
+const exposure = new Exposure();
+const glimpses: Glimpse[] = [];
+const projected = new THREE.Vector3();
 const quarry = {
   position: player.position,
   get eyeHeightNowM() {
     return player.eyeHeightNowM;
   },
   eyes: camera.position,
+  forward: new THREE.Vector3(0, 0, -1), // set from the camera every update
+  /** On screen: inside the camera's view once projected (a point behind the camera ends up outside it). */
+  inView(point: THREE.Vector3) {
+    projected.copy(point).project(camera);
+    return Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1 && Math.abs(projected.z) <= 1;
+  },
+  get exposure() {
+    return exposure.value;
+  },
+  get movingFast() {
+    return player.isSprinting || player.stance.stance === 'sliding';
+  },
 };
-const standIn = new StandInEnemy(
-  greyboxStandIn,
-  new StandInWorld(
-    weaponEvents,
-    level.collision,
-    navigation,
-    coverPoints,
-    quarry,
-    (amount) => playerHealth.damage(amount, 'enemy'),
-    () => grenades.livePositions(), // the grenade system is made further down
-  ),
+const standInWorld = new StandInWorld(
+  weaponEvents,
+  level.collision,
+  navigation,
+  coverPoints,
+  quarry,
+  (amount, from) => playerHealth.damage(amount, 'enemy', from),
+  () => grenades.livePositions(), // the grenade system is made further down
 );
+const standIn = new StandInEnemy(greyboxStandIn, standInWorld);
 const standInView = new StandInView(standIn);
 scene.add(standInView.group);
 weaponEvents.on('noise:made', (noise) => standIn.hear(noise));
@@ -143,6 +159,7 @@ const targets: Target[] = [...dummies, standIn];
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, targets);
 const tracers = new Tracers(scene, weaponEvents);
+const impactSparks = new ImpactSparks(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
 const audio = new AudioSystem(scene, camera);
@@ -234,6 +251,8 @@ function restart(): void {
   coverPoints.clearClaims();
   bulletMarks.clear();
   tracers.clear();
+  impactSparks.clear();
+  exposure.reset();
   casings.clear();
   explosions.clear();
   barrelSmoke.clear();
@@ -260,7 +279,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn, navigation, coverPoints, camera });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIn, navigation, coverPoints, camera, exposure, hitChance: () => standInWorld.hitChance() });
   });
 }
 
@@ -338,6 +357,7 @@ const loop = new Loop(
     }
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
+    impactSparks.update(stepSec);
     casings.update(stepSec);
     weaponSounds.update(stepSec);
     audio.update(stepSec);
@@ -349,8 +369,11 @@ const loop = new Loop(
       dummy.update(stepSec);
       dummyViews[i].update();
     });
+    camera.getWorldDirection(quarry.forward);
     standIn.update(stepSec, player.position);
     standInView.update();
+    glimpses[0] = standInWorld.glimpse(standIn, stepSec);
+    exposure.update(stepSec, glimpses, player.stance.stance === 'crouching');
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
@@ -391,7 +414,7 @@ const loop = new Loop(
     animatorInput.lookYawRad = lookYawRad;
     animatorInput.lookPitchRad = lookPitchRad;
     viewmodel.update(frameSec, animatorInput);
-    hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy });
+    hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy, camera });
     renderer.clear();
     renderer.render(scene, camera);
     renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls

@@ -54,6 +54,8 @@ export type WeaponEvents = {
   'shot:landed': ShotLanded;
   /** An enemy fired a round from its muzzle at `position` (a reused vector). For its gunshot sound. */
   'enemy:fired': { position: Vector3 };
+  /** An enemy round passed close by Rook's head without hitting him (4.5): `position` is the nearest point of its path. */
+  'shot:near-miss': { position: Vector3; distanceM: number; /** His exposure then, 0 to 1: the crack is louder as it rises. */ exposure: number };
   /** An enemy is about to peek out of cover (the tell, 4.4): a sound from `position` (a reused vector) warns the player. */
   'enemy:peek-tell': { position: Vector3 };
   /** An enemy at `position` (a reused vector) saw a grenade near it and runs. The "Grenade, move" callout (phase 6) listens. */
@@ -74,7 +76,7 @@ export type WeaponEvents = {
   /** A blast hurt the player by `damage` (the health system has already taken it). */
   'player:blast': { damage: number; distanceM: number };
   /** The player took damage; `health` is what is left. The screen effects (3.3) and PP's lines (phase 6) listen. */
-  'player:damaged': { amount: number; health: number; source: DamageSource };
+  'player:damaged': { amount: number; health: number; source: DamageSource; /** Where the shot came from, for the damage direction arc. */ from?: Vector3 };
   /** A heal item was used: `amount` was added, `health` is the total. PP's lines (phase 6) listen. */
   'player:healed': { amount: number; health: number };
   /** The pin of a heal item is out: the use has begun (it takes `healUseSec`). */

@@ -24,7 +24,7 @@ export const standInConfigDefaults = {
   fightSec: 2,
   /** Backing off to cover while firing, it moves at this share of its walk speed (decision 210). */
   retreatSpeedShare: 0.6,
-  /** And its hit chance is this share of the usual while it moves. */
+  /** And its hit chance (from Rook's exposure, 4.5) is this share of the usual while it moves. */
   retreatHitChanceShare: 0.5,
   /** Peeks (4.4): in cover it holds between these many seconds (random each time) before peeking out. */
   peekHoldMinSec: 2.5,
@@ -65,15 +65,10 @@ export const standInConfigDefaults = {
   burstRounds: 3,
   roundIntervalSec: 0.1,
   burstPauseSec: 1.2,
-  /** Chance that a round hits, 0 to 1. Flat until the exposure model (4.5). */
-  hitChance: 0.3,
   /** The trooper's rifle (enemies.md). */
   damagePerHit: 15,
   /** The hit budget: at most one damaging hit within this window. It never loosens (enemies.md). */
   hitGapSec: 0.5,
-  /** A miss passes this far from Rook's chest, at least and at most. */
-  missMinOffsetM: 0.3,
-  missMaxOffsetM: 1.5,
   fallTimeSec: 0.4,
   /** Time down before it gets up at its spawn spot, awake. */
   respawnDelaySec: 5,

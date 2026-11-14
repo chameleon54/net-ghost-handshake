@@ -53,6 +53,10 @@ export interface StandInHooks {
   planFlee(enemy: StandInEnemy, grenade: Vector3, safeM: number, out: Vector3): CoverPoint | null;
   /** It saw a grenade and runs: for the callout (phase 6). */
   grenadeSpotted(enemy: StandInEnemy): void;
+  /** The chance a round aimed at Rook hits right now, from his exposure meter (4.5). The hit budget is applied on top. */
+  hitChance(enemy: StandInEnemy): number;
+  /** True if Rook can see it right now: it is on his screen and nothing blocks the view (for the first-contact rule). */
+  rookSees(enemy: StandInEnemy): boolean;
 }
 
 const degToRad = Math.PI / 180;
@@ -69,7 +73,8 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // does not run from a fight (decisions 209 and 210): seen up close, it stands and fires, then backs off to new cover still
 // firing; if its cover fails at range it answers with a burst before moving. Wounded, it stops standing its ground and
 // pulls back into cover, peeking less; it runs out of the blast of a grenade it sees (decision 214). If no cover hides
-// it, it falls back to heading for Rook and firing when it sees him. No drawing code here.
+// it, it falls back to heading for Rook and firing when it sees him. Since 4.5 its hit chance comes from Rook's exposure
+// meter, and before first contact (he has not seen it) its first burst always misses, as a warning. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -106,6 +111,11 @@ export class StandInEnemy implements Target {
   private readonly fleeSpot = new Vector3();
   /** Game time since the last damaging hit, for the hit budget. */
   private sinceHitSec = Infinity;
+  /**
+   * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
+   * Once per life.
+   */
+  private contacted = false;
   private readonly ears = new Vector3();
   private readonly path: Vector3[] = [];
   /** The point of `path` it is walking to. */
@@ -283,6 +293,7 @@ export class StandInEnemy implements Target {
     if (this.sightTimerSec <= 0) {
       this.seesPlayer = this.hooks.canSeePlayer(this);
       this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
+      if (!this.contacted && this.hooks.rookSees(this)) this.contacted = true;
       // It looks for grenades as often as it looks for Rook.
       if (!this.grenadeSeen && this.state !== 'flee' && this.hooks.spotGrenade(this, this.grenadeDangerM, this.grenadeAt)) {
         this.grenadeSeen = true;
@@ -345,7 +356,7 @@ export class StandInEnemy implements Target {
     // No cover hides it: the 4.1 behaviour. Head for Rook, and stop to fire once it sees him within range.
     if (this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
       this.setState('shoot');
-      this.engage(dtSec, dx, dz, standInConfig.hitChance);
+      this.engage(dtSec, dx, dz);
       return;
     }
     this.startWalking();
@@ -399,7 +410,7 @@ export class StandInEnemy implements Target {
       this.leaveFight();
       return;
     }
-    this.engage(dtSec, dx, dz, standInConfig.hitChance);
+    this.engage(dtSec, dx, dz);
     if (this.roundsInBurst !== 0) return; // never leaves mid-burst
     const close = distanceM <= standInConfig.standGroundM;
     if (!this.wounded) {
@@ -468,7 +479,7 @@ export class StandInEnemy implements Target {
       this.giveUpWalk(); // stop backing off and check its cover
       return;
     }
-    if (firing) this.engage(dtSec, dx, dz, standInConfig.hitChance * standInConfig.retreatHitChanceShare);
+    if (firing) this.engage(dtSec, dx, dz, standInConfig.retreatHitChanceShare);
     else this.engaged = false;
   }
 
@@ -495,7 +506,7 @@ export class StandInEnemy implements Target {
   private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
     if (this.peekPhase === 'hold') {
       if (this.seesPlayer) {
-        this.engage(dtSec, dx, dz, standInConfig.hitChance);
+        this.engage(dtSec, dx, dz);
         return;
       }
       this.engaged = false;
@@ -578,10 +589,13 @@ export class StandInEnemy implements Target {
     if (facingErrorRad > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.rollHit(standInConfig.hitChance) ? 'hit' : 'miss');
+    this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.aimedShot(1));
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
-    if (this.peekRounds >= standInConfig.burstRounds) this.startPeekBack();
+    if (this.peekRounds >= standInConfig.burstRounds) {
+      this.contacted = true; // a whole burst fired: the warning has been given
+      this.startPeekBack();
+    }
   }
 
   private startPeekBack(): void {
@@ -612,8 +626,11 @@ export class StandInEnemy implements Target {
     this.feet.z = this.coverSpot.z + this.peekSide.z * stepM;
   }
 
-  /** Turns to Rook and fires bursts with `hitChance` per round, after the reaction pause the first time it sees him. */
-  private engage(dtSec: number, dx: number, dz: number, hitChance: number): void {
+  /**
+   * Turns to Rook and fires bursts, after the reaction pause the first time it sees him. `hitShare` scales the hit chance
+   * (less while backing off).
+   */
+  private engage(dtSec: number, dx: number, dz: number, hitShare = 1): void {
     if (!this.engaged) {
       this.engaged = true;
       this.cooldownSec = standInConfig.reactionSec;
@@ -621,7 +638,7 @@ export class StandInEnemy implements Target {
     }
     // The reaction pause only counts down once it faces Rook, so it never fires sideways.
     const facingErrorRad = this.turnToward(dx, dz, dtSec);
-    if (facingErrorRad <= standInConfig.aimToleranceDeg * degToRad) this.shoot(dtSec, hitChance);
+    if (facingErrorRad <= standInConfig.aimToleranceDeg * degToRad) this.shoot(dtSec, hitShare);
   }
 
   /** Stands up and starts walking; it never fires on the move. */
@@ -684,20 +701,25 @@ export class StandInEnemy implements Target {
     return this.routeFound && this.walkStuckForSec < standInConfig.walkStuckSec;
   }
 
-  /** Whether a round aimed at Rook hits: the chance, and the hit budget. */
-  private rollHit(hitChance: number): boolean {
+  /**
+   * A round aimed at Rook: before first contact it always misses (a warning, enemies.md); after, it hits by the chance
+   * from his exposure (times `hitShare`), within the hit budget.
+   */
+  private aimedShot(hitShare: number): StandInShot {
+    if (!this.contacted) return 'miss';
     // shortcut: the hit budget is kept per enemy; the squad coordinator (4.6) shares it across every enemy.
-    const hits = this.random() < hitChance && this.sinceHitSec >= standInConfig.hitGapSec;
+    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.sinceHitSec >= standInConfig.hitGapSec;
     if (hits) this.sinceHitSec = 0;
-    return hits;
+    return hits ? 'hit' : 'miss';
   }
 
-  private shoot(dtSec: number, hitChance: number): void {
+  private shoot(dtSec: number, hitShare: number): void {
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    this.hooks.fire(this, this.rollHit(hitChance) ? 'hit' : 'miss');
+    this.hooks.fire(this, this.aimedShot(hitShare));
     this.roundsInBurst++;
     if (this.roundsInBurst >= standInConfig.burstRounds) {
+      this.contacted = true; // a whole burst fired: the warning has been given
       this.roundsInBurst = 0;
       this.burstsDone++;
       this.cooldownSec += standInConfig.burstPauseSec;
@@ -752,6 +774,7 @@ export class StandInEnemy implements Target {
     this.lastKnownAgeSec = Infinity;
     this.grenadeSeen = false;
     this.sinceHitSec = Infinity;
+    this.contacted = false;
     this.path.length = 0;
     this.pathIndex = 0;
   }

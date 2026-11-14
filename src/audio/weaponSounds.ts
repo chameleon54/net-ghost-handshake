@@ -1,4 +1,5 @@
 import { audioConfig } from '../config/audio';
+import { exposureConfig } from '../config/exposure';
 import type { EventBus } from '../core/events';
 import { checkHoldProgress } from '../weapons/checkTiming';
 import type { WeaponEvents, WeaponId } from '../weapons/events';
@@ -64,6 +65,11 @@ export class WeaponSounds {
     });
     // Decision 201: the stand-in enemy reuses the M4-A shot, from where it stands, until enemies get their own sounds (4.14).
     events.on('enemy:fired', ({ position }) => this.player.play('rifle-fire', { position, rate: this.rate(), note: 'enemy shot' }));
+    // A near miss cracks from where the bullet passed, louder as Rook's exposure rises (4.5).
+    events.on('shot:near-miss', ({ position, exposure }) => {
+      const volume = exposureConfig.crackQuietVolume + (1 - exposureConfig.crackQuietVolume) * exposure;
+      this.player.play('bullet-crack', { position, volume, rate: this.rate(), note: 'bullet crack' });
+    });
     events.on('enemy:peek-tell', ({ position }) => this.player.play('enemy-peek-tell', { position, rate: this.rate(), note: 'enemy about to peek' }));
     events.on('weapon:empty-click', () => this.play('dry-click'));
     events.on('weapon:jammed', () => this.play('jam-clunk'));

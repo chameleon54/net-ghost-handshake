@@ -14,6 +14,8 @@ import { NavOverlay } from './navOverlay';
 import { CoverOverlay } from './coverOverlay';
 import type { CoverPoints } from '../level/cover';
 import { coverConfig, coverConfigDefaults } from '../config/cover';
+import { exposureConfig, exposureConfigDefaults } from '../config/exposure';
+import type { Exposure } from '../player/exposure';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -34,7 +36,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -63,6 +65,9 @@ interface Parts {
   coverPoints: CoverPoints;
   /** The game camera: Rook's eyes, for the cover overlay's colours. */
   camera: THREE.PerspectiveCamera;
+  /** Rook's hidden exposure meter (4.5), and the hit chance it gives an enemy round right now. */
+  exposure: Exposure;
+  hitChance: () => number;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -73,7 +78,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation, coverPoints, camera }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIn, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
@@ -110,9 +115,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'freeCamera', 'status'] as const) {
+  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'exposure', 'freeCamera', 'status'] as const) {
     readoutFolder.add(readouts, key).listen().disable();
   }
   readoutFolder.open();
@@ -135,6 +140,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(movementConfig, movementConfigDefaults);
       resetToDefaults(standInConfig, standInConfigDefaults);
       resetToDefaults(coverConfig, coverConfigDefaults);
+      resetToDefaults(exposureConfig, exposureConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -157,6 +163,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/movement.ts': changedValues(movementConfig, movementConfigDefaults),
           'src/config/standInEnemy.ts': changedValues(standInConfig, standInConfigDefaults),
           'src/config/cover.ts': changedValues(coverConfig, coverConfigDefaults),
+          'src/config/exposure.ts': changedValues(exposureConfig, exposureConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -236,6 +243,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();
   for (const s of coverFolder.sliders) coverPanel.add(coverConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const exposurePanel = standInPanel.addFolder(exposureFolder.title);
+  exposurePanel.close();
+  for (const s of exposureFolder.sliders) exposurePanel.add(exposureConfig, s.key, s.min, s.max, s.step).name(s.label);
 
   const grenadePanel = gui.addFolder(grenadeFolder.title);
   grenadePanel.close();
@@ -323,6 +333,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
     readouts.enemy = `${standIn.state}${standIn.crouched ? ' (crouched)' : ''}${standIn.wounded ? ' (wounded)' : ''}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
+    readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 

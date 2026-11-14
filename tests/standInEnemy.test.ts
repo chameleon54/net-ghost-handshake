@@ -11,12 +11,15 @@ import { greyboxRoom } from '../src/data/greyboxRoom';
 import { greyboxCover } from '../src/data/greyboxCover';
 import { CoverPoints, type CoverPoint } from '../src/level/cover';
 import { dummyConfig } from '../src/config/dummy';
+import { exposureConfig } from '../src/config/exposure';
 import { grenadeConfig } from '../src/config/grenade';
 import type { Noise } from '../src/stealth/noise';
 import type { WeaponEvents } from '../src/weapons/events';
 
 const dtSec = 1 / 60;
 const spawn = { xM: 0, zM: 0, yawRad: 0 }; // faces north (-z)
+/** The hit chance the fake senses report (in the game it comes from Rook's exposure meter). */
+const fakeHitChance = 0.3;
 
 /** A stand-in with fake senses. `roll` is what its random number gives: below the hit chance hits, above it misses. */
 function setup(roll = 0.99) {
@@ -46,6 +49,9 @@ function setup(roll = 0.99) {
     routeFails: false,
     /** An invisible wall it cannot walk north past (pushOut holds its feet at this z), or none. */
     wallAtZ: null as number | null,
+    /** The hit chance a round gets (from the exposure meter in the game), and whether Rook can see the stand-in. */
+    hitChance: fakeHitChance,
+    rookSees: true,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -77,6 +83,8 @@ function setup(roll = 0.99) {
     pickCover: () => world.cover,
     coverHides: () => world.coverHides,
     releaseCover: () => world.releases++,
+    hitChance: () => world.hitChance,
+    rookSees: () => world.rookSees,
   };
   const enemy = new StandInEnemy(spawn, hooks, () => roll);
   const run = (player: Vector3, seconds: number) => {
@@ -90,6 +98,17 @@ function setup(roll = 0.99) {
 }
 
 const noiseAt = (position: Vector3, radiusM: number): Noise => ({ kind: 'footstep', position, radiusM });
+
+/** Rook for the real world: standing at (x, z), looking north; everything counts as on his screen. */
+const rookAt = (xM: number, zM: number, exposure = 0) => ({
+  position: new Vector3(xM, 0, zM),
+  eyeHeightNowM: 1.6,
+  eyes: new Vector3(xM, 1.6, zM),
+  forward: new Vector3(0, 0, -1),
+  inView: () => true,
+  exposure,
+  movingFast: false,
+});
 
 describe('StandInEnemy waking up', () => {
   it('stays idle, still and silent until something wakes it', () => {
@@ -122,6 +141,44 @@ describe('StandInEnemy waking up', () => {
     const { enemy } = setup();
     expect(enemy.isBehind(0, 3)).toBe(true); // south of a north-facing enemy
     expect(enemy.isBehind(0, -3)).toBe(false);
+  });
+});
+
+describe('StandInEnemy first contact and hit chance (4.5)', () => {
+  it('before Rook has seen it, its first burst always misses; after that warning, rounds can hit', () => {
+    const { enemy, world, shots, run } = setup(0); // every roll would hit
+    world.rookSees = false;
+    world.hitChance = 1;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 3);
+    const rounds = standInConfig.burstRounds;
+    expect(shots.length).toBeGreaterThan(rounds);
+    expect(shots.slice(0, rounds).every((s) => !s.hits)).toBe(true);
+    expect(shots[rounds].hits).toBe(true);
+  });
+
+  it('once Rook has seen it, there is no warning burst; a respawn brings the warning back', () => {
+    const { enemy, world, shots, run } = setup(0);
+    world.hitChance = 1;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 1);
+    expect(shots[0].hits).toBe(true);
+    world.rookSees = false;
+    enemy.reset();
+    shots.length = 0;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 1);
+    expect(shots.length).toBeGreaterThan(0);
+    expect(shots.slice(0, standInConfig.burstRounds).every((s) => !s.hits)).toBe(true);
+  });
+
+  it('takes its hit chance from its senses (the exposure meter): at 0 it never hits', () => {
+    const { enemy, world, shots, run } = setup(0);
+    world.hitChance = 0;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 4);
+    expect(shots.length).toBeGreaterThan(0);
+    expect(shots.every((s) => !s.hits)).toBe(true);
   });
 });
 
@@ -468,7 +525,7 @@ describe('StandInEnemy fighting back (4.3 follow-up)', () => {
 
   it('hits less often while backing off', () => {
     // A roll between the halved and the full hit chance: hits when standing, misses when moving.
-    const roll = standInConfig.hitChance * (1 + standInConfig.retreatHitChanceShare) / 2;
+    const roll = fakeHitChance * (1 + standInConfig.retreatHitChanceShare) / 2;
     const { enemy, world, shots, run } = inCover(roll);
     const rook = new Vector3(0, 0, 1);
     world.sees = true;
@@ -803,19 +860,29 @@ describe('StandInWorld', () => {
   });
   const farProp: RoomBox = { kind: 'prop', xM: 50, zM: 50, widthM: 1, depthM: 1, heightM: 1 };
   const backWall: RoomBox = { kind: 'wall', xM: 0, zM: 5, widthM: 20, depthM: 0.3, heightM: 8 }; // behind the player, tall enough to catch high misses
-  const player = { position: new Vector3(0, 0, 0), eyeHeightNowM: 1.6, eyes: new Vector3(0, 1.6, 0) };
+  const player = rookAt(0, 0);
 
   const setupWorld = (boxes: RoomBox[]) => {
+    player.exposure = 0;
+    player.position.set(0, 0, 0);
+    player.eyes.set(0, 1.6, 0);
+    player.inView = () => true;
     const events = new EventBus<WeaponEvents>();
     const damage: number[] = [];
+    const damageFrom: Vector3[] = [];
+    const cracks: { position: Vector3; distanceM: number }[] = [];
+    events.on('shot:near-miss', ({ position, distanceM }) => cracks.push({ position: position.clone(), distanceM }));
     const landed: { muzzle: Vector3; end: Vector3; hit: boolean; shooter: string }[] = [];
     const fired: Vector3[] = [];
     events.on('shot:landed', (s) => landed.push({ muzzle: s.muzzle.clone(), end: s.end.clone(), hit: s.hit, shooter: s.shooter }));
     events.on('enemy:fired', ({ position }) => fired.push(position.clone()));
     const { collision } = buildGreybox([farProp, ...boxes]);
-    const world = new StandInWorld(events, collision, navigation, new CoverPoints([], collision), player, (amount) => damage.push(amount));
+    const world = new StandInWorld(events, collision, navigation, new CoverPoints([], collision), player, (amount, from) => {
+      damage.push(amount);
+      damageFrom.push(from.clone());
+    });
     const enemy = new StandInEnemy({ xM: 0, zM: -8, yawRad: Math.PI }, world); // 8 m north, facing south at him
-    return { world, enemy, damage, landed, fired };
+    return { world, enemy, damage, damageFrom, landed, fired, cracks };
   };
 
   it('sees the player in the open, not through a wall', () => {
@@ -825,9 +892,10 @@ describe('StandInWorld', () => {
   });
 
   it('a hit hurts the player and lands on his chest; the shot is marked as an enemy shot', () => {
-    const { world, enemy, damage, landed, fired } = setupWorld([backWall]);
+    const { world, enemy, damage, damageFrom, landed, fired } = setupWorld([backWall]);
     world.fire(enemy, 'hit');
     expect(damage).toEqual([standInConfig.damagePerHit]);
+    expect(damageFrom[0].toArray()).toEqual(fired[0].toArray()); // the arc points at its muzzle
     expect(landed[0].shooter).toBe('enemy');
     expect(landed[0].hit).toBe(false); // no bullet mark on the player
     expect(landed[0].end.toArray()).toEqual([0, 1.6 * standInConfig.aimHeightShareOfEyes, 0]);
@@ -852,23 +920,83 @@ describe('StandInWorld', () => {
     expect(Math.abs(landed[0].end.x)).toBeLessThan(0.01); // straight at him, no offset
   });
 
-  it('a miss never hurts, passes 0.3 to 1.5 m from his chest, and ends on what is behind him', () => {
-    const { world, enemy, damage, landed } = setupWorld([backWall]);
+  /** How far a shot's line passes from his chest. */
+  const passFromChestM = (shot: { muzzle: Vector3; end: Vector3 }): number => {
     const chest = new Vector3(0, 1.6 * standInConfig.aimHeightShareOfEyes, 0);
-    const toChest = new Vector3();
-    const direction = new Vector3();
-    for (let i = 0; i < 200; i++) world.fire(enemy, 'miss');
-    expect(damage).toHaveLength(0);
-    for (const shot of landed) {
-      direction.subVectors(shot.end, shot.muzzle).normalize();
-      toChest.subVectors(chest, shot.muzzle);
-      // How far the bullet's line passes from his chest. The offset is set square to the shot at his distance, so the
-      // line itself passes a hair closer (under 2% at this range).
-      const passM = toChest.cross(direction).length();
-      expect(passM).toBeGreaterThanOrEqual(standInConfig.missMinOffsetM * 0.98);
-      expect(passM).toBeLessThanOrEqual(standInConfig.missMaxOffsetM + 1e-6);
-      expect(shot.hit).toBe(true); // the back wall or the floor
+    const direction = new Vector3().subVectors(shot.end, shot.muzzle).normalize();
+    return chest.sub(shot.muzzle).cross(direction).length();
+  };
+
+  it('a miss never hurts and passes farther from his chest at low exposure than at full (impacts get closer)', () => {
+    // The offset is set square to the shot at his distance, so the line itself passes a hair closer (under 2% here).
+    for (const [exposure, offsetM] of [[0, exposureConfig.missFarOffsetM], [1, exposureConfig.missNearOffsetM]]) {
+      const { world, enemy, damage, landed } = setupWorld([backWall]);
+      player.exposure = exposure;
+      for (let i = 0; i < 100; i++) world.fire(enemy, 'miss');
+      expect(damage).toHaveLength(0);
+      for (const shot of landed) {
+        expect(passFromChestM(shot)).toBeGreaterThanOrEqual(offsetM * 0.98);
+        expect(passFromChestM(shot)).toBeLessThanOrEqual(offsetM + 1e-6);
+        expect(shot.hit).toBe(true); // the back wall or the floor
+      }
     }
+  });
+
+  it('misses prefer striking his cover: most end on the low wall in front of him', () => {
+    const lowWall: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 4, depthM: 0.3, heightM: 1 };
+    const { world, enemy, landed } = setupWorld([lowWall]); // nothing behind him: a miss that passes flies on
+    for (let i = 0; i < 200; i++) world.fire(enemy, 'miss');
+    const chest = new Vector3(0, 1.6 * standInConfig.aimHeightShareOfEyes, 0);
+    const near = landed.filter((shot) => shot.hit && shot.end.distanceTo(chest) <= exposureConfig.missNearSurfaceM).length;
+    expect(near / landed.length).toBeGreaterThan(0.75);
+  });
+
+  it('a miss that flies past his head cracks; one stopped by his cover does not', () => {
+    const open = setupWorld([backWall]);
+    player.exposure = 1; // misses pass 0.3 m from his chest
+    for (let i = 0; i < 50; i++) open.world.fire(open.enemy, 'miss');
+    const passed = open.landed.filter((shot) => shot.end.z > 0.5).length; // ended behind him
+    expect(passed).toBeGreaterThan(0);
+    expect(open.cracks).toHaveLength(passed);
+    for (const crack of open.cracks) expect(crack.distanceM).toBeLessThanOrEqual(exposureConfig.crackRadiusM);
+    const covered = setupWorld([{ kind: 'wall', xM: 0, zM: -1, widthM: 4, depthM: 0.3, heightM: 3 }]);
+    covered.world.fire(covered.enemy, 'cover');
+    expect(covered.cracks).toHaveLength(0);
+  });
+
+  it('measures what it sees of him: all of him in the open, head and chest over a low wall, nothing while idle', () => {
+    const open = setupWorld([]);
+    expect(open.world.glimpse(open.enemy, 1).visibleShare).toBe(0); // idle: it has not noticed him
+    open.enemy.hit('body', 1);
+    const seen = open.world.glimpse(open.enemy, 1);
+    expect(seen.visibleShare).toBe(1);
+    expect(seen.distanceM).toBeCloseTo(8, 5);
+    expect(seen.fromSide).toBe(false); // he looks north, at it
+    const low = setupWorld([{ kind: 'prop', xM: 0, zM: -1, widthM: 4, depthM: 0.3, heightM: 1 }]);
+    low.enemy.hit('body', 1);
+    expect(low.world.glimpse(low.enemy, 1).visibleShare).toBeCloseTo(2 / 3, 5); // the hips are hidden
+  });
+
+  it('remembers the spot it saw him from: in view of it while it hides, until he moves out of view of it', () => {
+    const { world, enemy } = setupWorld([{ kind: 'wall', xM: -3, zM: -4, widthM: 4, depthM: 0.3, heightM: 3 }]);
+    enemy.hit('body', 1);
+    expect(world.glimpse(enemy, 1).visibleShare).toBe(1);
+    enemy.feet.set(-3, 0, -8); // it ducks behind the wall
+    const hidden = world.glimpse(enemy, 1);
+    expect(hidden.visibleShare).toBe(0);
+    expect(hidden.inViewOfLastSpot).toBe(true);
+    player.position.set(-6, 0, 0); // he moves out of view of where it saw him from
+    player.eyes.set(-6, 1.6, 0);
+    expect(world.glimpse(enemy, 1).inViewOfLastSpot).toBe(false);
+  });
+
+  it('Rook sees it only when it is on his screen and nothing is in the way', () => {
+    const open = setupWorld([]);
+    expect(open.world.rookSees(open.enemy)).toBe(true);
+    player.inView = () => false;
+    expect(open.world.rookSees(open.enemy)).toBe(false);
+    const walled = setupWorld([{ kind: 'wall', xM: 0, zM: -4, widthM: 4, depthM: 0.3, heightM: 3 }]);
+    expect(walled.world.rookSees(walled.enemy)).toBe(false);
   });
 });
 
@@ -876,7 +1004,7 @@ describe('the stand-in in the real test room (4.2)', () => {
   it('with no cover, walks around the pillar to find the player hiding behind it, and never through it', async () => {
     const level = buildGreybox();
     const navigation = await Navigation.create(level.navigationGeometry);
-    const player = { position: new Vector3(0, 0, 1.5), eyeHeightNowM: 1.6, eyes: new Vector3(0, 1.6, 1.5) }; // just south of the pillar
+    const player = rookAt(0, 1.5); // just south of the pillar
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, new CoverPoints([], level.collision), player, () => {});
     const enemy = new StandInEnemy({ xM: 0, zM: -2, yawRad: Math.PI }, world, () => 0.99); // just north of it
     const pillar = greyboxRoom[6];
@@ -897,7 +1025,7 @@ describe('the stand-in in the real test room (4.3)', () => {
     const level = buildGreybox();
     const navigation = await Navigation.create(level.navigationGeometry);
     const cover = new CoverPoints(greyboxCover, level.collision);
-    const player = { position: new Vector3(0, 0, 4.5), eyeHeightNowM: 1.6, eyes: new Vector3(0, 1.6, 4.5) }; // the start spot
+    const player = rookAt(0, 4.5); // the start spot
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, player, () => {});
     const enemy = new StandInEnemy({ xM: 1.5, zM: -5, yawRad: Math.PI }, world, () => 0.99); // its real spawn
     enemy.hit('body', 1);
@@ -919,7 +1047,7 @@ describe('the stand-in and a real grenade in the real test room (4.4 follow-up)'
     const level = buildGreybox();
     const navigation = await Navigation.create(level.navigationGeometry);
     const cover = new CoverPoints(greyboxCover, level.collision);
-    const player = { position: new Vector3(0, 0, 4.5), eyeHeightNowM: 1.6, eyes: new Vector3(0, 1.6, 4.5) };
+    const player = rookAt(0, 4.5);
     const grenades: Vector3[] = [];
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, player, () => {}, () => grenades);
     const enemy = new StandInEnemy({ xM: 1.95, zM: -3, yawRad: -Math.PI / 2 }, world); // west of the tall crate

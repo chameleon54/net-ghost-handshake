@@ -47,6 +47,7 @@ export const soundNames = [
   'land-soft',
   'land-hard',
   'enemy-peek-tell',
+  'bullet-crack',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -402,6 +403,17 @@ export const recipes: Record<SoundName, Recipe> = {
       metalClick(s, sr, rng, 0.04, 0.5, 2600 + variant * 300);
       metalClick(s, sr, rng, 0.11, 0.35, 3100 - variant * 200);
       return finish(s, sr, { peak: 0.5 });
+    },
+  },
+  // An enemy round passing close by (4.5): a sharp snap, then a short high whiz.
+  'bullet-crack': {
+    group: 'impact',
+    variants: 2,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.12);
+      addNoise(s, sr, { duration: 0.012, decay: 0.003, gain: 1, highpass: 1500, rng });
+      addNoise(s, sr, { start: 0.004, duration: 0.08, decay: between(rng, 0.02, 0.03), gain: 0.35, highpass: 3000, lowpass: 9000, rng });
+      return finish(s, sr, { peak: 0.8 });
     },
   },
   // A heal item opened: a snap of the cap, then a soft hiss of the dose going in.

@@ -13,6 +13,7 @@ import type { PistolConfig } from '../config/pistol';
 import type { RifleConfig } from '../config/rifle';
 import type { StandInConfig } from '../config/standInEnemy';
 import type { CoverConfig } from '../config/cover';
+import type { ExposureConfig } from '../config/exposure';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -47,6 +48,7 @@ type MovementKey = keyof MovementConfig;
 type HealthFxKey = keyof HealthFxConfig;
 type StandInKey = keyof StandInConfig;
 type CoverKey = keyof CoverConfig;
+type ExposureKey = keyof ExposureConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -195,6 +197,9 @@ export const rifleFolders: Folder<RifleKey>[] = [
       { key: 'tracerSpeedMps', label: 'Tracer speed (m/s)', min: 50, max: 1000, step: 10 },
       { key: 'tracerLengthM', label: 'Tracer length (m)', min: 0.5, max: 20, step: 0.5 },
       { key: 'markRadiusM', label: 'Bullet mark radius (m)', min: 0.01, max: 0.2, step: 0.005 },
+      { key: 'sparkSpeedMps', label: 'Impact sparks: speed (m/s)', min: 0, max: 15, step: 0.5 },
+      { key: 'sparkLifeSec', label: 'Impact sparks: last (s)', min: 0.05, max: 1.5, step: 0.05 },
+      { key: 'sparkSizeM', label: 'Impact sparks: size (m)', min: 0.005, max: 0.15, step: 0.005 },
     ],
   },
 ];
@@ -501,11 +506,8 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 10, step: 1 },
     { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
     { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
-    { key: 'hitChance', label: 'Hit chance per round (0 to 1)', min: 0, max: 1, step: 0.05 },
     { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
     { key: 'hitGapSec', label: 'Hit budget: one hit per (s)', min: 0, max: 3, step: 0.05 },
-    { key: 'missMinOffsetM', label: 'Miss passes at least (m)', min: 0.05, max: 3, step: 0.05 },
-    { key: 'missMaxOffsetM', label: 'Miss passes at most (m)', min: 0.1, max: 5, step: 0.05 },
     { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
   ],
@@ -521,6 +523,32 @@ export const coverFolder: Folder<CoverKey> = {
     { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
   ],
 };
+
+export const exposureFolder: Folder<ExposureKey> = {
+  title: 'Exposure and misses',
+  sliders: [
+    { key: 'fillPerSec', label: 'Meter fills per s (fully seen, close)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'drainPerSec', label: 'Meter drains per s (in cover)', min: 0.05, max: 5, step: 0.05 },
+    { key: 'holdMaxSec', label: 'Holds unseen at most (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'fullFillRangeM', label: 'Full fill up to (m)', min: 1, max: 50, step: 1 },
+    { key: 'farRangeM', label: 'Slowest fill from (m)', min: 2, max: 100, step: 1 },
+    { key: 'farFillShare', label: 'Fill when far (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'crouchFillShare', label: 'Fill when crouched (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'sideFillScale', label: 'Fill when seen from side or behind (x)', min: 1, max: 4, step: 0.1 },
+    { key: 'hitStartExposure', label: 'Hits start above exposure', min: 0, max: 0.95, step: 0.05 },
+    { key: 'maxHitChance', label: 'Hit chance at full exposure (0 to 1)', min: 0, max: 1, step: 0.05 },
+    { key: 'movingHitShare', label: 'Hit chance sprinting or sliding (share)', min: 0, max: 1, step: 0.05 },
+    { key: 'missFarOffsetM', label: 'Miss passes at exposure 0 (m)', min: 0.1, max: 5, step: 0.05 },
+    { key: 'missNearOffsetM', label: 'Miss passes at full exposure (m)', min: 0.05, max: 3, step: 0.05 },
+    { key: 'missNearSurfaceM', label: 'Misses prefer a surface within (m of you)', min: 0, max: 6, step: 0.25 },
+    { key: 'crackRadiusM', label: 'Bullet crack within (m of your head)', min: 0, max: 6, step: 0.25 },
+    { key: 'crackQuietVolume', label: 'Bullet crack volume at exposure 0', min: 0, max: 1, step: 0.05 },
+    { key: 'checksPerSec', label: 'Exposure checks per s', min: 1, max: 60, step: 1 },
+  ],
+};
+
+/** Exposure values that are not on the panel: where on Rook's body the third sight point is. */
+export const exposureKeysNotOnPanel: readonly ExposureKey[] = ['hipHeightShareOfEyes'];
 
 export const healthFolder: Folder<HealthKey> = {
   title: 'Health and falls',
@@ -584,6 +612,7 @@ export const healthFxFolders: Folder<HealthFxKey>[] = [
       { key: 'hudShowSec', label: 'A pop-up stays (s)', min: 0.5, max: 10, step: 0.5 },
       { key: 'hudFadeSec', label: 'Then fades over (s)', min: 0.1, max: 2, step: 0.1 },
       { key: 'magazinePictureShowSec', label: 'Magazine pictures stay (s)', min: 1, max: 10, step: 0.5 },
+      { key: 'damageArcSec', label: 'Damage direction arc fades over (s)', min: 0.2, max: 5, step: 0.1 },
     ],
   },
 ];

@@ -1,5 +1,6 @@
 import { difficultySetting } from '../config/difficulty';
 import { healthConfig } from '../config/health';
+import type { Vector3 } from 'three';
 import type { EventBus } from '../core/events';
 import { Health } from '../enemies/health';
 import type { WeaponEvents } from '../weapons/events';
@@ -39,12 +40,13 @@ export class PlayerHealth {
     return !this.dead && !this.regenHeld && this.sinceDamageSec >= healthConfig.regenDelaySec && this.current < healthConfig.regenCeiling;
   }
 
-  damage(amount: number, source: DamageSource): void {
+  /** `from`: where an enemy's shot came from, for the damage direction arc. */
+  damage(amount: number, source: DamageSource, from?: Vector3): void {
     if (this.dead || this.invulnerable || amount <= 0) return;
     this.sinceDamageSec = 0;
     this.regenHeld = false;
     const killed = this.health.damage(amount);
-    this.events.emit('player:damaged', { amount, health: this.health.current, source });
+    this.events.emit('player:damaged', { amount, health: this.health.current, source, from });
     if (killed) this.events.emit('player:died', { source });
   }
 

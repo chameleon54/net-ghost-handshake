@@ -8,6 +8,7 @@ import { casingConfigDefaults } from '../src/config/casing';
 import { dummyConfigDefaults } from '../src/config/dummy';
 import { standInConfigDefaults } from '../src/config/standInEnemy';
 import { coverConfigDefaults } from '../src/config/cover';
+import { exposureConfigDefaults } from '../src/config/exposure';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
@@ -25,6 +26,8 @@ import {
   dummyKeysNotOnPanel,
   standInFolder,
   coverFolder,
+  exposureFolder,
+  exposureKeysNotOnPanel,
   standInKeysNotOnPanel,
   knifeFolder,
   pistolFolders,
@@ -173,6 +176,18 @@ describe('the cover tuning panel', () => {
     }
     const onPanel = new Set<string>(coverFolder.sliders.map((s) => s.key));
     for (const key of Object.keys(coverConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the exposure tuning panel', () => {
+  it('has a sensible range around every default and lists every value', () => {
+    for (const s of exposureFolder.sliders) {
+      expect(s.min, s.key).toBeLessThan(s.max);
+      expect(exposureConfigDefaults[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+      expect(exposureConfigDefaults[s.key], s.key).toBeLessThanOrEqual(s.max);
+    }
+    const onPanel = new Set<string>([...exposureFolder.sliders.map((s) => s.key), ...exposureKeysNotOnPanel]);
+    for (const key of Object.keys(exposureConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
   });
 });
 

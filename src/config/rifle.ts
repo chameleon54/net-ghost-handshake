@@ -58,6 +58,10 @@ export const rifleConfigDefaults = {
   tracerLengthM: 5,
   /** Radius of a bullet mark on a wall. */
   markRadiusM: 0.04,
+  /** Sparks where any bullet hits a surface (4.5): their speed at most, how long they last, and their size. */
+  sparkSpeedMps: 4,
+  sparkLifeSec: 0.25,
+  sparkSizeM: 0.03,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */
