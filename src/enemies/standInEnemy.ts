@@ -151,6 +151,13 @@ export class StandInEnemy implements Target {
   /** On a flank: how long Rook has kept it in view. */
   private flankSpottedSec = 0;
   /**
+   * The flank attack (decision 227): after a flank it peeks at once and stays out firing bursts (each with its own slot)
+   * until Rook hurts it, it has not seen him for a moment, or the time is up. How long it has been out, and unseeing.
+   */
+  private pressing = false;
+  private pressSec = 0;
+  private pressUnseenSec = 0;
+  /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
    */
@@ -295,6 +302,7 @@ export class StandInEnemy implements Target {
     const killed = this.health.damage(bodyDamage);
     if (killed) this.die();
     else if (this.state === 'idle') this.wake();
+    else if (this.pressing && this.peekPhase !== 'hold' && this.peekPhase !== 'back') this.startPeekBack(); // hurt: back in at once
     return killed;
   }
 
@@ -527,6 +535,11 @@ export class StandInEnemy implements Target {
     if (toSpotM <= standInConfig.coverArriveM) {
       this.coverTimerSec = 0; // check the spot still hides it straight away
       this.setState('cover');
+      // The flank attack: no hold first; it peeks at once (the tell still warns Rook) and stays out firing.
+      this.peekTimerSec = 0;
+      this.pressing = true;
+      this.pressSec = 0;
+      this.pressUnseenSec = 0;
       return;
     }
     if (!this.walkRoute(dtSec, this.coverSpot, squadConfig.flankSpeedMps)) this.giveUpWalk();
@@ -671,33 +684,63 @@ export class StandInEnemy implements Target {
     this.peekTimerSec = standInConfig.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
   }
 
-  /** Out of cover: fires one burst (or looks for as long as one would take), then goes back in. */
+  /**
+   * Out of cover: fires one burst (or looks for as long as one would take), then goes back in. In a flank attack it stays
+   * out, firing a burst at Rook whenever it sees him, until the attack ends (see `pressOver`).
+   */
   private peekFire(dtSec: number, dx: number, dz: number): void {
+    if (this.pressing) {
+      if (this.pressOver(dtSec)) {
+        this.startPeekBack();
+        return;
+      }
+      if (this.peekMode === 'look' && this.seesPlayer) this.peekMode = 'aimed';
+    }
     // It aims at Rook when it sees him; otherwise at where it last knew he was (decision 213).
     const facingErrorRad = this.peekMode === 'aimed' ? this.turnToward(dx, dz, dtSec) : this.faceLastKnown(dtSec);
     if (this.peekMode === 'look') {
-      if (this.peekTimerSec <= 0) this.startPeekBack();
+      if (!this.pressing && this.peekTimerSec <= 0) this.startPeekBack();
       return;
     }
     if (facingErrorRad > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
+    if (this.peekRounds === 0 && !this.takeSlot()) {
+      this.cooldownSec = 0; // every burst needs a firing slot: keep aiming and fire as soon as one is free
+      return;
+    }
     this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.aimedShot(1));
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
-    if (this.peekRounds >= standInConfig.burstRounds) {
-      this.contacted = true; // a whole burst fired: the warning has been given
+    if (this.peekRounds < standInConfig.burstRounds) return;
+    this.contacted = true; // a whole burst fired: the warning has been given
+    if (!this.pressing) {
       this.startPeekBack();
+      return;
     }
+    // The flank attack goes on: the slot goes back between bursts, and the next burst only fires at Rook it can see.
+    this.giveSlotBack();
+    this.peekRounds = 0;
+    this.cooldownSec += standInConfig.burstPauseSec - standInConfig.roundIntervalSec;
+    this.peekMode = this.seesPlayer ? 'aimed' : 'look';
+  }
+
+  /** In a flank attack: true once it has been out long enough, or has not seen Rook for a moment. */
+  private pressOver(dtSec: number): boolean {
+    this.pressSec += dtSec;
+    this.pressUnseenSec = this.seesPlayer ? 0 : this.pressUnseenSec + dtSec;
+    return this.pressSec >= squadConfig.flankPressMaxSec || this.pressUnseenSec >= squadConfig.flankPressLostSightSec;
   }
 
   private startPeekBack(): void {
     this.peekPhase = 'back';
     this.peekTimerSec = standInConfig.peekBackSec;
+    this.pressing = false; // a flank attack ends when it goes back in
   }
 
   /** Back to holding, for a random while. */
   private resetPeek(): void {
+    this.pressing = false;
     this.peekPhase = 'hold';
     this.peekShare = 0;
     this.riseShare = 0;

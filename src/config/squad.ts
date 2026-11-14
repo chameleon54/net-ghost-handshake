@@ -26,6 +26,10 @@ export const squadConfigDefaults = {
   flankSpeedMps: 3.5,
   /** Seen by Rook for this long on the way, the flank is called off. */
   spottedSec: 0.5,
+  /** The flank attack (decision 227): on arrival it peeks at once and stays out firing for at most this long... */
+  flankPressMaxSec: 6,
+  /** ...or until it has not seen Rook for this long (or he hurts it). */
+  flankPressLostSightSec: 1,
 } as const;
 
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */

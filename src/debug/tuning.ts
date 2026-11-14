@@ -564,6 +564,8 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'flankMaxExposedM', label: 'Flank: route in your view at most (m)', min: 0, max: 30, step: 0.5 },
     { key: 'flankSpeedMps', label: 'Flank: moves at (m/s)', min: 0.5, max: 8, step: 0.1 },
     { key: 'spottedSec', label: 'Flank: called off when seen for (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
+    { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
   ],
 };
 

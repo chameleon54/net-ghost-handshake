@@ -339,6 +339,62 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(world.releases).toBeGreaterThan(releasesBefore); // it let the flank spot go
   });
 
+  /** A stand-in that has just arrived at its flank spot: hidden there, but it sees Rook once fully out of a peek. */
+  const arrived = () => {
+    const s = walking();
+    s.world.sees = false;
+    s.world.seenWhenOut = true;
+    s.enemy.beginFlank(flankSpot);
+    for (let i = 0; i < 5 / dtSec && s.enemy.state !== 'cover'; i++) s.run(far, dtSec);
+    expect(s.enemy.state).toBe('cover');
+    return s;
+  };
+  const outSec = standInConfig.tellSec + standInConfig.peekOutSec;
+
+  it('the flank attack: on arrival it peeks at once (with the tell) and stays out firing burst after burst', () => {
+    const { enemy, world, shots, run } = arrived();
+    run(far, dtSec * 2);
+    expect(world.tells).toHaveLength(1); // no hold first
+    run(far, outSec + 3);
+    expect(enemy.peekOut).toBe(1); // still out
+    expect(shots.length).toBeGreaterThanOrEqual(standInConfig.burstRounds * 2);
+    expect(shots.every((s) => s.shot !== 'cover')).toBe(true);
+  });
+
+  it('the flank attack ends at once when Rook hurts it, even mid-burst', () => {
+    const { enemy, shots, run } = arrived();
+    run(far, outSec + 0.05); // out, its first burst under way
+    expect(enemy.peekOut).toBe(1);
+    enemy.hit('body', 1);
+    const fired = shots.length;
+    run(far, standInConfig.peekBackSec + 0.05);
+    expect(enemy.peekOut).toBe(0);
+    expect(shots.length).toBe(fired);
+  });
+
+  it('the flank attack ends when it has not seen Rook for a moment, or when its time is up', () => {
+    const lost = arrived();
+    lost.run(far, outSec + 1);
+    lost.world.seenWhenOut = false; // he hid
+    lost.run(far, squadConfig.flankPressLostSightSec + 1 / standInConfig.sightChecksPerSec + standInConfig.peekBackSec + 0.1);
+    expect(lost.enemy.peekOut).toBe(0);
+
+    const timed = arrived();
+    timed.run(far, outSec + squadConfig.flankPressMaxSec + standInConfig.peekBackSec + 0.1);
+    expect(timed.enemy.peekOut).toBe(0);
+  });
+
+  it('in a flank attack each burst needs a firing slot: with none free it stays out aiming but holds fire', () => {
+    const { enemy, shots, run, squad } = arrived();
+    run(far, outSec + standInConfig.burstRounds * standInConfig.roundIntervalSec + 0.05); // the first burst done
+    const fired = shots.length;
+    expect(squad.holdsSlot(enemy)).toBe(false); // given back between bursts
+    for (let i = 0; i < squadConfig.firingSlots; i++) squad.requestSlot({});
+    run(far, standInConfig.burstPauseSec + 0.5);
+    expect(shots.length).toBe(fired);
+    expect(enemy.peekOut).toBe(1);
+  });
+
   it('a grenade it sees beats the flank, and the squad hears the flank is over', () => {
     const { enemy, world, run } = walking();
     enemy.beginFlank(flankSpot);

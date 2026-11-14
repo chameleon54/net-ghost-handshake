@@ -19,6 +19,7 @@ import type { Exposure } from '../player/exposure';
 import { squadConfig, squadConfigDefaults } from '../config/squad';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
+import { ReadoutBox } from './readoutBox';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -123,12 +124,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const gui = new GUI({ title: 'Tuning (dev only, Esc to use)', width: 320 });
   gui.close();
 
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', enemy: '', squad: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
-  const readoutFolder = gui.addFolder('Readouts');
-  for (const key of ['health', 'position', 'speed', 'state', 'weapon', 'enemy', 'squad', 'exposure', 'freeCamera', 'status'] as const) {
-    readoutFolder.add(readouts, key).listen().disable();
-  }
-  readoutFolder.open();
+  // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  let enemyLines: string[] = [];
+  const readoutBox = new ReadoutBox();
+  gui.add(readoutBox, 'shown').name('Show readouts (top left)');
 
   const actions = {
     resetAll: () => {
@@ -351,16 +351,30 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
-    readouts.enemy = activeStandIns
-      .map((s, i) => `${letter(i)} ${s.state}${s.crouched ? ' (c)' : ''}${s.wounded ? ' (w)' : ''} ${s.health.current.toFixed(0)}`)
-      .join(', ');
+    enemyLines = activeStandIns.map(
+      (s, i) =>
+        `${letter(i)}         ${s.state}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
+    );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
     const flankerIndex = activeStandIns.findIndex((s) => s === squad.flanker);
     readouts.squad =
-      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? `: ${firing.join(', ')}` : ''}; ` +
-      `you held your spot ${squad.heldSec.toFixed(1)} s; ${flankerIndex >= 0 ? `${letter(flankerIndex)} flanking` : 'no flank'}`;
+      `slots ${squad.slotsHeld}/${squadConfig.firingSlots}${firing.length > 0 ? ` (${firing.join(', ')})` : ''}, ` +
+      `you held your spot ${squad.heldSec.toFixed(1)} s, ${flankerIndex >= 0 ? `${letter(flankerIndex)} flanking` : 'no flank'}`;
     readouts.exposure = `${exposure.value.toFixed(2)}, hit chance ${(hitChance() * 100).toFixed(0)}% per round`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
+    readoutBox.show([
+      `health    ${readouts.health}`,
+      `position  ${readouts.position}`,
+      `speed     ${readouts.speed}`,
+      `state     ${readouts.state}`,
+      `weapon    ${readouts.weapon}`,
+      `exposure  ${readouts.exposure}`,
+      `squad     ${readouts.squad}`,
+      ...enemyLines,
+      `camera    ${readouts.freeCamera}`,
+      ...(readouts.status ? [`status    ${readouts.status}`] : []),
+    ]);
   }
 
   return {
