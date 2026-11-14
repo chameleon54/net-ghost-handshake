@@ -322,7 +322,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     if (player.slowed) flags.push('slowed by a fall');
     readouts.state = flags.join(', ');
     const gun = weapons.gun;
-    readouts.enemy = `${standIn.state}${standIn.crouched ? ' (crouched)' : ''}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
+    readouts.enemy = `${standIn.state}${standIn.crouched ? ' (crouched)' : ''}${standIn.wounded ? ' (wounded)' : ''}${standIn.frozen ? ' (frozen)' : ''}, health ${standIn.health.current.toFixed(0)}`;
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
   }
 

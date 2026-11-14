@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
+import { grenadeConfig } from '../config/grenade';
 import { standInConfig } from '../config/standInEnemy';
 import type { CoverPoint } from '../level/cover';
 import { hearsNoise, type Noise } from '../stealth/noise';
@@ -10,9 +11,10 @@ import type { Target } from './target';
 /**
  * `approach`: walking (to its cover, or straight for Rook when no cover hides it). `cover`: at its cover spot, holding.
  * `fight`: standing where it is, firing at Rook (he is close, or its cover failed). `retreat`: backing off to new cover
- * while firing. `shoot`: standing in the open firing, only when no cover hides it (the 4.1 behaviour).
+ * while firing. `shoot`: standing in the open firing, only when no cover hides it (the 4.1 behaviour). `flee`: running
+ * out of a grenade's blast, not firing.
  */
-export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'falling' | 'down';
+export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' | 'shoot' | 'flee' | 'falling' | 'down';
 
 /** A round's outcome, decided when it is fired: it hits Rook, misses near him, or is fired at his cover while he is hidden. */
 export type StandInShot = 'hit' | 'miss' | 'cover';
@@ -40,6 +42,17 @@ export interface StandInHooks {
   coverHides(point: CoverPoint): boolean;
   /** Lets go of the spot it holds. */
   releaseCover(enemy: StandInEnemy): void;
+  /** The nearest live grenade it can see within `radiusM` of its feet, written into `out`. False if there is none. */
+  spotGrenade(enemy: StandInEnemy, radiusM: number, out: Vector3): boolean;
+  /** True if any live grenade is within `radiusM` of `point` (seen or not). */
+  grenadeNear(point: Vector3, radiusM: number): boolean;
+  /**
+   * Where to run from a grenade at `grenade`: the best cover point out of the blast that it can reach quickly (claimed for
+   * it, and returned), or else a spot of open floor straight away from the grenade (null returned). The spot goes into `out`.
+   */
+  planFlee(enemy: StandInEnemy, grenade: Vector3, safeM: number, out: Vector3): CoverPoint | null;
+  /** It saw a grenade and runs: for the callout (phase 6). */
+  grenadeSpotted(enemy: StandInEnemy): void;
 }
 
 const degToRad = Math.PI / 180;
@@ -50,8 +63,9 @@ const degToRad = Math.PI / 180;
 // peeks from there every few seconds: a tell (a small movement and a sound), then it rises over low cover or steps past
 // the edge of high cover, fires a burst, and goes back in; a peek that finds Rook hidden may fire at his cover anyway. It
 // does not run from a fight (decisions 209 and 210): seen up close, it stands and fires, then backs off to new cover still
-// firing; if its cover fails at range it answers with a burst before moving. If no cover hides it, it falls back to
-// heading for Rook and firing when it sees him. No drawing code here.
+// firing; if its cover fails at range it answers with a burst before moving. Wounded, it stops standing its ground and
+// pulls back into cover, peeking less; it runs out of the blast of a grenade it sees (decision 214). If no cover hides
+// it, it falls back to heading for Rook and firing when it sees him. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -67,6 +81,8 @@ export class StandInEnemy implements Target {
   readonly lastKnown = new Vector3();
   /** False until it has seen or heard him since it (re)spawned. */
   knowsWhere = false;
+  /** How long ago it last saw or heard him. */
+  lastKnownAgeSec = Infinity;
   private stateSec = 0;
   private seesPlayer = false;
   private sightTimerSec = 0;
@@ -77,6 +93,13 @@ export class StandInEnemy implements Target {
   private roundsInBurst = 0;
   /** Bursts finished since the current fight began. */
   private burstsDone = 0;
+  /** In a fight, when it may next look for cover again after finding none. */
+  private coverRetryAtSec = 0;
+  /** True from seeing a grenade until it reacts. */
+  private grenadeSeen = false;
+  private grenadeReactSec = 0;
+  private readonly grenadeAt = new Vector3();
+  private readonly fleeSpot = new Vector3();
   /** Game time since the last damaging hit, for the hit budget. */
   private sinceHitSec = Infinity;
   private readonly ears = new Vector3();
@@ -91,7 +114,9 @@ export class StandInEnemy implements Target {
   private peekTimerSec = 0;
   /** How far out it is: 0 hidden at its spot, 1 fully out. */
   private peekShare = 0;
-  /** The way a peek from high cover steps (a unit vector across the cover), or zero for low cover, which rises instead. */
+  /** How far it has risen out of a crouch for this peek (only when the peek rises over low cover). */
+  private riseShare = 0;
+  /** The way a peek steps (a unit vector across the cover), or zero when it rises over low cover instead. */
   private readonly peekSide = new Vector3();
   /** What this peek does once out: fire at Rook, fire at his cover, or just look. */
   private peekMode: 'aimed' | 'cover' | 'look' = 'look';
@@ -131,15 +156,30 @@ export class StandInEnemy implements Target {
     return this.peekShare;
   }
 
-  /** A crouched value, or the standing one; crouched behind low cover, a peek rises from one to the other. */
+  /** A crouched value, or the standing one; crouched behind low cover, a rising peek goes from one to the other. */
   private crouchedOr(crouchedValue: number, standingValue: number): number {
     if (!this.crouched) return standingValue;
-    return crouchedValue + (standingValue - crouchedValue) * this.peekShare;
+    return crouchedValue + (standingValue - crouchedValue) * this.riseShare;
+  }
+
+  /** True while what it knows of Rook is fresh enough to fire at his cover. */
+  get knowsFresh(): boolean {
+    return this.knowsWhere && this.lastKnownAgeSec <= standInConfig.memoryFreshSec;
   }
 
   /** The cover spot it holds or is walking to, or null. */
   get cover(): CoverPoint | null {
     return this.coverPoint;
+  }
+
+  /** Below its wounded share of health: it stops standing its ground (decision 214). */
+  get wounded(): boolean {
+    return this.health.current < this.health.max * standInConfig.woundedHealthShare;
+  }
+
+  /** How close a grenade must be for it to run: the blast radius plus a margin. */
+  private get grenadeDangerM(): number {
+    return grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM;
   }
 
   get hittable(): boolean {
@@ -153,7 +193,7 @@ export class StandInEnemy implements Target {
   /** The part of its route still ahead (from where it stands), for the dev overlay. Empty when it is not walking. */
   routeAhead(out: Vector3[]): Vector3[] {
     out.length = 0;
-    if (this.state !== 'approach' && this.state !== 'retreat') return out;
+    if (this.state !== 'approach' && this.state !== 'retreat' && this.state !== 'flee') return out;
     out.push(this.feet);
     for (let i = this.pathIndex; i < this.path.length; i++) out.push(this.path[i]);
     return out;
@@ -179,6 +219,7 @@ export class StandInEnemy implements Target {
     if (!hearsNoise(noise, this.ears)) return;
     this.lastKnown.set(noise.position.x, 0, noise.position.z);
     this.knowsWhere = true;
+    this.lastKnownAgeSec = 0;
     if (this.state === 'idle') this.wake();
   }
 
@@ -225,11 +266,27 @@ export class StandInEnemy implements Target {
     if (this.sightTimerSec <= 0) {
       this.seesPlayer = this.hooks.canSeePlayer(this);
       this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
+      // It looks for grenades as often as it looks for Rook.
+      if (!this.grenadeSeen && this.state !== 'flee' && this.hooks.spotGrenade(this, this.grenadeDangerM, this.grenadeAt)) {
+        this.grenadeSeen = true;
+        this.grenadeReactSec = standInConfig.grenadeReactionSec;
+      }
     }
     // Seeing him tells it where he is. Woken by a hit, or just up again, it starts from where he is too.
+    this.lastKnownAgeSec += dtSec;
     if (this.seesPlayer || !this.knowsWhere) {
       this.lastKnown.set(player.x, 0, player.z);
       this.knowsWhere = true;
+      this.lastKnownAgeSec = 0;
+    }
+    // A grenade it saw beats everything else, once it has reacted (decision 214).
+    if (this.grenadeSeen) {
+      this.grenadeReactSec -= dtSec;
+      if (this.grenadeReactSec <= 0) this.startFlee();
+    }
+    if (this.state === 'flee') {
+      this.flee(dtSec);
+      return;
     }
     this.checkCover(dtSec);
     const dx = player.x - this.feet.x;
@@ -244,7 +301,7 @@ export class StandInEnemy implements Target {
       this.retreat(dtSec, dx, dz);
       return;
     }
-    // Seen up close, it stands and fights instead of running (decision 209).
+    // Seen up close, it stands and fights instead of running (decision 209); wounded, that fight is only to get away.
     if (this.coverPoint && this.seesPlayer && distanceM <= standInConfig.standGroundM) {
       this.beginFight();
       this.fight(dtSec, dx, dz, distanceM);
@@ -281,7 +338,7 @@ export class StandInEnemy implements Target {
    * fails while it can see Rook, it answers with a fight first instead of walking off (decision 209).
    */
   private checkCover(dtSec: number): void {
-    if (this.state === 'fight' || this.state === 'retreat') return; // those pick their own next spot
+    if (this.state === 'fight' || this.state === 'retreat' || this.state === 'flee') return; // those pick their own next spot
     this.coverTimerSec -= dtSec;
     if (this.coverTimerSec > 0) return;
     this.coverTimerSec = standInConfig.coverCheckIntervalSec;
@@ -307,12 +364,14 @@ export class StandInEnemy implements Target {
     this.setState('fight');
     this.crouched = false;
     this.burstsDone = 0;
+    this.coverRetryAtSec = 0;
   }
 
   /**
    * Fights where it stands. It always finishes a burst, and fires at least one. Then, if Rook is close, it keeps on for
-   * the fight time and backs off to new cover still firing; if he is further away, it walks to new cover. With nowhere
-   * to go, it keeps fighting. If it loses sight of him it stops and finds cover.
+   * the fight time and backs off to new cover still firing; if he is further away, it walks to new cover. Wounded, it
+   * backs off as soon as its burst is done, without answering first or waiting (decision 214). With nowhere to go, it
+   * keeps fighting. If it loses sight of him it stops and finds cover.
    */
   private fight(dtSec: number, dx: number, dz: number, distanceM: number): void {
     if (!this.seesPlayer) {
@@ -320,17 +379,54 @@ export class StandInEnemy implements Target {
       return;
     }
     this.engage(dtSec, dx, dz, standInConfig.hitChance);
-    if (this.roundsInBurst !== 0 || this.burstsDone === 0) return; // never leaves mid-burst, and always answers
+    if (this.roundsInBurst !== 0) return; // never leaves mid-burst
     const close = distanceM <= standInConfig.standGroundM;
-    if (close && this.stateSec < standInConfig.fightSec) return;
+    if (!this.wounded) {
+      if (this.burstsDone === 0) return; // it always answers
+      if (close && this.stateSec < standInConfig.fightSec) return;
+    }
+    if (this.stateSec < this.coverRetryAtSec) return;
     const next = this.hooks.pickCover(this);
     this.setCover(next);
     if (!next) {
-      this.stateSec = 0; // nowhere to go: fight on, and look again after another round of fighting
+      // Nowhere to go: fight on, answer again, and look again a little later.
+      this.coverRetryAtSec = this.stateSec + Math.max(standInConfig.fightSec, standInConfig.coverCheckIntervalSec);
       this.burstsDone = 0;
       return;
     }
-    if (close) this.setState('retreat');
+    if (close || this.wounded) this.setState('retreat');
+    else this.startWalking();
+  }
+
+  /** Runs from the grenade it saw: picks where to, says so, and goes. */
+  private startFlee(): void {
+    this.grenadeSeen = false;
+    this.hooks.grenadeSpotted(this);
+    const point = this.hooks.planFlee(this, this.grenadeAt, this.grenadeDangerM, this.fleeSpot);
+    this.coverPoint = point;
+    if (point) this.coverSpot.set(point.xM, 0, point.zM);
+    this.crouched = false;
+    this.engaged = false;
+    this.setState('flee');
+    this.repathTimerSec = 0;
+  }
+
+  /**
+   * Runs to its flee spot without firing, then waits there until no live grenade threatens it. A grenade that still
+   * does (it rolled after it) and that it can see sends it running again. Then it carries on as usual.
+   */
+  private flee(dtSec: number): void {
+    const toSpotM = Math.hypot(this.fleeSpot.x - this.feet.x, this.fleeSpot.z - this.feet.z);
+    if (toSpotM > standInConfig.coverArriveM) {
+      this.walkRoute(dtSec, this.fleeSpot, standInConfig.grenadeRunSpeedMps);
+      return;
+    }
+    if (this.hooks.grenadeNear(this.feet, this.grenadeDangerM)) {
+      if (this.hooks.spotGrenade(this, this.grenadeDangerM, this.grenadeAt)) this.startFlee();
+      return;
+    }
+    this.coverTimerSec = 0; // safe: check its cover straight away
+    if (this.coverPoint) this.setState('cover');
     else this.startWalking();
   }
 
@@ -395,24 +491,29 @@ export class StandInEnemy implements Target {
     }
   }
 
-  /** The tell: picks the side to come out on, warns with a sound, and starts to move. */
+  /**
+   * The tell: picks how to come out, warns with a sound, and starts to move. Low cover offers rising over the top (0) and
+   * its open sides; high cover its open sides only (1 is right, -1 left, as seen facing the cover). It picks at random
+   * among the ways that let it see Rook, or among all of them if none does (decision 216).
+   */
   private startTell(point: CoverPoint): void {
-    this.peekSide.set(0, 0, 0);
-    if (point.height === 'high') {
-      const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
-      const rightZ = -Math.sin(point.facingYawRad);
-      const sides = point.lean === 'left' ? [-1] : point.lean === 'right' ? [1] : [1, -1];
-      // Prefer a side that lets it see Rook; otherwise any open side.
-      let chosen = sides[Math.floor(this.random() * sides.length) % sides.length];
-      for (const sign of sides) {
-        this.peekEyes.set(this.coverSpot.x + sign * rightX * standInConfig.peekStepM, standInConfig.eyeHeightM, this.coverSpot.z + sign * rightZ * standInConfig.peekStepM);
-        if (this.hooks.seesPlayerFrom(this.peekEyes)) {
-          chosen = sign;
-          break;
-        }
-      }
-      this.peekSide.set(chosen * rightX, 0, chosen * rightZ);
-    }
+    const low = point.height === 'low';
+    const ways = low ? [0] : [];
+    if (point.lean === 'right' || point.lean === 'both') ways.push(1);
+    if (point.lean === 'left' || point.lean === 'both') ways.push(-1);
+    if (ways.length === 0) ways.push(1); // a high spot with no open side listed: it still steps out somewhere
+    const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
+    const rightZ = -Math.sin(point.facingYawRad);
+    const stepM = low ? standInConfig.crouchPeekStepM : standInConfig.peekStepM;
+    const seeing = ways.filter((way) => {
+      // Rising, its eyes are at standing height over the spot; stepping, at its height there, to the side.
+      const eyeM = low && way !== 0 ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
+      this.peekEyes.set(this.coverSpot.x + way * rightX * stepM, eyeM, this.coverSpot.z + way * rightZ * stepM);
+      return this.hooks.seesPlayerFrom(this.peekEyes);
+    });
+    const choices = seeing.length > 0 ? seeing : ways;
+    const way = choices[Math.min(Math.floor(this.random() * choices.length), choices.length - 1)];
+    this.peekSide.set(way * rightX, 0, way * rightZ);
     this.hooks.peekTell(this);
     this.peekPhase = 'tell';
     this.peekTimerSec = standInConfig.tellSec;
@@ -423,7 +524,9 @@ export class StandInEnemy implements Target {
     this.peekPhase = 'fire';
     this.seesPlayer = this.hooks.canSeePlayer(this);
     this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
-    this.peekMode = this.seesPlayer ? 'aimed' : this.random() < standInConfig.hiddenFireChance ? 'cover' : 'look';
+    // Fire at his cover only on fresh knowledge of where he is (decision 216); old knowledge, it only looks.
+    const fireAtCover = this.knowsFresh && this.random() < standInConfig.hiddenFireChance;
+    this.peekMode = this.seesPlayer ? 'aimed' : fireAtCover ? 'cover' : 'look';
     this.peekRounds = 0;
     this.cooldownSec = 0; // the tell was the warning: no extra reaction pause
     this.peekTimerSec = standInConfig.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
@@ -455,15 +558,21 @@ export class StandInEnemy implements Target {
   private resetPeek(): void {
     this.peekPhase = 'hold';
     this.peekShare = 0;
-    const { peekHoldMinSec, peekHoldMaxSec } = standInConfig;
-    this.peekTimerSec = peekHoldMinSec + this.random() * Math.max(peekHoldMaxSec - peekHoldMinSec, 0);
+    this.riseShare = 0;
+    const { peekHoldMinSec, peekHoldMaxSec, woundedHoldScale } = standInConfig;
+    const holdSec = peekHoldMinSec + this.random() * Math.max(peekHoldMaxSec - peekHoldMinSec, 0);
+    this.peekTimerSec = holdSec * (this.wounded ? woundedHoldScale : 1); // wounded, it stays tucked in longer
   }
 
-  /** How far out it is. Low cover: it rises. High cover: its feet move from the spot toward the open side. */
+  /** How far out it is. Rising over low cover: it stands up. Stepping out: its feet move from the spot toward the open side. */
   private setPeekShare(point: CoverPoint, share: number): void {
     this.peekShare = share;
-    if (point.height === 'low') return; // rising is read through `crouchedOr`
-    const stepM = standInConfig.peekStepM * share;
+    const rising = this.peekSide.lengthSq() === 0;
+    if (rising) {
+      this.riseShare = share; // read through `crouchedOr`
+      return;
+    }
+    const stepM = (point.height === 'low' ? standInConfig.crouchPeekStepM : standInConfig.peekStepM) * share;
     this.feet.x = this.coverSpot.x + this.peekSide.x * stepM;
     this.feet.z = this.coverSpot.z + this.peekSide.z * stepM;
   }
@@ -590,6 +699,8 @@ export class StandInEnemy implements Target {
     this.engaged = false;
     this.burstsDone = 0;
     this.knowsWhere = false;
+    this.lastKnownAgeSec = Infinity;
+    this.grenadeSeen = false;
     this.sinceHitSec = Infinity;
     this.path.length = 0;
     this.pathIndex = 0;

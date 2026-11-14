@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
+import { grenadeConfig } from '../config/grenade';
 import { playerConfig } from '../config/player';
 import { rifleConfig } from '../config/rifle';
 import { standInConfig } from '../config/standInEnemy';
@@ -45,6 +46,8 @@ export class StandInWorld implements StandInHooks {
     private readonly quarry: StandInQuarry,
     /** Hurts Rook. */
     private readonly damagePlayer: (amount: number) => void,
+    /** Where every live grenade is right now (the grenade system's `livePositions`). */
+    private readonly liveGrenades: () => readonly Vector3[] = () => [],
     private readonly random: () => number = Math.random,
   ) {}
 
@@ -77,9 +80,79 @@ export class StandInWorld implements StandInHooks {
     this.coverPoints.release(enemy);
   }
 
-  /** How far it would walk to reach a spot along the navigation mesh, or Infinity if the route does not get there. */
+  spotGrenade(enemy: StandInEnemy, radiusM: number, out: Vector3): boolean {
+    this.enemyEyes.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    let nearestM = Infinity;
+    for (const grenade of this.liveGrenades()) {
+      const distanceM = Math.hypot(grenade.x - enemy.xM, grenade.z - enemy.zM);
+      if (distanceM > radiusM || distanceM >= nearestM) continue;
+      if (!this.clearLine(this.enemyEyes, grenade)) continue; // it must see it (enemies.md)
+      nearestM = distanceM;
+      out.copy(grenade);
+    }
+    return nearestM < Infinity;
+  }
+
+  grenadeNear(point: Vector3, radiusM: number): boolean {
+    return this.liveGrenades().some((grenade) => Math.hypot(grenade.x - point.x, grenade.z - point.z) <= radiusM);
+  }
+
+  /**
+   * Prefers a cover point out of the blast that hides it from Rook, then the shortest walk, within its run limit. With
+   * none, open floor straight away from the grenade, just outside the blast (or where it stands, if the mesh has no floor there).
+   */
+  planFlee(enemy: StandInEnemy, grenade: Vector3, safeM: number, out: Vector3): CoverPoint | null {
+    let best: CoverPoint | null = null;
+    let bestHides = false;
+    let bestWalkM = Infinity;
+    for (const point of this.coverPoints.points) {
+      const holder = this.coverPoints.claimedBy(point);
+      if (holder && holder !== enemy) continue;
+      if (Math.hypot(point.xM - grenade.x, point.zM - grenade.z) < safeM) continue;
+      const walk = this.walkM(enemy, point);
+      if (walk > standInConfig.grenadeRunMaxM) continue;
+      const hides = this.coverPoints.hides(point, this.quarry.eyes);
+      if ((hides && !bestHides) || (hides === bestHides && walk < bestWalkM)) {
+        best = point;
+        bestHides = hides;
+        bestWalkM = walk;
+      }
+    }
+    if (best) {
+      this.coverPoints.claim(best, enemy);
+      out.set(best.xM, 0, best.zM);
+      return best;
+    }
+    this.coverPoints.release(enemy);
+    let awayX = enemy.xM - grenade.x;
+    let awayZ = enemy.zM - grenade.z;
+    const fromGrenadeM = Math.hypot(awayX, awayZ);
+    if (fromGrenadeM < 1e-3) {
+      awayX = Math.sin(enemy.yawRad); // right on top of it: straight back
+      awayZ = Math.cos(enemy.yawRad);
+    } else {
+      awayX /= fromGrenadeM;
+      awayZ /= fromGrenadeM;
+    }
+    const runM = Math.max(safeM - fromGrenadeM, 0) + standInConfig.coverArriveM;
+    this.spot.set(enemy.xM + awayX * runM, 0, enemy.zM + awayZ * runM);
+    if (!this.navigation.closestPoint(this.spot, out)) out.copy(enemy.feet);
+    out.y = 0;
+    return null;
+  }
+
+  grenadeSpotted(enemy: StandInEnemy): void {
+    this.target.set(enemy.xM, enemy.heightM, enemy.zM);
+    this.events.emit('enemy:grenade-spotted', { position: this.target });
+  }
+
+  /**
+   * How far it would walk to reach a spot along the navigation mesh, or Infinity if the route does not get there or the
+   * spot is inside the blast of a live grenade (so it never picks cover next to one).
+   */
   private walkM(enemy: StandInEnemy, point: CoverPoint): number {
     this.spot.set(point.xM, 0, point.zM);
+    if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) return Infinity;
     if (!this.navigation.findPath(enemy.feet, this.spot, this.routeToCover)) return Infinity;
     const route = this.routeToCover;
     if (route[route.length - 1].distanceTo(this.spot) > standInConfig.coverArriveM) return Infinity;

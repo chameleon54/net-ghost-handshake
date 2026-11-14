@@ -61,6 +61,32 @@ describe('the cover points in the test room', () => {
     }
   });
 
+  it('a low spot with open sides: a crouched peek to each is on the navigation mesh and sees past the end', () => {
+    const { crouchPeekStepM, crouchEyeHeightM } = standInConfig;
+    const onMesh = new Vector3();
+    const direction = new Vector3();
+    const clear = (from: Vector3, to: Vector3) => {
+      const d = from.distanceTo(to);
+      direction.subVectors(to, from).divideScalar(d);
+      return level.collision.rayDistance(from, direction, d) === Infinity;
+    };
+    for (const p of greyboxCover.filter((c) => c.height === 'low' && c.lean)) {
+      const fX = -Math.sin(p.facingYawRad);
+      const fZ = -Math.cos(p.facingYawRad);
+      const rightX = Math.cos(p.facingYawRad);
+      const rightZ = -Math.sin(p.facingYawRad);
+      const ahead = 1.5;
+      expect(clear(new Vector3(p.xM, crouchEyeHeightM, p.zM), new Vector3(p.xM + fX * ahead, crouchEyeHeightM, p.zM + fZ * ahead))).toBe(false);
+      for (const sign of p.lean === 'left' ? [-1] : p.lean === 'right' ? [1] : [1, -1]) {
+        const x = p.xM + sign * rightX * crouchPeekStepM;
+        const z = p.zM + sign * rightZ * crouchPeekStepM;
+        expect(navigation.closestPoint(new Vector3(x, 0, z), onMesh)).toBe(true);
+        expect(Math.hypot(onMesh.x - x, onMesh.z - z), `crouched peek from ${p.xM}, ${p.zM} lands off the mesh`).toBeLessThan(0.05);
+        expect(clear(new Vector3(x, crouchEyeHeightM, z), new Vector3(x + fX * ahead, crouchEyeHeightM, z + fZ * ahead)), `crouched peek from ${p.xM}, ${p.zM} does not clear the end`).toBe(true);
+      }
+    }
+  });
+
   it('each point toward a prop within a metre in the direction they face', () => {
     for (const p of greyboxCover) {
       const x = p.xM - Math.sin(p.facingYawRad) * 0.6;

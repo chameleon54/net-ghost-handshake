@@ -40,6 +40,7 @@ export class GrenadeSystem implements GrenadeHooks {
   private readonly tilt = new THREE.Quaternion();
   private readonly chest = new THREE.Vector3();
   private readonly hit = createRayHit();
+  private readonly livePoints: THREE.Vector3[] = [];
 
   constructor(
     scene: THREE.Scene,
@@ -65,6 +66,13 @@ export class GrenadeSystem implements GrenadeHooks {
   /** How many grenades are in the air or waiting to go off. */
   get live(): number {
     return this.pool.filter((p) => p.grenade.active).length;
+  }
+
+  /** Where every live grenade is right now, for enemies to react to. The array and its vectors are reused: read them straight away. */
+  livePositions(): readonly THREE.Vector3[] {
+    this.livePoints.length = 0;
+    for (const { grenade } of this.pool) if (grenade.active) this.livePoints.push(grenade.position);
+    return this.livePoints;
   }
 
   /** Removes every grenade in the air without a blast (instant restart). */

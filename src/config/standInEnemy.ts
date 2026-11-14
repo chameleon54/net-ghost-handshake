@@ -36,8 +36,24 @@ export const standInConfigDefaults = {
   peekBackSec: 0.25,
   /** How far it steps sideways out of high cover. */
   peekStepM: 0.6,
+  /** How far it steps sideways out of low cover, staying crouched (decision 216). */
+  crouchPeekStepM: 0.75,
+  /** What it knows of Rook stays fresh this long; a peek fires at his cover only on fresh knowledge (decision 216). */
+  memoryFreshSec: 5,
   /** Chance that a peek which finds Rook hidden fires its burst at his cover anyway, for pressure (decision 207). */
   hiddenFireChance: 0.5,
+  /** Below this share of its health it is wounded: it stops standing its ground and pulls back to cover (decision 214). */
+  woundedHealthShare: 0.4,
+  /** Wounded, it holds this many times longer between peeks. */
+  woundedHoldScale: 1.5,
+  /** It runs from a grenade it can see within the blast radius plus this margin. */
+  grenadeMarginM: 1,
+  /** Time between seeing a grenade and running from it. */
+  grenadeReactionSec: 0.4,
+  /** How fast it runs from a grenade (faster than its walk). */
+  grenadeRunSpeedMps: 4.5,
+  /** It only runs to a cover point this close by walking; otherwise to open floor straight away from the grenade. */
+  grenadeRunMaxM: 9,
   /** How often it checks whether it can see Rook (perception does not run every update). */
   sightChecksPerSec: 5,
   /** Pause after it first gets sight before the first burst. */

@@ -116,7 +116,15 @@ const quarry = {
 };
 const standIn = new StandInEnemy(
   greyboxStandIn,
-  new StandInWorld(weaponEvents, level.collision, navigation, coverPoints, quarry, (amount) => playerHealth.damage(amount, 'enemy')),
+  new StandInWorld(
+    weaponEvents,
+    level.collision,
+    navigation,
+    coverPoints,
+    quarry,
+    (amount) => playerHealth.damage(amount, 'enemy'),
+    () => grenades.livePositions(), // the grenade system is made further down
+  ),
 );
 const standInView = new StandInView(standIn);
 scene.add(standInView.group);

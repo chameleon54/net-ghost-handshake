@@ -11,6 +11,7 @@ import { greyboxRoom } from '../src/data/greyboxRoom';
 import { greyboxCover } from '../src/data/greyboxCover';
 import { CoverPoints, type CoverPoint } from '../src/level/cover';
 import { dummyConfig } from '../src/config/dummy';
+import { grenadeConfig } from '../src/config/grenade';
 import type { Noise } from '../src/stealth/noise';
 import type { WeaponEvents } from '../src/weapons/events';
 
@@ -35,6 +36,12 @@ function setup(roll = 0.99) {
     /** Which peek positions see Rook (for choosing a side); by default the same as `sees`. */
     seesFrom: null as ((eyes: Vector3) => boolean) | null,
     tells: [] as number[],
+    /** A live grenade (or none), whether it can be seen, and where planFlee sends it. */
+    grenade: null as Vector3 | null,
+    grenadeVisible: true,
+    fleeTo: new Vector3(),
+    fleeCover: null as CoverPoint | null,
+    spotted: 0,
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -43,6 +50,18 @@ function setup(roll = 0.99) {
     fire: (_enemy, shot) => shots.push({ atSec: world.clockSec, hits: shot === 'hit', shot }),
     seesPlayerFrom: (eyes) => (world.seesFrom ? world.seesFrom(eyes) : world.sees),
     peekTell: () => world.tells.push(world.clockSec),
+    spotGrenade: (e, radiusM, out) => {
+      const g = world.grenade;
+      if (!g || !world.grenadeVisible || Math.hypot(g.x - e.xM, g.z - e.zM) > radiusM) return false;
+      out.copy(g);
+      return true;
+    },
+    grenadeNear: (point, radiusM) => world.grenade !== null && Math.hypot(world.grenade.x - point.x, world.grenade.z - point.z) <= radiusM,
+    planFlee: (_e, _g, _safe, out) => {
+      out.copy(world.fleeTo);
+      return world.fleeCover;
+    },
+    grenadeSpotted: () => world.spotted++,
     findPath: (from, to, out) => {
       out.length = 0;
       out.push(from.clone(), ...(world.route ?? [to]).map((p) => p.clone()));
@@ -520,6 +539,7 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
 
   it('a peek that finds Rook hidden fires at his cover when the chance comes up, and only looks when it does not', () => {
     const lucky = holding(lowSpot, standInConfig.hiddenFireChance / 2); // every roll below the chance
+    lucky.enemy.hear(noiseAt(new Vector3(0, 1.6, 10), 30)); // fresh knowledge of where he is
     lucky.run(rook, holdSec(standInConfig.hiddenFireChance / 2) + 2);
     expect(lucky.shots.length).toBe(standInConfig.burstRounds);
     expect(lucky.shots.every((s) => s.shot === 'cover')).toBe(true);
@@ -527,6 +547,41 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
     unlucky.run(rook, holdSec(0.99) + 2);
     expect(unlucky.world.tells).toHaveLength(1); // it did peek
     expect(unlucky.shots).toHaveLength(0);
+  });
+
+  it('from low cover with an open side, it steps out crouched when only the side sees Rook', () => {
+    const sideSpot: CoverPoint = { ...lowSpot, lean: 'both' };
+    const { enemy, world, run } = holding(sideSpot);
+    // Facing south, its left is east. Only eyes east of the spot at crouched height see him.
+    world.seesFrom = (eyes) => eyes.x > 0.3 && eyes.y < 1;
+    runUntil(run, rook, () => enemy.peekOut >= 1);
+    expect(enemy.feet.x).toBeCloseTo(standInConfig.crouchPeekStepM, 5);
+    expect(enemy.crouched).toBe(true);
+    expect(enemy.heightM).toBe(standInConfig.crouchHeightM); // it stays crouched
+    run(rook, 2);
+    expect(enemy.feet.x).toBeCloseTo(0, 5);
+  });
+
+  it('from low cover with open sides, it rises when only the top sees Rook', () => {
+    const sideSpot: CoverPoint = { ...lowSpot, lean: 'both' };
+    const { enemy, world, run } = holding(sideSpot);
+    world.seesFrom = (eyes) => eyes.y > 1.5 && Math.abs(eyes.x) < 0.01; // standing, over the spot
+    runUntil(run, rook, () => enemy.peekOut >= 1);
+    expect(enemy.feet.x).toBeCloseTo(0, 5);
+    expect(enemy.heightM).toBeCloseTo(dummyConfig.heightM, 5);
+  });
+
+  it('on old knowledge a peek only looks: it fires at his cover only if it saw or heard him recently', () => {
+    const { enemy, world, shots, run } = holding(lowSpot, standInConfig.hiddenFireChance / 2); // every roll would fire
+    run(rook, standInConfig.memoryFreshSec + 1); // nothing new about Rook for longer than its memory stays fresh
+    expect(enemy.knowsFresh).toBe(false);
+    shots.length = 0; // count only what the peeks on old knowledge do
+    const toldBefore = world.tells.length;
+    runUntil(run, rook, () => world.tells.length > toldBefore);
+    run(rook, 1.5);
+    expect(shots.filter((s) => s.shot === 'cover')).toHaveLength(0);
+    enemy.hear(noiseAt(new Vector3(0, 1.6, 10), 30)); // heard again: fresh
+    expect(enemy.knowsFresh).toBe(true);
   });
 
   it('peeks again after another hold', () => {
@@ -542,6 +597,128 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
     runUntil(run, near, () => enemy.peekOut >= 1);
     run(near, 2 * dtSec);
     expect(enemy.state).toBe('fight');
+  });
+});
+
+describe('StandInEnemy wounded (4.4 follow-up)', () => {
+  const firstSpot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI };
+  const nextSpot: CoverPoint = { xM: 0, zM: -9, height: 'high', facingYawRad: Math.PI, lean: 'both' };
+  const woundingDamage = standInConfig.healthPoints * (1 - standInConfig.woundedHealthShare) + 1;
+
+  it('counts as wounded below its share of health', () => {
+    const { enemy } = setup();
+    expect(enemy.wounded).toBe(false);
+    enemy.hit('body', woundingDamage);
+    expect(enemy.wounded).toBe(true);
+  });
+
+  it('rushed while wounded, it does not stand its ground: it backs off to cover at once, still firing', () => {
+    const { enemy, world, shots, run } = setup();
+    world.sees = false;
+    world.cover = firstSpot;
+    enemy.hit('body', woundingDamage);
+    run(new Vector3(0, 0, 20), 3);
+    expect(enemy.state).toBe('cover');
+    world.sees = true;
+    world.coverHides = false;
+    world.cover = nextSpot;
+    run(new Vector3(0, 0, 1), 0.3); // 4 m away: an unhurt one would fight here for 2 s
+    expect(enemy.state).toBe('retreat');
+    run(new Vector3(0, 0, 1), 1.5);
+    expect(shots.length).toBeGreaterThan(0); // it fires as it backs off
+  });
+
+  it('holds longer between peeks while wounded', () => {
+    const roll = 0.5;
+    const holdSec = standInConfig.peekHoldMinSec + roll * (standInConfig.peekHoldMaxSec - standInConfig.peekHoldMinSec);
+    const tellAt = (wounded: boolean) => {
+      const { enemy, world, run } = setup(roll);
+      world.sees = false;
+      world.cover = firstSpot;
+      enemy.hit('body', wounded ? woundingDamage : 1);
+      for (let i = 0; i < 20 / dtSec && world.tells.length === 0; i++) run(new Vector3(0, 0, 20), dtSec);
+      return world.tells[0];
+    };
+    const gapSec = tellAt(true) - tellAt(false);
+    expect(gapSec).toBeCloseTo(holdSec * (standInConfig.woundedHoldScale - 1), 1);
+  });
+});
+
+describe('StandInEnemy and grenades (4.4 follow-up)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI };
+  const rook = new Vector3(0, 0, 15);
+
+  function holding() {
+    const s = setup();
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(rook, 2);
+    expect(s.enemy.state).toBe('cover');
+    s.world.clockSec = 0;
+    return s;
+  }
+
+  it('seeing a grenade near it, it reacts after a moment and runs to safety, not firing, faster than it walks', () => {
+    const { enemy, world, shots, run } = holding();
+    world.grenade = new Vector3(0.5, 0.05, -2.5); // right at its spot
+    world.fleeTo.set(0, 0, -12);
+    run(rook, standInConfig.grenadeReactionSec - 0.1);
+    expect(enemy.state).toBe('cover'); // not yet: it has not reacted
+    run(rook, 0.2 + 1 / standInConfig.sightChecksPerSec);
+    expect(enemy.state).toBe('flee');
+    expect(world.spotted).toBe(1);
+    expect(enemy.crouched).toBe(false);
+    const zBefore = enemy.feet.z;
+    run(rook, 1);
+    expect(zBefore - enemy.feet.z).toBeGreaterThan(standInConfig.walkSpeedMps); // running, not walking
+    expect(shots).toHaveLength(0);
+  });
+
+  it('once its flee spot is out of the blast, it takes that cover at once', () => {
+    const { enemy, world, run } = holding();
+    const refuge: CoverPoint = { xM: 0, zM: -12, height: 'low', facingYawRad: Math.PI };
+    world.grenade = new Vector3(0, 0.05, -2.8);
+    world.fleeTo.set(0, 0, -12);
+    world.fleeCover = refuge;
+    run(rook, 3.5);
+    expect(enemy.state).toBe('cover');
+    expect(enemy.cover).toBe(refuge);
+    expect(enemy.feet.distanceTo(new Vector3(0, 0, -12))).toBeLessThan(standInConfig.coverArriveM + 0.05);
+  });
+
+  it('if the grenade still threatens it where it ran to, it waits, then carries on once the grenade has gone off', () => {
+    const { enemy, world, run } = holding();
+    world.grenade = new Vector3(0, 0.05, -2.8);
+    world.fleeTo.set(0, 0, -7); // still inside the danger zone (the grenade rolled, say)
+    run(rook, 3);
+    expect(enemy.state).toBe('flee');
+    expect(enemy.feet.distanceTo(new Vector3(0, 0, -7))).toBeLessThan(standInConfig.coverArriveM + 0.05);
+    world.grenade = null; // it went off
+    run(rook, 0.1);
+    expect(enemy.state).not.toBe('flee');
+  });
+
+  it('ignores a grenade it cannot see, or one too far away to hurt it', () => {
+    const hidden = holding();
+    hidden.world.grenade = new Vector3(0, 0.05, -2.5);
+    hidden.world.grenadeVisible = false;
+    hidden.run(rook, 1);
+    expect(hidden.enemy.state).toBe('cover');
+    const far = holding();
+    far.world.grenade = new Vector3(0, 0.05, -3 - grenadeConfig.blastRadiusM - standInConfig.grenadeMarginM - 0.5);
+    far.run(rook, 1);
+    expect(far.enemy.state).toBe('cover');
+  });
+
+  it('never stops to fight while running, even with Rook close', () => {
+    const { enemy, world, shots, run } = holding();
+    world.grenade = new Vector3(0, 0.05, -2.5);
+    world.fleeTo.set(0, 0, -12);
+    world.sees = true;
+    run(new Vector3(0, 0, 0), 1.5); // Rook 3 m away, in sight
+    expect(enemy.state).toBe('flee');
+    expect(shots).toHaveLength(0);
   });
 });
 
@@ -660,5 +837,32 @@ describe('the stand-in in the real test room (4.3)', () => {
     const fromPlayerM = Math.hypot(spot.xM - 0, spot.zM - 4.5);
     expect(fromPlayerM).toBeGreaterThanOrEqual(5);
     expect(fromPlayerM).toBeLessThanOrEqual(12);
+  });
+});
+
+describe('the stand-in and a real grenade in the real test room (4.4 follow-up)', () => {
+  it('sees a grenade at its spot, plans a run out of the blast, and does not see one behind its crate', async () => {
+    const level = buildGreybox();
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const cover = new CoverPoints(greyboxCover, level.collision);
+    const player = { position: new Vector3(0, 0, 4.5), eyeHeightNowM: 1.6, eyes: new Vector3(0, 1.6, 4.5) };
+    const grenades: Vector3[] = [];
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, player, () => {}, () => grenades);
+    const enemy = new StandInEnemy({ xM: 1.95, zM: -3, yawRad: -Math.PI / 2 }, world); // west of the tall crate
+    const safeM = grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM;
+    const seen = new Vector3();
+    grenades.push(new Vector3(1.6, 0.05, -2.2)); // on the floor beside it
+    expect(world.spotGrenade(enemy, safeM, seen)).toBe(true);
+    const out = new Vector3();
+    const point = world.planFlee(enemy, seen, safeM, out);
+    expect(Math.hypot(out.x - seen.x, out.z - seen.z)).toBeGreaterThanOrEqual(safeM - standInConfig.coverArriveM);
+    const onMesh = new Vector3();
+    expect(navigation.closestPoint(out, onMesh)).toBe(true);
+    expect(Math.hypot(onMesh.x - out.x, onMesh.z - out.z)).toBeLessThan(0.05); // the mesh sits a little above the floor
+    if (point) expect(cover.claimedBy(point)).toBe(enemy);
+    grenades.length = 0;
+    grenades.push(new Vector3(3.9, 0.05, -3)); // just east of the tall crate: the crate is between
+    expect(world.spotGrenade(enemy, safeM, seen)).toBe(false);
+    expect(world.grenadeNear(enemy.feet, safeM)).toBe(true); // it is there all the same
   });
 });

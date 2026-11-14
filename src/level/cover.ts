@@ -13,7 +13,7 @@ export interface CoverPoint {
   readonly height: 'low' | 'high';
   /** Points from the spot toward the cover: the direction it protects from. 0 = north (-z), like the player's yaw. */
   readonly facingYawRad: number;
-  /** High cover only: which sides a peek can step out from, as seen facing the cover (4.4). */
+  /** Which sides a peek can step out from, as seen facing the cover (4.4; low cover too since decision 216). */
   readonly lean?: 'left' | 'right' | 'both';
 }
 
@@ -78,6 +78,12 @@ export class CoverPoints {
     this.release(owner);
     if (best) this.claims.set(best, owner);
     return best;
+  }
+
+  /** Claims `point` for `owner`, letting go of any spot it held before. */
+  claim(point: CoverPoint, owner: Owner): void {
+    this.release(owner);
+    this.claims.set(point, owner);
   }
 
   /** Clears every claim (instant restart). */
