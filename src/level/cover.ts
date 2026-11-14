@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { coverConfig } from '../config/cover';
+import { roleConfig } from '../config/roles';
 import { dummyConfig } from '../config/dummy';
 import { standInConfig } from '../config/standInEnemy';
 import type { LevelCollision } from './collision';
@@ -60,7 +61,14 @@ export class CoverPoints {
    * short walk (`walkM` gives the walking distance to a spot, Infinity if it cannot be reached). The winner is claimed
    * for `owner`, and any spot it held before is let go.
    */
-  best(owner: Owner, eyes: Vector3, feet: Vector3, walkM: (point: CoverPoint) => number): CoverPoint | null {
+  best(
+    owner: Owner,
+    eyes: Vector3,
+    feet: Vector3,
+    walkM: (point: CoverPoint) => number,
+    /** The liked distance from the threat (the enemy's role). */
+    range: { readonly preferMinM: number; readonly preferMaxM: number } = roleConfig.trooper,
+  ): CoverPoint | null {
     let best: CoverPoint | null = null;
     let bestScore = -Infinity;
     for (const point of this.points) {
@@ -68,7 +76,7 @@ export class CoverPoints {
       if (holder && holder !== owner) continue;
       if (!this.hides(point, eyes)) continue;
       const fromThreatM = Math.hypot(point.xM - feet.x, point.zM - feet.z);
-      const outOfRangeM = Math.max(coverConfig.preferMinM - fromThreatM, fromThreatM - coverConfig.preferMaxM, 0);
+      const outOfRangeM = Math.max(range.preferMinM - fromThreatM, fromThreatM - range.preferMaxM, 0);
       const walk = walkM(point);
       if (!Number.isFinite(walk)) continue;
       const score = -(outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM);

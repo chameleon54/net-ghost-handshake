@@ -17,6 +17,7 @@ import { coverConfig, coverConfigDefaults } from '../config/cover';
 import { exposureConfig, exposureConfigDefaults } from '../config/exposure';
 import type { Exposure } from '../player/exposure';
 import { squadConfig, squadConfigDefaults } from '../config/squad';
+import { roleConfig, roleConfigDefaults, roles } from '../config/roles';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
@@ -40,7 +41,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -150,6 +151,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(coverConfig, coverConfigDefaults);
       resetToDefaults(exposureConfig, exposureConfigDefaults);
       resetToDefaults(squadConfig, squadConfigDefaults);
+      for (const role of roles) resetToDefaults(roleConfig[role], roleConfigDefaults[role]);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -174,6 +176,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/cover.ts': changedValues(coverConfig, coverConfigDefaults),
           'src/config/exposure.ts': changedValues(exposureConfig, exposureConfigDefaults),
           'src/config/squad.ts': changedValues(squadConfig, squadConfigDefaults),
+          ...Object.fromEntries(roles.map((role) => [`src/config/roles.ts, ${role}`, changedValues(roleConfig[role], roleConfigDefaults[role])])),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -257,6 +260,13 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const squadPanel = standInPanel.addFolder(squadFolder.title);
   squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const rolesPanel = standInPanel.addFolder('Roles (4.8)');
+  rolesPanel.close();
+  for (const role of roles) {
+    const rolePanel = rolesPanel.addFolder(role);
+    rolePanel.close();
+    for (const s of roleSliders) rolePanel.add(roleConfig[role], s.key, s.min, s.max, s.step).name(s.label);
+  }
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();
@@ -353,7 +363,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
     enemyLines = activeStandIns.map(
       (s, i) =>
-        `${letter(i)}         ${s.state}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `${letter(i)} ${s.role.padEnd(8)}${s.state}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));

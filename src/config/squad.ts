@@ -22,10 +22,15 @@ export const squadConfigDefaults = {
   flankMinAngleDeg: 60,
   /** At most this much of the route to a flank spot may be in Rook's view. */
   flankMaxExposedM: 4,
-  /** A flanker moves this fast (its walk is slower). */
-  flankSpeedMps: 3.5,
+  // How fast a flank goes is per role since 4.8 (src/config/roles.ts).
   /** Seen by Rook for this long on the way, the flank is called off. */
   spottedSec: 0.5,
+  /** When the squad leader goes down, the squad is disorganised this long (decision 228)... */
+  disorderSec: 6,
+  /** ...with only this many firing slots... */
+  disorderSlots: 1,
+  /** ...and its members hold this many times longer between peeks. No flank starts meanwhile. */
+  disorderHoldScale: 1.5,
   /** The flank attack (decision 227): on arrival it peeks at once and stays out firing for at most this long... */
   flankPressMaxSec: 6,
   /** ...or until it has not seen Rook for this long (or he hurts it). */

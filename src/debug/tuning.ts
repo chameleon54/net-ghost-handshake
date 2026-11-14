@@ -15,6 +15,7 @@ import type { StandInConfig } from '../config/standInEnemy';
 import type { CoverConfig } from '../config/cover';
 import type { ExposureConfig } from '../config/exposure';
 import type { SquadConfig } from '../config/squad';
+import type { RoleValues } from '../config/roles';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -51,6 +52,7 @@ type StandInKey = keyof StandInConfig;
 type CoverKey = keyof CoverConfig;
 type ExposureKey = keyof ExposureConfig;
 type SquadKey = keyof SquadConfig;
+type RoleKey = keyof RoleValues;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -473,8 +475,6 @@ export const dummyFolder: Folder<DummyKey> = {
 export const standInFolder: Folder<StandInKey> = {
   title: 'Stand-in enemy',
   sliders: [
-    { key: 'healthPoints', label: 'Health (from next spawn)', min: 1, max: 500, step: 1 },
-    { key: 'walkSpeedMps', label: 'Walk speed (m/s)', min: 0, max: 8, step: 0.1 },
     { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
@@ -505,7 +505,6 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'sightChecksPerSec', label: 'Sight checks per s', min: 1, max: 30, step: 1 },
     { key: 'reactionSec', label: 'Reaction before firing (s)', min: 0, max: 3, step: 0.05 },
     { key: 'aimToleranceDeg', label: 'Fires when facing within (deg)', min: 1, max: 90, step: 1 },
-    { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 10, step: 1 },
     { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
     { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
     { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
@@ -517,8 +516,6 @@ export const standInFolder: Folder<StandInKey> = {
 export const coverFolder: Folder<CoverKey> = {
   title: 'Choosing cover',
   sliders: [
-    { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
-    { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
     { key: 'rangePenaltyPerM', label: 'Penalty per m outside that', min: 0, max: 5, step: 0.1 },
     { key: 'walkPenaltyPerM', label: 'Penalty per m of walking', min: 0, max: 5, step: 0.05 },
     { key: 'chestShareOfHeight', label: 'Hidden check: chest at (share of height)', min: 0.2, max: 0.9, step: 0.05 },
@@ -549,6 +546,16 @@ export const exposureFolder: Folder<ExposureKey> = {
   ],
 };
 
+/** The sliders for one role's values (4.8); the dev panel shows one folder of these per role. */
+export const roleSliders: Slider<RoleKey>[] = [
+  { key: 'healthPoints', label: 'Health (from next spawn)', min: 1, max: 500, step: 1 },
+  { key: 'walkSpeedMps', label: 'Walk speed (m/s)', min: 0.2, max: 8, step: 0.1 },
+  { key: 'flankSpeedMps', label: 'Flank speed (m/s, 0: never flanks)', min: 0, max: 8, step: 0.1 },
+  { key: 'burstRounds', label: 'Rounds per burst', min: 1, max: 12, step: 1 },
+  { key: 'preferMinM', label: 'Likes cover at least (m from you)', min: 0, max: 30, step: 0.5 },
+  { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
+];
+
 export const squadFolder: Folder<SquadKey> = {
   title: 'Squad',
   sliders: [
@@ -562,7 +569,9 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'flankRetrySec', label: 'Flank: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
     { key: 'flankMinAngleDeg', label: 'Flank: spot at least (deg round from your view)', min: 0, max: 180, step: 5 },
     { key: 'flankMaxExposedM', label: 'Flank: route in your view at most (m)', min: 0, max: 30, step: 0.5 },
-    { key: 'flankSpeedMps', label: 'Flank: moves at (m/s)', min: 0.5, max: 8, step: 0.1 },
+    { key: 'disorderSec', label: 'Leader down: squad disorganised for (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'disorderSlots', label: 'Leader down: firing slots', min: 1, max: 4, step: 1 },
+    { key: 'disorderHoldScale', label: 'Leader down: holds longer (x)', min: 1, max: 5, step: 0.1 },
     { key: 'spottedSec', label: 'Flank: called off when seen for (s)', min: 0, max: 3, step: 0.05 },
     { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },

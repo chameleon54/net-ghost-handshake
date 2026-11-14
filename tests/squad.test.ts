@@ -99,6 +99,35 @@ describe('SquadCoordinator flanking (4.7)', () => {
   });
 });
 
+describe('SquadCoordinator roles (4.8)', () => {
+  it('the flank job goes to a preferred one (a flanker) even if another plan is cheaper; to the others only if none can', () => {
+    const squad = new SquadCoordinator();
+    const [flanker, trooper] = [{ flanker: true }, { flanker: false }];
+    squad.forceFlank();
+    const job = squad.assignFlank([trooper, flanker], (m) => ({ cost: m.flanker ? 9 : 1 }), (m) => m.flanker);
+    expect(job?.member).toBe(flanker);
+    squad.reset();
+    squad.forceFlank();
+    const fallback = squad.assignFlank([trooper, flanker], (m) => (m.flanker ? null : { cost: 1 }), (m) => m.flanker);
+    expect(fallback?.member).toBe(trooper);
+  });
+
+  it('with the leader down: no flank starts, fewer firing slots, for the disorder time; then back to normal', () => {
+    const squad = new SquadCoordinator();
+    squad.forceFlank();
+    squad.leaderDown();
+    expect(squad.disorganised).toBe(true);
+    expect(squad.flankDue).toBe(false);
+    const members = Array.from({ length: 4 }, () => ({}));
+    const granted = members.filter((m) => squad.requestSlot(m)).length;
+    expect(granted).toBe(Math.min(squadConfig.disorderSlots, squadConfig.firingSlots));
+    for (const m of members) squad.releaseSlot(m);
+    squad.update(squadConfig.disorderSec + 0.01);
+    expect(squad.disorganised).toBe(false);
+    expect(members.filter((m) => squad.requestSlot(m)).length).toBe(squadConfig.firingSlots);
+  });
+});
+
 describe('the squad spawns in the test room (4.6)', () => {
   it('are four, on the navigation mesh, and at least 2 m apart', async () => {
     const level = buildGreybox();

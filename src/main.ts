@@ -414,6 +414,7 @@ const loop = new Loop(
       const job = squad.assignFlank(
         activeEnemies.filter((enemy) => enemy.canFlank),
         (enemy) => worldOf.get(enemy)?.planFlank(enemy) ?? null,
+        (enemy) => enemy.role === 'flanker', // flankers first; the others only if no flanker can (decision 217)
       );
       job?.member.beginFlank(job.plan.point);
     }

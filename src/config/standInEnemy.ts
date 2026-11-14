@@ -1,9 +1,7 @@
 // Stand-in enemy tuning (milestone 4.1, decisions 197 to 201). A temporary enemy that walks at Rook and shoots, to prove
 // damage, health and death; the real enemies replace it from 4.2. All are starting values. Units are in the names.
 export const standInConfigDefaults = {
-  /** Same as a trooper (enemies.md). Read when it (re)spawns. */
-  healthPoints: 100,
-  walkSpeedMps: 2.5,
+  // Health, walking speed and rounds per burst are per role since 4.8 (src/config/roles.ts).
   /** How fast it turns to face Rook. */
   turnSpeedDegPerSec: 360,
   /** It stops walking and fires once it can see Rook within this distance. */
@@ -62,7 +60,6 @@ export const standInConfigDefaults = {
   reactionSec: 0.5,
   /** It only fires when facing Rook within this angle. */
   aimToleranceDeg: 10,
-  burstRounds: 3,
   roundIntervalSec: 0.1,
   burstPauseSec: 1.2,
   /** The trooper's rifle (enemies.md). */

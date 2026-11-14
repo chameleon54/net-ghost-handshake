@@ -10,6 +10,7 @@ import { standInConfigDefaults } from '../src/config/standInEnemy';
 import { coverConfigDefaults } from '../src/config/cover';
 import { exposureConfigDefaults } from '../src/config/exposure';
 import { squadConfigDefaults } from '../src/config/squad';
+import { roleConfigDefaults, roles } from '../src/config/roles';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
@@ -29,6 +30,7 @@ import {
   coverFolder,
   exposureFolder,
   squadFolder,
+  roleSliders,
   exposureKeysNotOnPanel,
   standInKeysNotOnPanel,
   knifeFolder,
@@ -202,6 +204,20 @@ describe('the squad tuning panel', () => {
     }
     const onPanel = new Set<string>(squadFolder.sliders.map((s) => s.key));
     for (const key of Object.keys(squadConfigDefaults)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+  });
+});
+
+describe('the role tuning panel (4.8)', () => {
+  it('has a sensible range around every role default and lists every value', () => {
+    for (const role of roles) {
+      for (const s of roleSliders) {
+        expect(s.min, s.key).toBeLessThan(s.max);
+        expect(roleConfigDefaults[role][s.key], `${role} ${s.key}`).toBeGreaterThanOrEqual(s.min);
+        expect(roleConfigDefaults[role][s.key], `${role} ${s.key}`).toBeLessThanOrEqual(s.max);
+      }
+      const onPanel = new Set<string>(roleSliders.map((s) => s.key));
+      for (const key of Object.keys(roleConfigDefaults[role])) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+    }
   });
 });
 

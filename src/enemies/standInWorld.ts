@@ -117,6 +117,14 @@ export class StandInWorld implements StandInHooks {
     this.squad.flankOver(enemy);
   }
 
+  disorganised(): boolean {
+    return this.squad.disorganised;
+  }
+
+  downed(enemy: StandInEnemy): void {
+    if (enemy.role === 'leader') this.squad.leaderDown();
+  }
+
   /**
    * The best flank spot for this stand-in, or null (enemies.md, "Choosing cover", 4.7). A spot qualifies if it is free
    * (and not the one it holds), at least the flank angle round from where Rook looks, hides it from him (by its own prop),
@@ -244,7 +252,7 @@ export class StandInWorld implements StandInHooks {
   }
 
   pickCover(enemy: StandInEnemy): CoverPoint | null {
-    return this.coverPoints.best(enemy, this.quarry.eyes, this.quarry.position, (point) => this.walkM(enemy, point));
+    return this.coverPoints.best(enemy, this.quarry.eyes, this.quarry.position, (point) => this.walkM(enemy, point), enemy.values);
   }
 
   coverHides(point: CoverPoint): boolean {

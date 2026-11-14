@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
 import { standInConfig } from '../src/config/standInEnemy';
 import { squadConfig } from '../src/config/squad';
+import { roleConfig, roles, type Role } from '../src/config/roles';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
 import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
@@ -25,7 +26,7 @@ const spawn = { xM: 0, zM: 0, yawRad: 0 }; // faces north (-z)
 const fakeHitChance = 0.3;
 
 /** A stand-in with fake senses. `roll` is what its random number gives: below the hit chance hits, above it misses. */
-function setup(roll = 0.99, squad = new SquadCoordinator()) {
+function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'trooper') {
   /**
    * `route` (if set) replaces the straight line the fake navigation gives: the points after the start. `cover` is what
    * the fake cover service offers (none by default, so it behaves as in 4.1), and `coverHides` whether that spot still hides it.
@@ -100,8 +101,12 @@ function setup(roll = 0.99, squad = new SquadCoordinator()) {
       world.flankOvers++;
       squad.flankOver(e);
     },
+    disorganised: () => squad.disorganised,
+    downed: (e) => {
+      if (e.role === 'leader') squad.leaderDown();
+    },
   };
-  const enemy = new StandInEnemy(spawn, hooks, () => roll);
+  const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
   const run = (player: Vector3, seconds: number) => {
     const steps = Math.round(seconds / dtSec);
@@ -148,7 +153,7 @@ describe('StandInEnemy waking up', () => {
     const { enemy } = setup();
     expect(enemy.hit('body', 15)).toBe(false);
     expect(enemy.awake).toBe(true);
-    expect(enemy.health.current).toBe(standInConfig.healthPoints - 15);
+    expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints - 15);
     expect(enemy.hit('head', 1)).toBe(true);
     expect(enemy.state).toBe('falling');
     expect(enemy.hittable).toBe(false);
@@ -168,7 +173,7 @@ describe('StandInEnemy first contact and hit chance (4.5)', () => {
     world.hitChance = 1;
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -5), 3);
-    const rounds = standInConfig.burstRounds;
+    const rounds = roleConfig.trooper.burstRounds;
     expect(shots.length).toBeGreaterThan(rounds);
     expect(shots.slice(0, rounds).every((s) => !s.hits)).toBe(true);
     expect(shots[rounds].hits).toBe(true);
@@ -186,7 +191,7 @@ describe('StandInEnemy first contact and hit chance (4.5)', () => {
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -5), 1);
     expect(shots.length).toBeGreaterThan(0);
-    expect(shots.slice(0, standInConfig.burstRounds).every((s) => !s.hits)).toBe(true);
+    expect(shots.slice(0, roleConfig.trooper.burstRounds).every((s) => !s.hits)).toBe(true);
   });
 
   it('takes its hit chance from its senses (the exposure meter): at 0 it never hits', () => {
@@ -224,8 +229,8 @@ describe('StandInEnemy in a squad (4.6)', () => {
   it('gives its slot back when the burst ends, and when it is frozen or falls mid-burst', () => {
     const ended = setup();
     ended.enemy.hit('body', 1);
-    ended.run(rook, standInConfig.reactionSec + standInConfig.burstRounds * standInConfig.roundIntervalSec + 0.1);
-    expect(ended.shots).toHaveLength(standInConfig.burstRounds);
+    ended.run(rook, standInConfig.reactionSec + roleConfig.trooper.burstRounds * standInConfig.roundIntervalSec + 0.1);
+    expect(ended.shots).toHaveLength(roleConfig.trooper.burstRounds);
     expect(ended.squad.slotsHeld).toBe(0); // between bursts
 
     for (const stop of ['freeze', 'fall'] as const) {
@@ -281,6 +286,62 @@ describe('StandInEnemy in a squad (4.6)', () => {
   });
 });
 
+describe('StandInEnemy roles (4.8)', () => {
+  it('each role spawns with its own health, walks at its own speed and fires its own burst length', () => {
+    for (const role of roles) {
+      const values = roleConfig[role];
+      const walker = setup(0.99, new SquadCoordinator(), role);
+      expect(walker.enemy.role).toBe(role);
+      expect(walker.enemy.health.current, role).toBe(values.healthPoints);
+      walker.world.sees = false;
+      walker.enemy.hit('body', 1);
+      walker.run(new Vector3(0, 0, -30), 1);
+      expect(-walker.enemy.feet.z, role).toBeCloseTo(values.walkSpeedMps, 1);
+
+      const shooter = setup(0.99, new SquadCoordinator(), role);
+      shooter.enemy.hit('body', 1);
+      shooter.run(new Vector3(0, 0, -5), standInConfig.reactionSec + values.burstRounds * standInConfig.roundIntervalSec + 0.3);
+      expect(shooter.shots.length, role).toBe(values.burstRounds); // one whole burst, then the pause
+    }
+  });
+
+  it('a heavy never flanks; a flanker can', () => {
+    for (const [role, can] of [['heavy', false], ['flanker', true]] as const) {
+      const { enemy, world, run } = setup(0.99, new SquadCoordinator(), role);
+      world.sees = false;
+      enemy.hit('body', 1);
+      run(new Vector3(0, 0, 20), dtSec);
+      expect(enemy.canFlank, role).toBe(can);
+    }
+  });
+
+  it('the squad leader going down disorganises the squad; anyone else does not', () => {
+    const trooper = setup(0.99, new SquadCoordinator(), 'trooper');
+    trooper.enemy.kill();
+    expect(trooper.squad.disorganised).toBe(false);
+    const leader = setup(0.99, new SquadCoordinator(), 'leader');
+    leader.enemy.kill();
+    expect(leader.squad.disorganised).toBe(true);
+  });
+
+  it('with the squad disorganised it holds longer between peeks', () => {
+    const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI };
+    const far = new Vector3(0, 0, 10);
+    const roll = 0.99; // the longest hold
+    const holdSec = standInConfig.peekHoldMinSec + roll * (standInConfig.peekHoldMaxSec - standInConfig.peekHoldMinSec);
+    const { enemy, world, run, squad } = setup(roll);
+    world.sees = false;
+    world.cover = spot;
+    squad.leaderDown();
+    enemy.hit('body', 1);
+    run(far, 1.5);
+    expect(enemy.state).toBe('cover');
+    world.tells.length = 0;
+    run(far, holdSec); // a normal hold would be over by now
+    expect(world.tells).toHaveLength(0);
+  });
+});
+
 describe('StandInEnemy flanking (4.7)', () => {
   const far = new Vector3(0, 0, 20); // beyond its stop range: it walks
   const flankSpot: CoverPoint = { xM: 7, zM: 0, height: 'low', facingYawRad: Math.PI / 2, lean: 'both' }; // 7 m east
@@ -299,7 +360,7 @@ describe('StandInEnemy flanking (4.7)', () => {
     enemy.frozen = true;
     expect(enemy.canFlank).toBe(false);
     enemy.frozen = false;
-    enemy.hit('body', standInConfig.healthPoints * (1 - standInConfig.woundedHealthShare) + 1);
+    enemy.hit('body', roleConfig.trooper.healthPoints * (1 - standInConfig.woundedHealthShare) + 1);
     expect(enemy.wounded).toBe(true);
     expect(enemy.canFlank).toBe(false);
     expect(setup().enemy.canFlank).toBe(false); // idle
@@ -314,7 +375,7 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(enemy.cover).toBe(flankSpot);
     run(far, 1);
     expect(enemy.state).toBe('flank');
-    expect(enemy.feet.distanceTo(start)).toBeCloseTo(squadConfig.flankSpeedMps, 0);
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.flankSpeedMps, 0);
     expect(shots).toHaveLength(0);
     expect(world.flankOvers).toBe(0);
     run(far, 2);
@@ -357,7 +418,7 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(world.tells).toHaveLength(1); // no hold first
     run(far, outSec + 3);
     expect(enemy.peekOut).toBe(1); // still out
-    expect(shots.length).toBeGreaterThanOrEqual(standInConfig.burstRounds * 2);
+    expect(shots.length).toBeGreaterThanOrEqual(roleConfig.trooper.burstRounds * 2);
     expect(shots.every((s) => s.shot !== 'cover')).toBe(true);
   });
 
@@ -386,7 +447,7 @@ describe('StandInEnemy flanking (4.7)', () => {
 
   it('in a flank attack each burst needs a firing slot: with none free it stays out aiming but holds fire', () => {
     const { enemy, shots, run, squad } = arrived();
-    run(far, outSec + standInConfig.burstRounds * standInConfig.roundIntervalSec + 0.05); // the first burst done
+    run(far, outSec + roleConfig.trooper.burstRounds * standInConfig.roundIntervalSec + 0.05); // the first burst done
     const fired = shots.length;
     expect(squad.holdsSlot(enemy)).toBe(false); // given back between bursts
     for (let i = 0; i < squadConfig.firingSlots; i++) squad.requestSlot({});
@@ -445,7 +506,7 @@ describe('StandInEnemy walking and shooting', () => {
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -20), 1);
     expect(enemy.state).toBe('approach');
-    expect(enemy.feet.z).toBeCloseTo(-standInConfig.walkSpeedMps, 1);
+    expect(enemy.feet.z).toBeCloseTo(-roleConfig.trooper.walkSpeedMps, 1);
     expect(enemy.feet.x).toBeCloseTo(0, 5);
     expect(shots).toHaveLength(0);
   });
@@ -468,7 +529,7 @@ describe('StandInEnemy walking and shooting', () => {
     world.sees = false;
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -3), 3);
-    const stepM = standInConfig.walkSpeedMps * dtSec;
+    const stepM = roleConfig.trooper.walkSpeedMps * dtSec;
     expect(Math.abs(enemy.feet.z - -3)).toBeGreaterThan(standInConfig.closestM - stepM - 1e-9);
     expect(Math.abs(enemy.feet.z - -3)).toBeLessThanOrEqual(standInConfig.closestM + 1e-9);
   });
@@ -503,7 +564,8 @@ describe('StandInEnemy walking and shooting', () => {
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -5), 2.5);
     const times = shots.map((s) => s.atSec);
-    const { reactionSec, roundIntervalSec, burstPauseSec, burstRounds } = standInConfig;
+    const { reactionSec, roundIntervalSec, burstPauseSec } = standInConfig;
+    const { burstRounds } = roleConfig.trooper;
     expect(times[0]).toBeCloseTo(reactionSec, 1);
     expect(times[1] - times[0]).toBeCloseTo(roundIntervalSec, 1);
     expect(times[burstRounds] - times[burstRounds - 1]).toBeCloseTo(burstPauseSec, 1);
@@ -526,7 +588,7 @@ describe('StandInEnemy walking and shooting', () => {
     const hits = shots.filter((s) => s.hits).map((s) => s.atSec);
     expect(hits.length).toBeGreaterThan(1);
     for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
-    expect(shots.slice(0, standInConfig.burstRounds).map((s) => s.hits)).toEqual([true, false, false]);
+    expect(shots.slice(0, roleConfig.trooper.burstRounds).map((s) => s.hits)).toEqual([true, false, false]);
   });
 
   it('misses every round when the roll is above the hit chance', () => {
@@ -560,7 +622,7 @@ describe('StandInEnemy death and reset', () => {
     expect(enemy.fallProgress).toBe(1);
     run(new Vector3(0, 0, -20), standInConfig.respawnDelaySec);
     expect(enemy.awake).toBe(true);
-    expect(enemy.health.current).toBe(standInConfig.healthPoints);
+    expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
     expect(Math.abs(enemy.feet.z)).toBeLessThan(0.1); // back at the spot (it may have taken one step)
   });
 
@@ -573,7 +635,7 @@ describe('StandInEnemy death and reset', () => {
     expect(enemy.state).toBe('idle');
     expect(enemy.feet.toArray()).toEqual([0, 0, 0]);
     expect(enemy.yawRad).toBe(0);
-    expect(enemy.health.current).toBe(standInConfig.healthPoints);
+    expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
   });
 });
 
@@ -738,7 +800,7 @@ describe('StandInEnemy fighting back (4.3 follow-up)', () => {
     expect(shots.length).toBeGreaterThan(firedBefore); // it fires while backing off
     const movedM = zBefore - enemy.feet.z;
     expect(movedM).toBeGreaterThan(0);
-    expect(movedM).toBeLessThanOrEqual(standInConfig.walkSpeedMps * standInConfig.retreatSpeedShare + 1e-6);
+    expect(movedM).toBeLessThanOrEqual(roleConfig.trooper.walkSpeedMps * standInConfig.retreatSpeedShare + 1e-6);
     expect(Math.cos(enemy.yawRad)).toBeLessThan(-0.9); // still facing Rook (south) while it walks north
     run(rook, 6);
     expect(enemy.feet.distanceTo(new Vector3(0, 0, -9))).toBeLessThan(standInConfig.coverArriveM + 0.05);
@@ -754,9 +816,9 @@ describe('StandInEnemy fighting back (4.3 follow-up)', () => {
     expect(enemy.state).toBe('fight');
     run(rook, 1.5);
     expect(enemy.state).toBe('approach');
-    expect(shots).toHaveLength(standInConfig.burstRounds);
+    expect(shots).toHaveLength(roleConfig.trooper.burstRounds);
     run(rook, 1);
-    expect(shots).toHaveLength(standInConfig.burstRounds);
+    expect(shots).toHaveLength(roleConfig.trooper.burstRounds);
   });
 
   it('stops fighting when it loses sight of Rook, and goes on to cover', () => {
@@ -824,7 +886,8 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
   it('holds, gives a tell, comes out, fires one burst at Rook, and goes back in', () => {
     const { enemy, world, shots, run } = holding(lowSpot);
     world.seenWhenOut = true;
-    const { tellSec, peekOutSec, peekBackSec, burstRounds, roundIntervalSec } = standInConfig;
+    const { tellSec, peekOutSec, peekBackSec, roundIntervalSec } = standInConfig;
+    const { burstRounds } = roleConfig.trooper;
     run(rook, holdSec(0.99) + tellSec + peekOutSec + burstRounds * roundIntervalSec + peekBackSec + 0.2);
     expect(world.tells).toHaveLength(1);
     expect(world.tells[0]).toBeGreaterThan(holdSec(0.99) - 1.6); // after the hold (it arrived during the first 1.5 s)
@@ -862,7 +925,7 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
     const lucky = holding(lowSpot, standInConfig.hiddenFireChance / 2); // every roll below the chance
     lucky.enemy.hear(noiseAt(new Vector3(0, 1.6, 10), 30)); // fresh knowledge of where he is
     lucky.run(rook, holdSec(standInConfig.hiddenFireChance / 2) + 2);
-    expect(lucky.shots.length).toBe(standInConfig.burstRounds);
+    expect(lucky.shots.length).toBe(roleConfig.trooper.burstRounds);
     expect(lucky.shots.every((s) => s.shot === 'cover')).toBe(true);
     const unlucky = holding(lowSpot, 0.99); // every roll above it
     unlucky.run(rook, holdSec(0.99) + 2);
@@ -939,7 +1002,7 @@ describe('StandInEnemy peeking from cover (4.4)', () => {
 describe('StandInEnemy wounded (4.4 follow-up)', () => {
   const firstSpot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI };
   const nextSpot: CoverPoint = { xM: 0, zM: -9, height: 'high', facingYawRad: Math.PI, lean: 'both' };
-  const woundingDamage = standInConfig.healthPoints * (1 - standInConfig.woundedHealthShare) + 1;
+  const woundingDamage = roleConfig.trooper.healthPoints * (1 - standInConfig.woundedHealthShare) + 1;
 
   it('counts as wounded below its share of health', () => {
     const { enemy } = setup();
@@ -1007,7 +1070,7 @@ describe('StandInEnemy and grenades (4.4 follow-up)', () => {
     expect(enemy.crouched).toBe(false);
     const zBefore = enemy.feet.z;
     run(rook, 1);
-    expect(zBefore - enemy.feet.z).toBeGreaterThan(standInConfig.walkSpeedMps); // running, not walking
+    expect(zBefore - enemy.feet.z).toBeGreaterThan(roleConfig.trooper.walkSpeedMps); // running, not walking
     expect(shots).toHaveLength(0);
   });
 

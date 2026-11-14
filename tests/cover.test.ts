@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Vector3 } from 'three';
-import { coverConfig } from '../src/config/cover';
+import { roleConfig } from '../src/config/roles';
 import { standInConfig } from '../src/config/standInEnemy';
 import { greyboxCover } from '../src/data/greyboxCover';
 import { greyboxRoom } from '../src/data/greyboxRoom';
@@ -139,8 +139,8 @@ describe('CoverPoints.best', () => {
     expect(chosen).not.toBeNull();
     expect(cover.hides(chosen!, rookEyes)).toBe(true);
     const fromRookM = Math.hypot(chosen!.xM - rookFeet.x, chosen!.zM - rookFeet.z);
-    expect(fromRookM).toBeGreaterThanOrEqual(coverConfig.preferMinM);
-    expect(fromRookM).toBeLessThanOrEqual(coverConfig.preferMaxM);
+    expect(fromRookM).toBeGreaterThanOrEqual(roleConfig.trooper.preferMinM);
+    expect(fromRookM).toBeLessThanOrEqual(roleConfig.trooper.preferMaxM);
     expect(cover.claimedBy(chosen!)).toBe(owner);
     cover.clearClaims();
   });
@@ -157,6 +157,19 @@ describe('CoverPoints.best', () => {
     const again = cover.best(first, eyesAt(0, -5.5), new Vector3(0, 0, -5.5), walk); // Rook moved to the north
     expect(cover.claimedBy(a!)).toBe(again === a ? first : null);
     cover.clearClaims();
+  });
+
+  it('takes the liked range of the role: a heavy (close) picks cover nearer Rook than a trooper (mid range)', () => {
+    const rookFeet = new Vector3(0, 0, 4.5);
+    const rookEyes = eyesAt(0, 4.5);
+    const walk = straightLine(new Vector3(1.5, 0, -5));
+    const distance = (p: CoverPoint | null) => (p ? Math.hypot(p.xM - rookFeet.x, p.zM - rookFeet.z) : NaN);
+    const trooper = distance(cover.best({}, rookEyes, rookFeet, walk, roleConfig.trooper));
+    cover.clearClaims();
+    const heavy = distance(cover.best({}, rookEyes, rookFeet, walk, roleConfig.heavy));
+    cover.clearClaims();
+    expect(heavy).toBeLessThanOrEqual(roleConfig.heavy.preferMaxM);
+    expect(heavy).toBeLessThan(trooper);
   });
 
   it('skips spots it cannot walk to, and gives null when nothing hides', () => {

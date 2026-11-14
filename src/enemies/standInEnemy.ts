@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
 import { grenadeConfig } from '../config/grenade';
+import { roleConfig, type Role, type RoleValues } from '../config/roles';
 import { squadConfig } from '../config/squad';
 import { standInConfig } from '../config/standInEnemy';
 import type { CoverPoint } from '../level/cover';
@@ -70,6 +71,10 @@ export interface StandInHooks {
   claimCover(enemy: StandInEnemy, point: CoverPoint): void;
   /** Its flank is over (arrived, called off, or anything else): tells the squad. */
   flankOver(enemy: StandInEnemy): void;
+  /** True while the squad is disorganised (its leader went down, 4.8): it holds longer between peeks. */
+  disorganised(): boolean;
+  /** It went down (killed): tells the squad (a squad leader's death disorganises it). */
+  downed(enemy: StandInEnemy): void;
 }
 
 /** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
@@ -109,13 +114,16 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // it, it falls back to heading for Rook and firing when it sees him. Since 4.5 its hit chance comes from Rook's exposure
 // meter, and before first contact (he has not seen it) its first burst always misses, as a warning. Since 4.6 it is one of
 // a squad: it fires only while it holds a firing slot, and the squad shares the hit budget. Since 4.7 the squad may send
-// it round Rook's side to flank him (the `flank` state). No drawing code here.
+// it round Rook's side to flank him (the `flank` state). Since 4.8 it has a role (trooper, flanker, heavy or squad leader)
+// whose values set its health, speeds, burst length and liked cover range. No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
   /** Which way it faces; 0 faces north (-z), like the player's yaw. */
   yawRad = 0;
-  health = new Health(standInConfig.healthPoints);
+  health = new Health(roleConfig.trooper.healthPoints); // its role's health, set when it spawns
+  /** Its role (4.8): its body and gear, which never change. */
+  readonly role: Role;
   state: StandInState = 'idle';
   /** True while it crouches behind low cover. */
   crouched = false;
@@ -192,11 +200,17 @@ export class StandInEnemy implements Target {
   private readonly peekEyes = new Vector3();
 
   constructor(
-    private readonly spawn: { readonly xM: number; readonly zM: number; readonly yawRad: number },
+    private readonly spawn: { readonly xM: number; readonly zM: number; readonly yawRad: number; readonly role?: Role },
     private readonly hooks: StandInHooks,
     private readonly random: () => number = Math.random,
   ) {
+    this.role = spawn.role ?? 'trooper';
     this.placeAtSpawn();
+  }
+
+  /** Its role's values (live, so the dev panel can change them): health, speeds, burst length, liked cover range. */
+  get values(): RoleValues {
+    return roleConfig[this.role];
   }
 
   get xM(): number {
@@ -508,6 +522,7 @@ export class StandInEnemy implements Target {
   /** True if the squad may send it to flank: awake, not wounded, frozen, fighting or mid-burst, and no grenade on its mind. */
   get canFlank(): boolean {
     if (!this.awake || this.frozen || this.wounded || this.grenadeSeen || this.inBurst) return false;
+    if (this.values.flankSpeedMps <= 0) return false; // a heavy never flanks
     return this.state === 'approach' || this.state === 'cover';
   }
 
@@ -542,7 +557,7 @@ export class StandInEnemy implements Target {
       this.pressUnseenSec = 0;
       return;
     }
-    if (!this.walkRoute(dtSec, this.coverSpot, squadConfig.flankSpeedMps)) this.giveUpWalk();
+    if (!this.walkRoute(dtSec, this.coverSpot, this.values.flankSpeedMps)) this.giveUpWalk();
   }
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
@@ -590,7 +605,7 @@ export class StandInEnemy implements Target {
       return;
     }
     const firing = this.seesPlayer;
-    if (!this.walkRoute(dtSec, this.coverSpot, standInConfig.walkSpeedMps * standInConfig.retreatSpeedShare, !firing)) {
+    if (!this.walkRoute(dtSec, this.coverSpot, this.values.walkSpeedMps * standInConfig.retreatSpeedShare, !firing)) {
       this.giveUpWalk(); // stop backing off and check its cover
       return;
     }
@@ -681,7 +696,7 @@ export class StandInEnemy implements Target {
     this.peekMode = this.seesPlayer ? 'aimed' : fireAtCover ? 'cover' : 'look';
     this.peekRounds = 0;
     this.cooldownSec = 0; // the tell was the warning: no extra reaction pause
-    this.peekTimerSec = standInConfig.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
+    this.peekTimerSec = this.values.burstRounds * standInConfig.roundIntervalSec; // how long a look lasts
   }
 
   /**
@@ -712,7 +727,7 @@ export class StandInEnemy implements Target {
     this.hooks.fire(this, this.peekMode === 'cover' ? 'cover' : this.aimedShot(1));
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
-    if (this.peekRounds < standInConfig.burstRounds) return;
+    if (this.peekRounds < this.values.burstRounds) return;
     this.contacted = true; // a whole burst fired: the warning has been given
     if (!this.pressing) {
       this.startPeekBack();
@@ -746,7 +761,8 @@ export class StandInEnemy implements Target {
     this.riseShare = 0;
     const { peekHoldMinSec, peekHoldMaxSec, woundedHoldScale } = standInConfig;
     const holdSec = peekHoldMinSec + this.random() * Math.max(peekHoldMaxSec - peekHoldMinSec, 0);
-    this.peekTimerSec = holdSec * (this.wounded ? woundedHoldScale : 1); // wounded, it stays tucked in longer
+    // Wounded, or with its squad disorganised (its leader down), it stays tucked in longer.
+    this.peekTimerSec = holdSec * (this.wounded ? woundedHoldScale : 1) * (this.hooks.disorganised() ? squadConfig.disorderHoldScale : 1);
   }
 
   /** How far out it is. Rising over low cover: it stands up. Stepping out: its feet move from the spot toward the open side. */
@@ -792,7 +808,7 @@ export class StandInEnemy implements Target {
    * has failed: no route was found, or it has not got closer to `destination` for a while (a route that stops short of
    * a spot it cannot reach ends that way too).
    */
-  private walkRoute(dtSec: number, destination: Vector3, speedMps = standInConfig.walkSpeedMps, faceRoute = true): boolean {
+  private walkRoute(dtSec: number, destination: Vector3, speedMps = this.values.walkSpeedMps, faceRoute = true): boolean {
     if (Math.hypot(destination.x - this.walkGoal.x, destination.z - this.walkGoal.z) > standInConfig.coverArriveM) {
       this.walkGoal.copy(destination); // a new goal: start counting afresh
       this.walkClosestM = Infinity;
@@ -857,7 +873,7 @@ export class StandInEnemy implements Target {
     }
     this.hooks.fire(this, this.aimedShot(hitShare));
     this.roundsInBurst++;
-    if (this.roundsInBurst >= standInConfig.burstRounds) {
+    if (this.roundsInBurst >= this.values.burstRounds) {
       this.contacted = true; // a whole burst fired: the warning has been given
       this.roundsInBurst = 0;
       this.burstsDone++;
@@ -894,6 +910,7 @@ export class StandInEnemy implements Target {
   private die(): void {
     this.setState('falling');
     this.leaveCover();
+    this.hooks.downed(this);
   }
 
   private leaveCover(): void {
@@ -905,7 +922,7 @@ export class StandInEnemy implements Target {
     this.leaveCover();
     this.feet.set(this.spawn.xM, 0, this.spawn.zM);
     this.yawRad = this.spawn.yawRad;
-    this.health = new Health(standInConfig.healthPoints);
+    this.health = new Health(this.values.healthPoints);
     this.crouched = false;
     this.engaged = false;
     this.burstsDone = 0;

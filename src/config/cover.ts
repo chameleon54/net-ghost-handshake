@@ -1,9 +1,6 @@
 // Cover tuning (milestone 4.3, decision 206): how a cover point is judged and chosen. Starting values. Units are in the names.
 export const coverConfigDefaults = {
-  /** Cover this far from Rook or more is liked (a trooper likes mid range, enemies.md). */
-  preferMinM: 5,
-  /** Cover this far from Rook or less is liked. */
-  preferMaxM: 12,
+  // The liked distance from Rook is per role since 4.8 (src/config/roles.ts): troopers mid range, heavies closer.
   /** Score lost for each metre a spot is outside that range. */
   rangePenaltyPerM: 1,
   /** Score lost for each metre of walking to reach a spot, so a near spot wins over an equal far one. */
