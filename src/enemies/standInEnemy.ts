@@ -160,6 +160,22 @@ export function peekGunAt(point: CoverPoint, way: number, out: Vector3): Vector3
 const degToRad = Math.PI / 180;
 /** Getting this much closer to a walk's goal counts as progress (smaller changes are jitter). */
 const progressStepM = 0.05;
+/** How many steps the carrot may take along the route in one update (a bound for very short route pieces). */
+const carrotMaxMoves = 20;
+/**
+ * It plans its slowing down with this share of its braking, keeping the rest in hand, so it always makes the corner or
+ * the stop (planning with all of it, it would run one step behind the plan all the way and arrive too fast).
+ */
+const brakePlanShare = 0.8;
+/** How many corners ahead of the carrot it slows for. */
+const cornersAhead = 4;
+/**
+ * The share of its speed it keeps through a turn of `turnRad`: all of it going straight, the configured share at a right
+ * angle, falling to none for a full turn back (the creep speed still keeps it going).
+ */
+function cornerShare(turnRad: number): number {
+  return Math.max(1 - (turnRad / (Math.PI / 2)) * (1 - standInConfig.cornerSpeedShareRightAngle), 0);
+}
 /** Noises made where Rook's bullet or grenade ended up, not where he is. */
 const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'grenade-bounce', 'grenade-blast']);
 
@@ -264,8 +280,18 @@ export class StandInEnemy implements Target {
   private contacted = false;
   private readonly ears = new Vector3();
   private readonly path: Vector3[] = [];
-  /** The point of `path` it is walking to. */
+  /** The next point of `path` its steering point (`carrot`) is heading for. */
   private pathIndex = 0;
+  /**
+   * Moving like a person (4.15, decision 265): a point that runs a little ahead along the route, which it steers at, so
+   * corners become arcs; how fast it is going now (it speeds up and slows down); which way it is moving (a unit vector).
+   */
+  private readonly carrot = new Vector3();
+  private speedNowMps = 0;
+  private moveX = 0;
+  private moveZ = 0;
+  /** Whether it walked this update; if not, it is standing (speed 0). */
+  private walkedThisUpdate = false;
   private repathTimerSec = 0;
   /** Whether the last route planned reached anywhere. */
   private routeFound = true;
@@ -508,7 +534,13 @@ export class StandInEnemy implements Target {
   update(dtSec: number, player: Vector3): void {
     this.clockSec += dtSec;
     this.flinchLeftSec = Math.max(this.flinchLeftSec - dtSec, 0);
+    this.walkedThisUpdate = false;
     this.think(dtSec, player);
+    if (!this.walkedThisUpdate) {
+      this.speedNowMps = 0; // standing (its walks brake to a stop before they end), and the next walk sets off afresh
+      this.moveX = 0;
+      this.moveZ = 0;
+    }
     if (this.hasSlot && !this.inBurst) this.giveSlotBack(); // a slot covers one burst, and goes back whatever ended it
   }
 
@@ -634,7 +666,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.startWalking();
-    if (distanceM > standInConfig.closestM) this.walkRoute(dtSec, player); // if no route, it keeps trying
+    if (distanceM > standInConfig.closestM) this.walkRoute(dtSec, player, this.values.walkSpeedMps, true, standInConfig.closestM); // if no route, it keeps trying
   }
 
   /**
@@ -1281,13 +1313,21 @@ export class StandInEnemy implements Target {
     this.repathTimerSec = 0; // a fresh route from here
   }
 
+  /** How fast it is going now (m/s): it speeds up and slows down like a person (4.15). 0 while standing. */
+  get speedMps(): number {
+    return this.speedNowMps;
+  }
+
   /**
-   * Walks along its route toward `destination` at `speedMps`, planning a fresh one every so often. With `faceRoute` it
-   * faces the way it goes; without, it keeps its facing (backing off while aiming at Rook). Returns false once the walk
-   * has failed: no route was found, or it has not got closer to `destination` for a while (a route that stops short of
-   * a spot it cannot reach ends that way too).
+   * Walks along its route toward `destination` at up to `speedMps`, planning a fresh one every so often. With
+   * `faceRoute` it faces the way it goes; without, it keeps its facing (backing off while aiming at Rook). It moves like a
+   * person (4.15, decision 265): it speeds up from standing and slows down by its role's rates, steers at a point a little
+   * ahead along the route so corners become arcs, slows for sharp corners and sharp changes of direction, and slows to a
+   * stop by the time it is within `stopWithinM` of the end (where its caller counts it as arrived). Returns false once the
+   * walk has failed: no route was found, or it has not got closer to `destination` for a while (a route that stops
+   * short of a spot it cannot reach ends that way too).
    */
-  private walkRoute(dtSec: number, destination: Vector3, speedMps = this.values.walkSpeedMps, faceRoute = true): boolean {
+  private walkRoute(dtSec: number, destination: Vector3, speedMps = this.values.walkSpeedMps, faceRoute = true, stopWithinM = standInConfig.coverArriveM): boolean {
     if (Math.hypot(destination.x - this.walkGoal.x, destination.z - this.walkGoal.z) > standInConfig.coverArriveM) {
       this.walkGoal.copy(destination); // a new goal: start counting afresh
       this.walkClosestM = Infinity;
@@ -1297,28 +1337,60 @@ export class StandInEnemy implements Target {
     if (this.repathTimerSec <= 0) {
       this.routeFound = this.hooks.findPath(this.feet, destination, this.path);
       this.pathIndex = 1; // the first point is where it stands
+      if (this.path.length > 0) this.carrot.copy(this.path[0]);
       this.repathTimerSec = standInConfig.repathIntervalSec;
     }
-    if (faceRoute && this.pathIndex < this.path.length) {
-      const next = this.path[this.pathIndex];
-      this.turnToward(next.x - this.feet.x, next.z - this.feet.z, dtSec);
-    }
-    let stepM = speedMps * dtSec * (this.flinching ? standInConfig.flinchSpeedShare : 1);
-    while (stepM > 0 && this.pathIndex < this.path.length) {
-      const next = this.path[this.pathIndex];
-      const toX = next.x - this.feet.x;
-      const toZ = next.z - this.feet.z;
-      const toM = Math.hypot(toX, toZ);
-      if (toM <= stepM) {
-        this.feet.x = next.x;
-        this.feet.z = next.z;
-        stepM -= toM;
-        this.pathIndex++;
-      } else {
-        this.feet.x += (toX / toM) * stepM;
-        this.feet.z += (toZ / toM) * stepM;
-        stepM = 0;
+    this.walkedThisUpdate = true;
+
+    // Where it steers: the carrot, kept a little ahead along the route (further when going faster).
+    const lookaheadM = Math.max(standInConfig.lookaheadMinM, this.speedNowMps * standInConfig.lookaheadSec);
+    this.advanceCarrot(lookaheadM);
+    const toCarrotX = this.carrot.x - this.feet.x;
+    const toCarrotZ = this.carrot.z - this.feet.z;
+    const toCarrotM = Math.hypot(toCarrotX, toCarrotZ);
+
+    // How fast it should go, then speeding up or slowing down toward that by its role's rates.
+    const wantedMps = speedMps * (this.flinching ? standInConfig.flinchSpeedShare : 1);
+    let targetMps = 0;
+    if (toCarrotM > 1e-6) {
+      targetMps = Math.min(wantedMps, this.speedLimitMps(wantedMps, toCarrotM, stopWithinM));
+      if (this.speedNowMps > 0) {
+        // A sharp change from the way it is moving now (a new route, a turn of the carrot) is a corner right here.
+        const turnRad = Math.acos(Math.max(-1, Math.min(1, (this.moveX * toCarrotX + this.moveZ * toCarrotZ) / toCarrotM)));
+        targetMps = Math.min(targetMps, Math.max(wantedMps * cornerShare(turnRad), standInConfig.creepSpeedMps));
       }
+    }
+    const { accelMps2, brakeMps2 } = this.values;
+    this.speedNowMps =
+      targetMps > this.speedNowMps ? Math.min(targetMps, this.speedNowMps + accelMps2 * dtSec) : Math.max(targetMps, this.speedNowMps - brakeMps2 * dtSec);
+
+    // Its way of moving turns toward the carrot gradually: quickly when slow, slowly when fast (a person must slow down
+    // to turn round). From standing it simply sets off toward it. Then it moves on that way; it never passes the end.
+    const stepM = this.speedNowMps * dtSec;
+    if (stepM > 0 && toCarrotM > 1e-6) {
+      const wantX = toCarrotX / toCarrotM;
+      const wantZ = toCarrotZ / toCarrotM;
+      if (this.moveX === 0 && this.moveZ === 0) {
+        this.moveX = wantX;
+        this.moveZ = wantZ;
+      } else {
+        const offRad = Math.atan2(this.moveX * wantZ - this.moveZ * wantX, this.moveX * wantX + this.moveZ * wantZ);
+        const maxTurnRad = (standInConfig.turnAccelMps2 / Math.max(this.speedNowMps, standInConfig.creepSpeedMps)) * dtSec;
+        const turnRad = Math.max(-maxTurnRad, Math.min(maxTurnRad, offRad));
+        const cos = Math.cos(turnRad);
+        const sin = Math.sin(turnRad);
+        const x = this.moveX * cos - this.moveZ * sin;
+        this.moveZ = this.moveX * sin + this.moveZ * cos;
+        this.moveX = x;
+      }
+      if (toCarrotM <= stepM && this.pathIndex >= this.path.length) {
+        this.feet.x = this.carrot.x; // the last little bit: onto the end of the route
+        this.feet.z = this.carrot.z;
+      } else {
+        this.feet.x += this.moveX * stepM;
+        this.feet.z += this.moveZ * stepM;
+      }
+      if (faceRoute) this.turnToward(this.moveX, this.moveZ, dtSec);
     }
     this.hooks.pushOut(this.feet); // a safety net: the route already keeps clear of walls
     this.feet.y = 0;
@@ -1330,6 +1402,65 @@ export class StandInEnemy implements Target {
       this.walkStuckForSec += dtSec;
     }
     return this.routeFound && this.walkStuckForSec < standInConfig.walkStuckSec;
+  }
+
+  /** Moves the carrot on along the route until it is `lookaheadM` from its feet, or at the route's end. It never goes back. */
+  private advanceCarrot(lookaheadM: number): void {
+    for (let i = 0; i < carrotMaxMoves && this.pathIndex < this.path.length; i++) {
+      const aheadM = Math.hypot(this.carrot.x - this.feet.x, this.carrot.z - this.feet.z);
+      if (aheadM >= lookaheadM) return;
+      const next = this.path[this.pathIndex];
+      const leftM = Math.hypot(next.x - this.carrot.x, next.z - this.carrot.z);
+      const moveM = lookaheadM - aheadM; // moving it this far along the route adds at most this much
+      if (leftM <= moveM) {
+        this.carrot.x = next.x;
+        this.carrot.z = next.z;
+        this.pathIndex++;
+      } else {
+        this.carrot.x += ((next.x - this.carrot.x) / leftM) * moveM;
+        this.carrot.z += ((next.z - this.carrot.z) / leftM) * moveM;
+      }
+    }
+  }
+
+  /**
+   * The fastest it may go now and still slow, by its braking, to each corner's speed by that corner, and to a stop by
+   * `stopWithinM` from the route's end. Looks a few corners ahead of the carrot.
+   */
+  private speedLimitMps(wantedMps: number, toCarrotM: number, stopWithinM: number): number {
+    const brakeMps2 = this.values.brakeMps2 * brakePlanShare;
+    let limitMps = Infinity;
+    let distanceM = toCarrotM;
+    let fromX = this.carrot.x;
+    let fromZ = this.carrot.z;
+    let lastX = this.carrot.x - this.feet.x;
+    let lastZ = this.carrot.z - this.feet.z;
+    const lastIndex = Math.min(this.path.length - 1, this.pathIndex + cornersAhead);
+    for (let i = this.pathIndex; i <= lastIndex; i++) {
+      const point = this.path[i];
+      const segX = point.x - fromX;
+      const segZ = point.z - fromZ;
+      const segM = Math.hypot(segX, segZ);
+      if (segM > 1e-6) {
+        // The corner where the last stretch meets this one.
+        const lastM = Math.hypot(lastX, lastZ);
+        if (lastM > 1e-6) {
+          const turnRad = Math.acos(Math.max(-1, Math.min(1, (lastX * segX + lastZ * segZ) / (lastM * segM))));
+          const cornerMps = Math.max(wantedMps * cornerShare(turnRad), standInConfig.creepSpeedMps);
+          limitMps = Math.min(limitMps, Math.sqrt(cornerMps * cornerMps + 2 * brakeMps2 * Math.max(distanceM - toCarrotM, 0)));
+        }
+        distanceM += segM;
+        lastX = segX;
+        lastZ = segZ;
+      }
+      fromX = point.x;
+      fromZ = point.z;
+    }
+    // The end of the route, if it is within the corners looked at: slow to a stop by `stopWithinM` from it.
+    if (lastIndex === this.path.length - 1 || this.pathIndex >= this.path.length) {
+      limitMps = Math.min(limitMps, Math.max(Math.sqrt(2 * brakeMps2 * Math.max(distanceM - stopWithinM, 0)), standInConfig.creepSpeedMps));
+    }
+    return limitMps;
   }
 
   /**
@@ -1423,6 +1554,9 @@ export class StandInEnemy implements Target {
     this.flinchFreeAtSec = 0;
     this.path.length = 0;
     this.pathIndex = 0;
+    this.speedNowMps = 0;
+    this.moveX = 0;
+    this.moveZ = 0;
   }
 
   private setState(state: StandInState): void {

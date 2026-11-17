@@ -4,6 +4,20 @@ export const standInConfigDefaults = {
   // Health, walking speed and rounds per burst are per role since 4.8 (src/config/roles.ts).
   /** How fast it turns to face Rook. */
   turnSpeedDegPerSec: 360,
+  // Moving like a person (4.15, decision 265). How quickly it speeds up and slows down is per role (roles.ts).
+  /** Through a right-angle corner it goes at this share of its speed; gentler bends faster, sharper turns slower. */
+  cornerSpeedShareRightAngle: 0.5,
+  /** It steers at a point this far ahead along its route at least (corners become arcs)... */
+  lookaheadMinM: 0.4,
+  /** ...or as far as it goes in this long, if further (wider arcs when faster). */
+  lookaheadSec: 0.3,
+  /** Slowing into its spot, it still creeps on at least this fast, so it gets there. */
+  creepSpeedMps: 0.4,
+  /**
+   * How hard it can turn while moving (m/s^2 sideways): its way of moving turns at most this divided by its speed, in
+   * radians a second. Slow, it turns at once; running, it must slow down to turn round.
+   */
+  turnAccelMps2: 12,
   /** It stops walking and fires once it can see Rook within this distance. */
   stopRangeM: 8,
   /** It never walks closer than this, even without sight, so it does not stand inside Rook. */

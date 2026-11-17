@@ -487,6 +487,11 @@ export const standInFolder: Folder<StandInKey> = {
   title: 'Stand-in enemy',
   sliders: [
     { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
+    { key: 'cornerSpeedShareRightAngle', label: 'Moving: speed share through a right-angle corner', min: 0.05, max: 1, step: 0.05 },
+    { key: 'lookaheadMinM', label: 'Moving: steers at least this far ahead (m)', min: 0.1, max: 3, step: 0.05 },
+    { key: 'lookaheadSec', label: 'Moving: steers this far ahead in time (s)', min: 0, max: 1, step: 0.05 },
+    { key: 'creepSpeedMps', label: 'Moving: creeps into its spot at least (m/s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'turnAccelMps2', label: 'Moving: turns this hard on the move (m/s^2 sideways)', min: 1, max: 60, step: 1 },
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
     { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
@@ -579,6 +584,8 @@ export const roleSliders: Slider<RoleKey>[] = [
   { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
   { key: 'flinchDamage', label: 'Flinches at this damage within the window', min: 1, max: 300, step: 1 },
   { key: 'grenades', label: 'Grenades carried (from next spawn)', min: 0, max: 3, step: 1 },
+  { key: 'accelMps2', label: 'Speeds up by (m/s each second)', min: 0.5, max: 30, step: 0.5 },
+  { key: 'brakeMps2', label: 'Slows down by (m/s each second)', min: 0.5, max: 30, step: 0.5 },
 ];
 
 /** The sliders for one enemy gun's values (4.12); the dev panel shows one folder of these per gun. */

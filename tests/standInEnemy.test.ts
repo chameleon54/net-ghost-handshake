@@ -25,6 +25,14 @@ import type { Noise } from '../src/stealth/noise';
 import type { WeaponEvents } from '../src/weapons/events';
 
 const dtSec = 1 / 60;
+/**
+ * How far a stand-in gets in `seconds` from standing, speeding up at `accelMps2` to `speedMps` and holding it (4.15),
+ * for a long, straight walk (no corner or end to slow for).
+ */
+const fromStandingM = (speedMps: number, accelMps2: number, seconds: number): number => {
+  const upSec = speedMps / accelMps2;
+  return seconds <= upSec ? 0.5 * accelMps2 * seconds * seconds : 0.5 * accelMps2 * upSec * upSec + speedMps * (seconds - upSec);
+};
 const spawn = { xM: 0, zM: 0, yawRad: 0 }; // faces north (-z)
 /** The hit chance the fake senses report (in the game it comes from Rook's exposure meter). */
 const fakeHitChance = 0.3;
@@ -342,7 +350,8 @@ describe('StandInEnemy roles (4.8)', () => {
       walker.world.sees = false;
       walker.enemy.hit('body', 1);
       walker.run(new Vector3(0, 0, -30), 1);
-      expect(-walker.enemy.feet.z, role).toBeCloseTo(values.walkSpeedMps, 1);
+      expect(-walker.enemy.feet.z, role).toBeCloseTo(fromStandingM(values.walkSpeedMps, values.accelMps2, 1), 1); // speeding up (4.15)
+      expect(walker.enemy.speedMps, role).toBeCloseTo(values.walkSpeedMps, 5); // then at its own speed
 
       const shooter = setup(0.99, new SquadCoordinator(), role);
       shooter.enemy.hit('body', 1);
@@ -421,7 +430,8 @@ describe('StandInEnemy flanking (4.7)', () => {
     expect(enemy.cover).toBe(flankSpot);
     run(far, 1);
     expect(enemy.state).toBe('flank');
-    expect(enemy.feet.distanceTo(start)).toBeCloseTo(Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps), 0); // no slower than a run (decision 246)
+    const flankMps = Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps); // no slower than a run (decision 246)
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(fromStandingM(flankMps, roleConfig.trooper.accelMps2, 1), 0); // speeding up from standing (4.15)
     expect(shots).toHaveLength(0);
     expect(world.flankOvers).toBe(0);
     run(far, 2);
@@ -620,7 +630,7 @@ describe('StandInEnemy suppressing and advancing (4.9)', () => {
     enemy.beginAdvance(next);
     run(far, 1);
     expect(enemy.state).toBe('advance');
-    expect(enemy.feet.distanceTo(start)).toBeCloseTo(roleConfig.trooper.runSpeedMps, 0);
+    expect(enemy.feet.distanceTo(start)).toBeCloseTo(fromStandingM(roleConfig.trooper.runSpeedMps, roleConfig.trooper.accelMps2, 1), 0); // a run, from standing (4.15)
     run(far, 2);
     expect(enemy.state).toBe('cover');
     expect(world.advanceOvers).toBe(1);
@@ -814,7 +824,8 @@ describe('StandInEnemy walking and shooting', () => {
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -20), 1);
     expect(enemy.state).toBe('approach');
-    expect(enemy.feet.z).toBeCloseTo(-roleConfig.trooper.walkSpeedMps, 1);
+    expect(enemy.feet.z).toBeCloseTo(-fromStandingM(roleConfig.trooper.walkSpeedMps, roleConfig.trooper.accelMps2, 1), 1); // speeding up (4.15)
+    expect(enemy.speedMps).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 5);
     expect(enemy.feet.x).toBeCloseTo(0, 5);
     expect(shots).toHaveLength(0);
   });
@@ -842,7 +853,72 @@ describe('StandInEnemy walking and shooting', () => {
     expect(Math.abs(enemy.feet.z - -3)).toBeLessThanOrEqual(standInConfig.closestM + 1e-9);
   });
 
-  it('follows its route point by point, facing the way it walks', () => {
+  it('moving like a person (4.15): slows into a right-angle corner to about the corner share of its speed', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.route = [new Vector3(6, 0, 0), new Vector3(6, 0, -8)]; // 6 m east, then a right-angle turn north
+    // The fake route always runs through the corner point, even once it has cut past it: plan it only once here.
+    const repathSec = standInConfig.repathIntervalSec;
+    standInConfig.repathIntervalSec = 100;
+    enemy.hit('body', 1);
+    let straightMps = 0;
+    let cornerMps = Infinity;
+    try {
+      for (let t = 0; t < 4; t += dtSec) {
+        run(new Vector3(6, 0, -8), dtSec);
+        if (enemy.feet.x < 3) straightMps = Math.max(straightMps, enemy.speedMps); // on the straight
+        if (Math.hypot(enemy.feet.x - 6, enemy.feet.z) < 0.5) cornerMps = Math.min(cornerMps, enemy.speedMps); // at the corner
+      }
+    } finally {
+      standInConfig.repathIntervalSec = repathSec;
+    }
+    const walkMps = roleConfig.trooper.walkSpeedMps;
+    expect(straightMps).toBeCloseTo(walkMps, 5); // full speed on the straight
+    expect(cornerMps).toBeLessThan(walkMps * 0.75); // slowed for the corner...
+    expect(cornerMps).toBeGreaterThan(walkMps * standInConfig.cornerSpeedShareRightAngle * 0.5); // ...but did not stop
+  });
+
+  it('moving like a person (4.15): a sudden reversal brakes almost to a stop before it speeds up the other way', () => {
+    const { enemy, world, run } = setup();
+    world.sees = false;
+    world.route = [new Vector3(10, 0, 0)];
+    enemy.hit('body', 1);
+    run(new Vector3(10, 0, 0), 1); // walking east, up to speed
+    expect(enemy.speedMps).toBeCloseTo(roleConfig.trooper.walkSpeedMps, 5);
+    world.route = [new Vector3(-10, 0, 0)]; // the next route goes back west
+    let slowestMps = Infinity;
+    for (let t = 0; t < 1.5; t += dtSec) {
+      run(new Vector3(-10, 0, 0), dtSec);
+      slowestMps = Math.min(slowestMps, enemy.speedMps);
+    }
+    expect(slowestMps).toBeLessThan(roleConfig.trooper.walkSpeedMps / 2); // slowed hard to turn round (a tight curve, not a snap)
+    expect(enemy.speedMps).toBeGreaterThan(1); // and then off the other way
+    expect(enemy.feet.x).toBeLessThan(2.5); // and it really did turn back west
+  });
+
+  it('moving like a person (4.15): slows to a stop as it reaches its spot, without overshooting', () => {
+    const { enemy, world, run } = setup();
+    world.rookSees = false;
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, 20), dtSec);
+    const spot: CoverPoint = { xM: 6, zM: 0, height: 'low', facingYawRad: Math.PI / 2, lean: 'both' };
+    enemy.beginAdvance(spot);
+    let arrivedMps: number | null = null;
+    let mostEastM = -Infinity;
+    for (let t = 0; t < 5 && arrivedMps === null; t += dtSec) {
+      run(new Vector3(0, 0, 20), dtSec);
+      mostEastM = Math.max(mostEastM, enemy.feet.x);
+      if (Math.hypot(enemy.feet.x - spot.xM, enemy.feet.z - spot.zM) <= standInConfig.coverArriveM) arrivedMps = enemy.speedMps;
+    }
+    expect(arrivedMps).not.toBeNull();
+    expect(arrivedMps!).toBeLessThan(standInConfig.creepSpeedMps + roleConfig.trooper.accelMps2 * dtSec + 1e-9); // all but stopped
+    expect(mostEastM).toBeLessThanOrEqual(spot.xM + 1e-9); // never past its spot
+    run(new Vector3(0, 0, 20), 1);
+    expect(enemy.state).toBe('cover');
+    expect(enemy.speedMps).toBe(0);
+  });
+
+  it('follows its route, rounding the corner in an arc (4.15), facing the way it walks', () => {
     const { enemy, world, run } = setup();
     world.sees = false;
     world.route = [new Vector3(2, 0, 0), new Vector3(2, 0, -6)]; // east first, then north
@@ -851,8 +927,14 @@ describe('StandInEnemy walking and shooting', () => {
     expect(enemy.feet.x).toBeGreaterThan(0.5);
     expect(enemy.feet.z).toBeCloseTo(0, 5);
     expect(Math.sin(enemy.yawRad)).toBeLessThan(-0.9); // facing east (yaw -90 degrees)
-    run(new Vector3(2, 0, -6), 1.2); // round the corner
-    expect(enemy.feet.x).toBeCloseTo(2, 5);
+    let mostEastM = -Infinity;
+    for (let t = 0; t < 1.2; t += dtSec) {
+      run(new Vector3(2, 0, -6), dtSec); // round the corner
+      mostEastM = Math.max(mostEastM, enemy.feet.x);
+    }
+    expect(mostEastM).toBeLessThanOrEqual(2 + 1e-9); // it never swings out past the corner
+    expect(enemy.feet.x).toBeLessThan(2); // it cut a little inside it: an arc
+    expect(enemy.feet.x).toBeGreaterThan(2 - standInConfig.lookaheadMinM - 0.2); // but only a little
     expect(enemy.feet.z).toBeLessThan(-0.5);
     const routeAhead = enemy.routeAhead([]);
     expect(routeAhead[0]).toBe(enemy.feet);
@@ -1884,15 +1966,16 @@ describe('StandInEnemy on a hunt (decision 235)', () => {
     const leader = sent('trooper', true);
     leader.run(far, 1);
     expect(leader.enemy.state).toBe('hunt');
-    expect(-leader.enemy.zM).toBeCloseTo(Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps), 1);
+    expect(leader.enemy.speedMps).toBeCloseTo(Math.max(roleConfig.trooper.flankSpeedMps, roleConfig.trooper.runSpeedMps), 5); // up to speed after a second (4.15)
     const follower = sent('trooper', false);
     follower.run(far, 1);
-    expect(-follower.enemy.zM).toBeCloseTo(roleConfig.trooper.runSpeedMps, 1);
+    expect(follower.enemy.speedMps).toBeCloseTo(roleConfig.trooper.runSpeedMps, 5);
   });
 
   it("arriving, it holds cover there and the leader's look starts", () => {
     const { enemy, run, squad } = sent('flanker', true);
-    run(far, 20 / roleConfig.flanker.flankSpeedMps + 0.5);
+    const { flankSpeedMps, accelMps2, brakeMps2 } = roleConfig.flanker;
+    run(far, 20 / flankSpeedMps + flankSpeedMps / (2 * accelMps2) + flankSpeedMps / brakeMps2 + 0.5); // with speeding up and slowing down (4.15)
     expect(enemy.state).toBe('cover');
     expect(squad.huntLookingSec).not.toBeNull();
   });
@@ -1970,14 +2053,20 @@ describe('StandInEnemy flinching under heavy fire (decision 246)', () => {
     expect(enemy.state).toBe('retreat');
     expect(enemy.cover).toBe(shelter);
     expect(world.advanceOvers).toBe(1); // the squad hears its move is over
-    let before = enemy.feet.clone();
+    // Running when it flinched, it brakes down to the flinch's share of its run (4.15: no instant change of speed).
+    const flinchMps = roleConfig.trooper.runSpeedMps * standInConfig.flinchSpeedShare;
+    const before = enemy.feet.clone();
     run(far, 0.25);
-    expect(enemy.feet.distanceTo(before)).toBeCloseTo(roleConfig.trooper.runSpeedMps * standInConfig.flinchSpeedShare * 0.25, 1);
+    expect(enemy.feet.distanceTo(before)).toBeLessThan(roleConfig.trooper.runSpeedMps * 0.25); // slowed
+    expect(enemy.speedMps).toBeLessThanOrEqual(flinchMps + 1e-9);
     run(far, standInConfig.flinchSec);
     expect(enemy.flinching).toBe(false);
-    before = enemy.feet.clone();
-    run(far, 0.25);
-    expect(enemy.feet.distanceTo(before)).toBeCloseTo(roleConfig.trooper.runSpeedMps * 0.25, 1); // then it runs
+    let fastestMps = 0;
+    for (let t = 0; t < 0.5; t += dtSec) {
+      run(far, dtSec);
+      fastestMps = Math.max(fastestMps, enemy.speedMps);
+    }
+    expect(fastestMps).toBeGreaterThan(flinchMps + 0.5); // then it speeds up again: it runs
   });
 
   it('hits further apart than the window do not add up', () => {
