@@ -7,7 +7,7 @@ import { roleConfig, roles, type Role } from '../src/config/roles';
 import { aggressionConfig, aggressionSetting } from '../src/config/aggression';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { EventBus } from '../src/core/events';
-import { StandInEnemy, type StandInHooks, type StandInShot } from '../src/enemies/standInEnemy';
+import { StandInEnemy, type StandInHooks, type StandInShot, type ThrowPlan } from '../src/enemies/standInEnemy';
 import { describeFlankRejects, StandInWorld, type FlankRejects } from '../src/enemies/standInWorld';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { buildGreybox } from '../src/level/greybox';
@@ -19,6 +19,8 @@ import { CoverPoints, type CoverPoint } from '../src/level/cover';
 import { dummyConfig } from '../src/config/dummy';
 import { exposureConfig } from '../src/config/exposure';
 import { grenadeConfig } from '../src/config/grenade';
+import { enemyGunConfig, gunOfRole } from '../src/config/enemyGuns';
+import { enemyGrenadeConfig } from '../src/config/enemyGrenades';
 import type { Noise } from '../src/stealth/noise';
 import type { WeaponEvents } from '../src/weapons/events';
 
@@ -72,6 +74,10 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     muzzleClear: true,
     /** Where the nearest hiding cover is after a flinch on the move (none by default). */
     nearestCover: null as CoverPoint | null,
+    /** Grenade throws (4.12): whether a throw is still on at the release, the throws made, and each throw's end (thrown or not). */
+    throwStillOn: true,
+    thrown: [] as ThrowPlan[],
+    throwOvers: [] as boolean[],
   };
   const shots: { atSec: number; hits: boolean; shot: StandInShot }[] = [];
   const hooks: StandInHooks = {
@@ -129,6 +135,12 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     huntMoveOver: (e) => squad.huntMoveOver(e),
     huntHoldScale: (e) => squad.huntHoldScale(e),
     pickNearestCover: () => world.nearestCover,
+    throwStillOn: () => world.throwStillOn,
+    throwGrenade: (_e, plan) => world.thrown.push(plan),
+    throwOver: (e, thrown) => {
+      world.throwOvers.push(thrown);
+      squad.grenadeOver(e, thrown);
+    },
   };
   const enemy = new StandInEnemy({ ...spawn, role }, hooks, () => roll);
   /** Runs this stand-in alone (its squad's clock too). */
@@ -1511,12 +1523,22 @@ describe('StandInWorld', () => {
   it('a hit hurts the player and lands on his chest; the shot is marked as an enemy shot', () => {
     const { world, enemy, damage, damageFrom, landed, fired } = setupWorld([backWall]);
     world.fire(enemy, 'hit');
-    expect(damage).toEqual([standInConfig.damagePerHit]);
+    expect(damage).toEqual([enemyGunConfig.rifle.damagePerHit]); // a trooper carries the rifle (4.12)
     expect(damageFrom[0].toArray()).toEqual(fired[0].toArray()); // the arc points at its muzzle
     expect(landed[0].shooter).toBe('enemy');
     expect(landed[0].hit).toBe(false); // no bullet mark on the player
     expect(landed[0].end.toArray()).toEqual([0, 1.6 * standInConfig.aimHeightShareOfEyes, 0]);
     expect(fired[0].z).toBeCloseTo(-8 + standInConfig.muzzleForwardM, 5); // the muzzle is in front of it, toward him
+  });
+
+  it('the damage of a hit comes from its gun: pistol for a flanker, rifle for a trooper or leader, machine gun for the heavy (4.12)', () => {
+    const { world, damage } = setupWorld([backWall]);
+    for (const role of roles) {
+      world.fire(new StandInEnemy({ xM: 0, zM: -8, yawRad: Math.PI, role }, world), 'hit');
+      expect(damage.pop(), role).toBe(enemyGunConfig[gunOfRole[role]].damagePerHit);
+    }
+    expect(enemyGunConfig.pistol.damagePerHit).toBeLessThan(enemyGunConfig.lmg.damagePerHit);
+    expect(enemyGunConfig.lmg.damagePerHit).toBeLessThan(enemyGunConfig.rifle.damagePerHit);
   });
 
   it('a shot at his cover aims at where it last knew he was, not where he really is', () => {
@@ -2064,5 +2086,87 @@ describe('StandInWorld: the nearest hiding cover after a flinch (decision 246)',
     const enemy = new StandInEnemy({ xM: 0, zM: -4, yawRad: 0 }, world);
     expect(world.pickNearestCover(enemy)).toBe(nearSpot);
     expect(cover.claimedBy(nearSpot)).toBe(enemy);
+  });
+});
+
+describe('StandInEnemy throwing a grenade (4.12)', () => {
+  const lowSpot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI }; // the cover is to its south, toward Rook
+  const rook = new Vector3(0, 0, 10); // 13 m south: beyond the stand-ground range
+  const plan = (): ThrowPlan => ({ way: 0, from: new Vector3(0, 1.75, -3), velocity: new Vector3(0, 8, 6), rookAt: rook.clone(), cost: 13 });
+  /** Long enough for the tell, coming out and the wind-up. */
+  const throwSec = () => standInConfig.tellSec + standInConfig.peekOutSec + enemyGrenadeConfig.throwWindupSec + 0.1;
+
+  /** A stand-in of `role` that has walked to its low cover and is holding there, hidden. */
+  function holding(role: Role = 'trooper') {
+    const s = setup(0.99, new SquadCoordinator(), role);
+    s.world.sees = false;
+    s.world.cover = lowSpot;
+    s.enemy.hit('body', 1);
+    s.run(rook, 2.5); // the heavy runs slowest (1.8 m/s) to its spot 3 m away
+    expect(s.enemy.state).toBe('cover');
+    return s;
+  }
+
+  it('a trooper or leader carries one; a flanker or heavy carries none', () => {
+    for (const role of roles) expect(holding(role).enemy.grenades, role).toBe(roleConfig[role].grenades);
+    expect(holding('trooper').enemy.canThrow).toBe(true);
+    expect(holding('flanker').enemy.canThrow).toBe(false);
+    expect(holding('heavy').enemy.canThrow).toBe(false);
+  });
+
+  it('peeks at once with the tell, winds up, throws once, holds a firing slot meanwhile, and goes back in', () => {
+    const { enemy, world, shots, run, squad } = holding();
+    enemy.beginThrow(plan());
+    run(rook, standInConfig.tellSec / 2);
+    expect(world.tells).toHaveLength(1);
+    expect(squad.holdsSlot(enemy)).toBe(true); // a throw takes a firing slot
+    expect(world.thrown).toHaveLength(0);
+    run(rook, throwSec());
+    expect(world.thrown).toHaveLength(1);
+    expect(world.throwOvers).toEqual([true]);
+    expect(enemy.grenades).toBe(0);
+    expect(shots).toHaveLength(0); // it throws instead of firing
+    run(rook, standInConfig.peekBackSec + 0.1);
+    expect(enemy.peekOut).toBe(0);
+    expect(squad.holdsSlot(enemy)).toBe(false);
+    expect(enemy.canThrow).toBe(false); // nothing left to throw
+  });
+
+  it('throws even when it could see Rook from where it holds (the throw wins over firing)', () => {
+    const { enemy, world, shots, run } = holding();
+    world.sees = true;
+    enemy.beginThrow(plan());
+    run(rook, throwSec());
+    expect(world.thrown).toHaveLength(1);
+    expect(shots).toHaveLength(0);
+  });
+
+  it('if Rook has moved away by the release, it does not throw and keeps its grenade', () => {
+    const { enemy, world, run } = holding();
+    world.throwStillOn = false;
+    enemy.beginThrow(plan());
+    run(rook, throwSec());
+    expect(world.thrown).toHaveLength(0);
+    expect(world.throwOvers).toEqual([false]);
+    expect(enemy.grenades).toBe(1);
+  });
+
+  it('a flinch during the wind-up calls the throw off', () => {
+    const { enemy, world, run } = holding();
+    enemy.beginThrow(plan());
+    run(rook, standInConfig.tellSec + standInConfig.peekOutSec + 0.05); // out, winding up
+    enemy.hit('body', roleConfig.trooper.flinchDamage);
+    run(rook, enemyGrenadeConfig.throwWindupSec + 0.1);
+    expect(world.thrown).toHaveLength(0);
+    expect(world.throwOvers).toEqual([false]);
+    expect(enemy.grenades).toBe(1);
+  });
+
+  it('killed with a throw to make, the squad hears the throw is over', () => {
+    const { enemy, world } = holding();
+    enemy.beginThrow(plan());
+    enemy.kill();
+    expect(world.throwOvers).toEqual([false]);
+    expect(enemy.isThrowing).toBe(false);
   });
 });

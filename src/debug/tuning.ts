@@ -17,6 +17,9 @@ import type { ExposureConfig } from '../config/exposure';
 import type { SquadConfig } from '../config/squad';
 import type { RoleValues } from '../config/roles';
 import type { TierValues } from '../config/aggression';
+import type { EnemyGunValues } from '../config/enemyGuns';
+import type { EnemyGrenadeConfig } from '../config/enemyGrenades';
+import type { PickupConfig } from '../config/pickups';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
 // What the tuning panel offers, and the pure helpers behind its buttons. No DOM here, so it can be tested.
@@ -55,6 +58,9 @@ type ExposureKey = keyof ExposureConfig;
 type SquadKey = keyof SquadConfig;
 type RoleKey = keyof RoleValues;
 type TierKey = keyof TierValues;
+type EnemyGunKey = keyof EnemyGunValues;
+type EnemyGrenadeKey = keyof EnemyGrenadeConfig;
+type PickupKey = keyof PickupConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -517,7 +523,6 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'ownCoverM', label: 'Never fires into cover within (m past its muzzle)', min: 0, max: 3, step: 0.1 },
     { key: 'roundIntervalSec', label: 'Time between rounds (s)', min: 0.03, max: 1, step: 0.01 },
     { key: 'burstPauseSec', label: 'Pause between bursts (s)', min: 0.1, max: 5, step: 0.1 },
-    { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
     { key: 'fallTimeSec', label: 'Fall time (s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'respawnDelaySec', label: 'Time down before getting up (s)', min: 0.5, max: 30, step: 0.5 },
   ],
@@ -571,7 +576,43 @@ export const roleSliders: Slider<RoleKey>[] = [
   { key: 'preferMaxM', label: 'Likes cover at most (m from you)', min: 1, max: 40, step: 0.5 },
   { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
   { key: 'flinchDamage', label: 'Flinches at this damage within the window', min: 1, max: 300, step: 1 },
+  { key: 'grenades', label: 'Grenades carried (from next spawn)', min: 0, max: 3, step: 1 },
 ];
+
+/** The sliders for one enemy gun's values (4.12); the dev panel shows one folder of these per gun. */
+export const enemyGunSliders: Slider<EnemyGunKey>[] = [{ key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 }];
+
+export const enemyGrenadeFolder: Folder<EnemyGrenadeKey> = {
+  title: 'Enemy grenades (4.12)',
+  sliders: [
+    { key: 'throwMinM', label: 'Throws from at least (m from you)', min: 0, max: 20, step: 0.5 },
+    { key: 'throwMaxM', label: 'Throws from at most (m from you)', min: 2, max: 40, step: 0.5 },
+    { key: 'throwScatterM', label: 'Lands up to (m from your feet)', min: 0, max: 5, step: 0.1 },
+    { key: 'throwHandAboveEyesM', label: 'Leaves the hand above its eyes (m)', min: 0, max: 0.6, step: 0.05 },
+    { key: 'throwAngleMaxDeg', label: 'Throw angle, highest tried (deg)', min: 10, max: 80, step: 1 },
+    { key: 'throwAngleMinDeg', label: 'Throw angle, lowest tried (deg)', min: 5, max: 75, step: 1 },
+    { key: 'throwSpeedMaxMps', label: 'Throw speed at most (m/s)', min: 3, max: 40, step: 0.5 },
+    { key: 'throwLandToleranceM', label: 'Flight clear if it first strikes within (m of the aim)', min: 0.1, max: 3, step: 0.05 },
+    { key: 'throwWindupSec', label: 'Wind-up before letting go (s)', min: 0, max: 3, step: 0.05 },
+    { key: 'throwCancelMovedM', label: 'No throw if you moved more than (m)', min: 0.25, max: 10, step: 0.25 },
+    { key: 'throwRetrySec', label: 'Nobody can throw: try again after (s)', min: 0.2, max: 20, step: 0.1 },
+    { key: 'fuseSec', label: 'Fuse from landing (s)', min: 0.5, max: 8, step: 0.1 },
+    { key: 'beepSlowSec', label: 'Beeps every (s), at first', min: 0.05, max: 2, step: 0.05 },
+    { key: 'beepFastSec', label: 'Beeps every (s), at the end', min: 0.03, max: 1, step: 0.01 },
+    { key: 'trailSec', label: 'Trail lasts (s)', min: 0.05, max: 1, step: 0.05 },
+    { key: 'warningExtraM', label: 'Marker shows within blast radius plus (m)', min: 0, max: 10, step: 0.5 },
+    { key: 'calloutShowSec', label: '"Frag out!" stays (s)', min: 0.5, max: 6, step: 0.5 },
+  ],
+};
+
+export const pickupFolder: Folder<PickupKey> = {
+  title: 'Drops and pick-ups (4.12)',
+  sliders: [
+    { key: 'pickupRadiusM', label: 'Picked up within (m of your feet)', min: 0.2, max: 4, step: 0.1 },
+    { key: 'dropSpreadM', label: 'Drops lie apart (m)', min: 0, max: 1.5, step: 0.05 },
+    { key: 'glowPulseSec', label: 'Glow pulses every (s)', min: 0.2, max: 5, step: 0.1 },
+  ],
+};
 
 /** The sliders for one aggression tier's values (4.11); the dev panel shows one folder of these per tier. */
 export const tierSliders: Slider<TierKey>[] = [
@@ -589,6 +630,9 @@ export const tierSliders: Slider<TierKey>[] = [
   { key: 'huntAfterSec', label: 'Hunt: after its knowledge is old for (s)', min: 0, max: 60, step: 0.5 },
   { key: 'huntFollowers', label: 'Hunt: followers per step (8: everyone)', min: 0, max: 8, step: 1 },
   { key: 'huntStepEverySec', label: 'Hunt: a follow step every (s)', min: 0.5, max: 30, step: 0.5 },
+  { key: 'throwsGrenades', label: 'Grenades: throws at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'holdBeforeGrenadeSec', label: 'Grenades: after you hold a spot for (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'grenadeCooldownSec', label: 'Grenades: wait before the next (s)', min: 0, max: 120, step: 1 },
 ];
 
 export const squadFolder: Folder<SquadKey> = {

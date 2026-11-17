@@ -137,6 +137,10 @@ export class WeaponSounds {
       this.player.play('grenade-bounce', { position, volume, rate: this.rate() });
     });
     events.on('grenade:exploded', ({ position }) => this.player.play('grenade-explosion', { position, rate: this.rate() }));
+    // Enemy grenades (4.12): the throw from where it left the hand, and the warning beep from where the grenade is.
+    events.on('enemy:grenade-thrown', ({ position }) => this.player.play('grenade-throw', { position, rate: this.rate(), note: 'enemy grenade thrown' }));
+    events.on('grenade:beep', ({ position }) => this.player.play('grenade-beep', { position, note: 'enemy grenade beep' }));
+    events.on('pickup:taken', () => this.play('pickup'));
     // Ringing ears: the hook is ready; it stays silent until the sound's volume is raised (and the real sound added).
     events.on('player:deafened', ({ intensity, durationSec }) => {
       if (audioConfig.earRingingVolume > 0) this.play('ear-ringing', intensity * audioConfig.earRingingVolume);

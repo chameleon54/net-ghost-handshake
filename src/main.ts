@@ -65,6 +65,8 @@ import { KnifeStrike } from './weapons/knifeStrike';
 import { Viewmodel } from './weapons/viewmodel/viewmodel';
 import { Shooter } from './weapons/shooter';
 import { WeaponSet } from './weapons/weaponSet';
+import { Pickups } from './pickups/pickups';
+import { PickupsView } from './pickups/pickupsView';
 
 const fireButton = 0; // left mouse
 const aimButton = 2; // right mouse
@@ -110,12 +112,8 @@ const player = new Player(level.collision, testArenaStart);
 
 // Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
 const weaponEvents = new EventBus<WeaponEvents>();
-const weapons = new WeaponSet(
-  weaponEvents,
-  new Gun(weaponEvents, 'rifle', rifleConfig, true),
-  new Gun(weaponEvents, 'pistol', pistolConfig, false),
-  new Knife(weaponEvents),
-);
+const guns = { rifle: new Gun(weaponEvents, 'rifle', rifleConfig, true), pistol: new Gun(weaponEvents, 'pistol', pistolConfig, false) };
+const weapons = new WeaponSet(weaponEvents, guns.rifle, guns.pistol, new Knife(weaponEvents));
 const viewmodel = new Viewmodel(weaponEvents); // the weapon in hand, drawn in its own pass after the world
 viewmodel.setAspect(window.innerWidth / window.innerHeight);
 const aim = new Aim();
@@ -162,6 +160,7 @@ const standIns = testArenaStandIns.map((spawn) => {
     () => grenades.livePositions(), // the grenade system is made further down
     Math.random,
     squad,
+    (from, velocity) => grenades.throwEnemyGrenade(from, velocity), // enemy grenades (4.12)
   );
   const enemy = new StandInEnemy(spawn, world);
   const view = new StandInView(enemy);
@@ -318,6 +317,14 @@ const inspectKey = new HoldTap();
 const bulletMarks = new BulletMarks(scene, weaponEvents);
 // Grenades: G throws one (the thrower holds the rules), the system flies it and works out the blast, and the effects listen.
 const thrower = new GrenadeThrower(weaponEvents);
+// What dead contractors drop (4.12): a grenade they still carried, and a magazine that fits one of Rook's guns. He picks
+// them up by walking over them (a grenade only below his carry limit).
+const pickups = new Pickups(weaponEvents, (kind) => {
+  if (kind === 'grenade') return thrower.give(1) > 0;
+  guns[kind].magazines.addFull();
+  return true;
+});
+const pickupsView = new PickupsView(scene, pickups);
 const blastTargets: ReturnType<typeof dummyBlastTarget>[] = [];
 
 /**
@@ -406,6 +413,7 @@ function restart(): void {
   thrower.reset();
   heals.reset();
   grenades.clear();
+  pickups.clear();
   dummies.forEach((dummy) => dummy.reset());
   placeSquad();
   coverPoints.clearClaims();
@@ -479,6 +487,8 @@ const loop = new Loop(
     player.handsBusy = heals.busy;
     player.fixedUpdate(stepSec, input);
     movement.update();
+    pickups.update(player.position);
+    pickupsView.update(stepSec);
     // R and F: tap or hold. Their presses are consumed so nothing stale is remembered.
     input.consumePress('KeyR');
     input.consumePress('KeyF');
@@ -573,6 +583,15 @@ const loop = new Loop(
       const rejects = first ? worldOf.get(first)?.flankRejects : undefined;
       flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
     }
+    // Enemy grenades (4.12): when Rook has held one spot well past the flank, the nearest enemy with a grenade and a clear
+    // lob throws it from a peek. One in the air at a time, and a wait between throws.
+    if (squad.grenadeDue(grenades.enemyGrenadeLive)) {
+      const job = squad.assignGrenade(
+        activeEnemies.filter((enemy) => enemy.canThrow),
+        (enemy) => worldOf.get(enemy)?.planThrow(enemy) ?? null,
+      );
+      job?.member.beginThrow(job.plan);
+    }
     // Suppress and advance (4.9): while Rook hides, one moves up to closer cover while another pins his cover. How many
     // move is per tier: at Relentless everyone who can, cover by cover (the coordinated push, 4.11).
     if (squad.playDue) startPlay(Math.round(squad.tier.playMovers));
@@ -626,7 +645,7 @@ const loop = new Loop(
     animatorInput.lookYawRad = lookYawRad;
     animatorInput.lookPitchRad = lookPitchRad;
     viewmodel.update(frameSec, animatorInput);
-    hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy, camera });
+    hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy, camera, enemyGrenades: grenades.liveEnemyGrenades() });
     renderer.clear();
     renderer.render(scene, camera);
     renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls

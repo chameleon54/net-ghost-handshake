@@ -10,6 +10,7 @@ import { buildGreybox } from '../src/level/greybox';
 import { Navigation } from '../src/level/navigation';
 import type { WeaponEvents } from '../src/weapons/events';
 import { squadConfig } from '../src/config/squad';
+import { enemyGrenadeConfig } from '../src/config/enemyGrenades';
 
 /** The distance from a spot to the nearest face of its box (on the floor plan), and whether it faces the box. */
 const faceGap = (point: CoverPoint, box: RoomBox) => {
@@ -128,6 +129,29 @@ describe('the test arena (decision 236)', () => {
     });
     expect(plans[testArenaStandIns.findIndex((s) => s.role === 'flanker')].flank).not.toBeNull();
     expect(plans.some((p) => p.advance !== null)).toBe(true);
+  });
+
+  it('with Rook crouched behind the south-west bench, a trooper in cover it picked has a clear lob at him (4.12)', () => {
+    const cover = new CoverPoints(coverPointsFromBoxes(testArena).filter((p) => onMesh(p.xM, p.zM)), level.collision);
+    const rook = {
+      position: new Vector3(-6, 0, 7.1),
+      eyeHeightNowM: 1,
+      eyes: new Vector3(-6, 1, 7.1),
+      forward: new Vector3(0, 0, -1),
+      inView: () => true,
+      exposure: 0,
+      movingFast: false,
+    };
+    // Every hiding spot within throw range that a trooper could hold: most of them must offer a throw.
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rook, () => {}, () => [], () => 0.5);
+    const enemy = new StandInEnemy(testArenaStandIns[1], world); // the trooper
+    const inRange = cover.points.filter((p) => {
+      const m = Math.hypot(p.xM - rook.position.x, p.zM - rook.position.z);
+      return m >= enemyGrenadeConfig.throwMinM && m <= enemyGrenadeConfig.throwMaxM && cover.hides(p, rook.eyes);
+    });
+    const withThrow = inRange.filter((p) => world.planThrow(enemy, p) !== null);
+    expect(inRange.length).toBeGreaterThan(5);
+    expect(withThrow.length / inRange.length).toBeGreaterThan(0.5);
   });
 
   it('a stand-in picks a spot it can shoot from, and later finds another spot to move on to (decision 237)', () => {

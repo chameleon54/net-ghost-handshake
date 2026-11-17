@@ -19,6 +19,9 @@ import type { Exposure } from '../player/exposure';
 import { squadConfig, squadConfigDefaults } from '../config/squad';
 import { roleConfig, roleConfigDefaults, roles } from '../config/roles';
 import { aggressionConfig, aggressionConfigDefaults, aggressionSetting, tiers } from '../config/aggression';
+import { enemyGunConfig, enemyGunConfigDefaults, enemyGuns } from '../config/enemyGuns';
+import { enemyGrenadeConfig, enemyGrenadeConfigDefaults } from '../config/enemyGrenades';
+import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
@@ -42,7 +45,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, enemyGunSliders, enemyGrenadeFolder, pickupFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -129,7 +132,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.close();
 
   // The readouts: shown on the screen, top left (readoutBox.ts), so long lines are not cut off.
-  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', hunt: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
+  const readouts = { health: '', position: '', speed: '', state: '', weapon: '', squad: '', flank: '', play: '', heard: '', hunt: '', grenade: '', exposure: '', freeCamera: 'off (press ` to toggle)', status: '' };
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
@@ -156,6 +159,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       resetToDefaults(squadConfig, squadConfigDefaults);
       for (const role of roles) resetToDefaults(roleConfig[role], roleConfigDefaults[role]);
       for (const tier of tiers) resetToDefaults(aggressionConfig[tier], aggressionConfigDefaults[tier]);
+      for (const gun of enemyGuns) resetToDefaults(enemyGunConfig[gun], enemyGunConfigDefaults[gun]);
+      resetToDefaults(enemyGrenadeConfig, enemyGrenadeConfigDefaults);
+      resetToDefaults(pickupConfig, pickupConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -182,6 +188,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           'src/config/squad.ts': changedValues(squadConfig, squadConfigDefaults),
           ...Object.fromEntries(roles.map((role) => [`src/config/roles.ts, ${role}`, changedValues(roleConfig[role], roleConfigDefaults[role])])),
           ...Object.fromEntries(tiers.map((tier) => [`src/config/aggression.ts, ${tier}`, changedValues(aggressionConfig[tier], aggressionConfigDefaults[tier])])),
+          ...Object.fromEntries(enemyGuns.map((gun) => [`src/config/enemyGuns.ts, ${gun}`, changedValues(enemyGunConfig[gun], enemyGunConfigDefaults[gun])])),
+          'src/config/enemyGrenades.ts': changedValues(enemyGrenadeConfig, enemyGrenadeConfigDefaults),
+          'src/config/pickups.ts': changedValues(pickupConfig, pickupConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -270,6 +279,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   squadPanel.add({ flank: () => squad.forceFlank() }, 'flank').name('Flank now (if a spot qualifies)');
   squadPanel.add({ play: () => squad.forcePlay() }, 'play').name('Suppress and advance now (while you hide)');
   squadPanel.add({ hunt: () => squad.forceHunt() }, 'hunt').name('Hunt now (once they have lost you)');
+  squadPanel.add({ grenade: () => squad.forceGrenade() }, 'grenade').name('Grenade now (if one can throw)');
   for (const s of squadFolder.sliders) squadPanel.add(squadConfig, s.key, s.min, s.max, s.step).name(s.label);
   const tiersPanel = standInPanel.addFolder('Aggression tiers (4.11)');
   tiersPanel.close();
@@ -285,6 +295,20 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     rolePanel.close();
     for (const s of roleSliders) rolePanel.add(roleConfig[role], s.key, s.min, s.max, s.step).name(s.label);
   }
+  // Enemy guns (4.12): the damage per gun (flankers carry the pistol, troopers and the leader the rifle, the heavy the lmg).
+  const gunsPanel = standInPanel.addFolder('Enemy guns (4.12)');
+  gunsPanel.close();
+  for (const gun of enemyGuns) {
+    const gunPanel = gunsPanel.addFolder(gun);
+    gunPanel.close();
+    for (const s of enemyGunSliders) gunPanel.add(enemyGunConfig[gun], s.key, s.min, s.max, s.step).name(s.label);
+  }
+  const enemyGrenadePanel = standInPanel.addFolder(enemyGrenadeFolder.title);
+  enemyGrenadePanel.close();
+  for (const s of enemyGrenadeFolder.sliders) enemyGrenadePanel.add(enemyGrenadeConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const pickupPanel = standInPanel.addFolder(pickupFolder.title);
+  pickupPanel.close();
+  for (const s of pickupFolder.sliders) pickupPanel.add(pickupConfig, s.key, s.min, s.max, s.step).name(s.label);
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();
@@ -381,7 +405,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
     enemyLines = activeStandIns.map(
       (s, i) =>
-        `${letter(i)} ${s.role.padEnd(8)}${s.state}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
@@ -437,6 +461,17 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : squad.huntFailure ? `${squad.huntFailure}, tries again soon`
       : squad.disorganised ? 'none while the squad is disorganised'
       : `knowledge old ${squad.staleForSec.toFixed(1)} s, starts at ${squad.tier.huntAfterSec} s`;
+    // Enemy grenades (4.12): who throws, or why none is coming yet.
+    const throwerLetter = huntLetter(squad.thrower);
+    const grenadeHeld = `held your spot ${squad.heldSec.toFixed(1)} of ${squad.tier.holdBeforeGrenadeSec} s`;
+    readouts.grenade =
+      throwerLetter ? `${throwerLetter} throwing`
+      : squad.tier.throwsGrenades <= 0 ? 'never at this tier'
+      : squad.disorganised ? 'none while the squad is disorganised'
+      : squad.grenadeWaitSec > 0 ? `${squad.grenadeFailure ? `${squad.grenadeFailure}, ` : ''}next chance in ${squad.grenadeWaitSec.toFixed(1)} s`
+      : squad.heldSec < squad.tier.holdBeforeGrenadeSec ? `none yet: ${grenadeHeld}`
+      : squad.flankers.length > 0 ? 'waits while a flank is on'
+      : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
       `health    ${readouts.health}`,
@@ -450,6 +485,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       `advance   ${readouts.play}`,
       `heard     ${readouts.heard}`,
       `hunt      ${readouts.hunt}`,
+      `grenade   ${readouts.grenade}`,
       ...enemyLines,
       `camera    ${readouts.freeCamera}`,
       ...(readouts.status ? [`status    ${readouts.status}`] : []),

@@ -1,4 +1,5 @@
 import type { Vector3 } from 'three';
+import type { Role } from '../config/roles';
 import type { HitZone } from '../enemies/dummy';
 import type { Surface } from '../data/greyboxRoom';
 import type { DamageSource } from '../player/playerHealth';
@@ -7,6 +8,8 @@ import type { MagazineCheck } from './magazineFeel';
 
 export type GunId = 'rifle' | 'pistol';
 export type WeaponId = GunId | 'knife';
+/** What can lie on the floor to pick up (4.12): a grenade, or a magazine for the rifle or the pistol. */
+export type PickupKind = 'grenade' | GunId;
 
 /** Where a shot went, for effects (and later sound and enemy hearing). The vectors are reused: read them straight away. */
 export interface ShotLanded {
@@ -62,6 +65,12 @@ export type WeaponEvents = {
   'enemy:peek-tell': { position: Vector3 };
   /** An enemy at `position` (a reused vector) saw a grenade near it and runs. The "Grenade, move" callout (phase 6) listens. */
   'enemy:grenade-spotted': { position: Vector3 };
+  /** An enemy let go of a grenade at `position` (a reused vector), 4.12. The "Frag out!" line (and its voiced callout, phase 6) listens. */
+  'enemy:grenade-thrown': { position: Vector3 };
+  /** An enemy went down at `position` (a reused vector) carrying `grenades`: what it drops (4.12) listens. */
+  'enemy:downed': { position: Vector3; role: Role; grenades: number };
+  /** Rook walked over a dropped item and took it (4.12): a grenade, or a magazine for one of his guns. */
+  'pickup:taken': { kind: PickupKind };
   /** A weapon hit a target. Hit markers (and later sound) listen. */
   'target:hit': { zone: HitZone; killed: boolean; weapon: WeaponId | 'grenade' };
   /** The player made a sound enemies could hear, at `position`, carrying `radiusM`. Enemy hearing (4.10) listens to this. */
@@ -73,6 +82,8 @@ export type WeaponEvents = {
   'grenade:thrown': { position: Vector3; velocity: Vector3 };
   /** A grenade bounced off a surface at `speedMps` into it. The position vector is reused. */
   'grenade:bounced': { position: Vector3; speedMps: number };
+  /** An enemy grenade's warning beep, from where it is (4.12). The position vector is reused. */
+  'grenade:beep': { position: Vector3 };
   /** A grenade went off. Glass (phase 5) and enemies (4.12) will react to this; enemies hear it too. The position vector is reused. */
   'grenade:exploded': { position: Vector3; radiusM: number };
   /** A blast hurt the player by `damage` (the health system has already taken it). */

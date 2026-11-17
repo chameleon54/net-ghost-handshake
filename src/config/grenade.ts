@@ -1,7 +1,8 @@
-// Player grenades (milestone 2.9). All starting values, to be readjusted by feel. Units are in the names.
+// Player grenades (milestone 2.9). All starting values, to be readjusted by feel. Units are in the names. Enemy grenades
+// fly and blast the same way; their own values (fuse from landing, warnings) are in enemyGrenades.ts (4.12).
 export const grenadeConfigDefaults = {
-  /** Grenades carried at the start. Read once at start. Rook really starts with none (weapons.md): this is for testing, until looting exists (4.12). */
-  startingGrenades: 2,
+  /** Grenades carried at the start. Read once at start. Rook starts with none (weapons.md, decision 171): he loots them (4.12). */
+  startingGrenades: 0,
   /** The most that can be carried. Read once at start. */
   carryLimit: 2,
   /** From release to the blast. */

@@ -3,7 +3,9 @@
 // Until then the dev panel picks it. Starting values. Units are in the names; a 0 or 1 value is off or on. "Everyone who
 // can" is any number at least the squad size (8 is the largest squad, enemies.md "Endless scaling"). The hunt values
 // (decision 235): whether the squad comes looking once its knowledge of Rook is old, how long after, how many follow the
-// hunt's leader per step, and how often a step comes.
+// hunt's leader per step, and how often a step comes. Enemy grenades (4.12, decision 249): whether the squad throws at
+// all, after how long Rook holds one spot (longer than the flank's hold, so a flank comes first), and how long the squad
+// waits between throws.
 export type Tier = 'cautious' | 'assertive' | 'aggressive' | 'relentless';
 
 export const aggressionConfigDefaults = {
@@ -23,6 +25,9 @@ export const aggressionConfigDefaults = {
     huntAfterSec: 10,
     huntFollowers: 1,
     huntStepEverySec: 5,
+    throwsGrenades: 0,
+    holdBeforeGrenadeSec: 14,
+    grenadeCooldownSec: 20,
   },
   /** Suppress and advance: one pins Rook's cover while another moves up. Reacts to his gun half the time. */
   assertive: {
@@ -40,6 +45,9 @@ export const aggressionConfigDefaults = {
     huntAfterSec: 10,
     huntFollowers: 1,
     huntStepEverySec: 5,
+    throwsGrenades: 1,
+    holdBeforeGrenadeSec: 14,
+    grenadeCooldownSec: 20,
   },
   /** Pincer: two flank at once, one round each side of him. Reacts to his gun every time. */
   aggressive: {
@@ -57,6 +65,9 @@ export const aggressionConfigDefaults = {
     huntAfterSec: 5,
     huntFollowers: 2,
     huntStepEverySec: 4,
+    throwsGrenades: 1,
+    holdBeforeGrenadeSec: 10,
+    grenadeCooldownSec: 15,
   },
   /** Coordinated push: everyone who can moves up cover by cover but one suppressor; piles in when his gun goes quiet. Hunts at once. */
   relentless: {
@@ -74,6 +85,9 @@ export const aggressionConfigDefaults = {
     huntAfterSec: 0,
     huntFollowers: 8,
     huntStepEverySec: 3,
+    throwsGrenades: 1,
+    holdBeforeGrenadeSec: 8,
+    grenadeCooldownSec: 12,
   },
 } as const;
 
