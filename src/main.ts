@@ -447,7 +447,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance() });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision });
   });
 }
 
@@ -540,6 +540,7 @@ const loop = new Loop(
       dummyViews[i].update();
     });
     camera.getWorldDirection(quarry.forward);
+    const aiStartMs = performance.now(); // the AI's time, for the dev performance readout (4.13b)
     // The squad times how long Rook holds his spot while it knows where he is, and sends a flanker when he holds it too long.
     const squadKnows = activeEnemies.some((enemy) => enemy.awake && enemy.knowsFresh);
     const rookHidden = glimpses.length > 0 && glimpses.every((glimpse) => glimpse.visibleShare <= 0); // as of the last update
@@ -605,6 +606,7 @@ const loop = new Loop(
       glimpses.push(world.glimpse(enemy, stepSec));
     }
     exposure.update(stepSec, glimpses, player.stance.stance === 'crouching', camera.position);
+    debug?.perf.addAi(performance.now() - aiStartMs);
   },
   (alpha) => {
     // The free camera, when on, places the camera itself; otherwise the player does.
@@ -646,10 +648,12 @@ const loop = new Loop(
     animatorInput.lookPitchRad = lookPitchRad;
     viewmodel.update(frameSec, animatorInput);
     hud.update({ weapons, aimBlend: aim.eased, grenades: thrower.count, heals: heals.count, healing: heals.busy, camera, enemyGrenades: grenades.liveEnemyGrenades() });
+    const renderStartMs = performance.now();
     renderer.clear();
     renderer.render(scene, camera);
     renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls
     renderer.render(viewmodel.scene, viewmodel.camera);
+    debug?.perf.addRender(performance.now() - renderStartMs);
   },
   () => game.isPlaying,
 );

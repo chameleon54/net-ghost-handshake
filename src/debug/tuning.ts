@@ -639,7 +639,7 @@ export const tierSliders: Slider<TierKey>[] = [
 export const squadFolder: Folder<SquadKey> = {
   title: 'Squad',
   sliders: [
-    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 4, step: 1 },
+    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 8, step: 1 },
     { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
     { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
     { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },

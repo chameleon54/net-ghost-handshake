@@ -25,6 +25,8 @@ import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
+import { formatPerf, PerfMeter } from './perf';
+import type { LevelCollision } from '../level/collision';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -55,6 +57,8 @@ export interface DebugTools {
   readonly freeCameraActive: boolean;
   /** Call once per screen frame before drawing. Returns true if the free camera placed the camera this frame. */
   beforeRender(camera: THREE.PerspectiveCamera): boolean;
+  /** The performance readout (4.13b): the game hands it the AI's and the drawing's time. */
+  readonly perf: PerfMeter;
 }
 
 interface Parts {
@@ -84,6 +88,9 @@ interface Parts {
   /** Rook's hidden exposure meter (4.5), and the hit chance it gives an enemy round right now. */
   exposure: Exposure;
   hitChance: () => number;
+  /** For the performance readout (4.13b): draw calls and triangles, and the rays to count. */
+  renderer: THREE.WebGLRenderer;
+  collision: LevelCollision;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -94,8 +101,27 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
+  // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
+  const perf = new PerfMeter();
+  const perfState = { on: false };
+  const rayDistance = collision.rayDistance.bind(collision);
+  collision.rayDistance = (...args: Parameters<typeof rayDistance>) => {
+    perf.countRay();
+    return rayDistance(...args);
+  };
+  const raycast = collision.raycast.bind(collision);
+  collision.raycast = (...args: Parameters<typeof raycast>) => {
+    perf.countRay();
+    return raycast(...args);
+  };
+  const findPath = navigation.findPath.bind(navigation);
+  navigation.findPath = (...args: Parameters<typeof findPath>) => {
+    perf.countRoute();
+    return findPath(...args);
+  };
+  renderer.info.autoReset = false; // the frame draws twice (world, then gun): count both, reset once per frame
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
 
@@ -136,6 +162,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
+  gui.add(perfState, 'on').name('Show performance (4.13b)');
 
   const actions = {
     resetAll: () => {
@@ -474,6 +501,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
+      ...(perfState.on ? formatPerf(perf.report) : []),
       `health    ${readouts.health}`,
       `position  ${readouts.position}`,
       `speed     ${readouts.speed}`,
@@ -496,8 +524,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     get freeCameraActive() {
       return freeCamera.active;
     },
+    perf,
     beforeRender(camera) {
       const now = performance.now();
+      perf.frame(now - lastFrameMs, renderer.info.render.calls, renderer.info.render.triangles);
+      renderer.info.reset();
       const dtSec = Math.min((now - lastFrameMs) / 1000, maxFrameSec);
       lastFrameMs = now;
 

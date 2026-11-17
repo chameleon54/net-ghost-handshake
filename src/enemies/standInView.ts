@@ -5,7 +5,7 @@ import type { Role } from '../config/roles';
 import { standInConfig } from '../config/standInEnemy';
 import type { StandInEnemy } from './standInEnemy';
 
-// Placeholder colours per role until the real models (4.13); all roles share the same shape and hit zones.
+// Placeholder colours per role until the real models (phase 7b); all roles share the same shape and hit zones.
 const bodyColours: Record<Role, number> = {
   trooper: 0x4b5a3a, // dark olive, so it is not mistaken for a dummy
   leader: 0x4b5a3a, // a trooper, with a red band round the head
@@ -18,7 +18,7 @@ const bandHeightM = 0.05;
 const bandWidenM = 0.01; // just outside the head, so it does not flicker against it
 const gunColour = 0x15171a;
 /**
- * Placeholder gun shapes (4.12, until the real model in 4.13), so the threat can be read at a glance: a short pistol, a
+ * Placeholder gun shapes (4.12, until the real model in phase 7b), so the threat can be read at a glance: a short pistol, a
  * long rifle, and a long, thick machine gun with a box magazine under it.
  */
 const gunShapes: Record<EnemyGun, { widthM: number; heightM: number; lengthM: number; boxMagM: number }> = {
