@@ -3,6 +3,11 @@
 // aggression tier (aggression.ts); who carries one is per role (roles.ts). The blast is Rook's own (grenade.ts).
 // Starting values. Units are in the names.
 export const enemyGrenadeConfigDefaults = {
+  /**
+   * Rook "holds a spot" for a grenade while he stays within this distance of where he settled (decision 251): wider than
+   * the flank's (`holdRadiusM`, squad.ts), so moving along one piece of cover still counts as camping it.
+   */
+  grenadeHoldRadiusM: 5,
   // Who throws, and from where.
   /** A thrower is at least this far from Rook (horizontally)... */
   throwMinM: 4,

@@ -463,13 +463,13 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : `knowledge old ${squad.staleForSec.toFixed(1)} s, starts at ${squad.tier.huntAfterSec} s`;
     // Enemy grenades (4.12): who throws, or why none is coming yet.
     const throwerLetter = huntLetter(squad.thrower);
-    const grenadeHeld = `held your spot ${squad.heldSec.toFixed(1)} of ${squad.tier.holdBeforeGrenadeSec} s`;
+    const grenadeHeld = `held your spot ${squad.grenadeHeldSec.toFixed(1)} of ${squad.tier.holdBeforeGrenadeSec} s`;
     readouts.grenade =
       throwerLetter ? `${throwerLetter} throwing`
       : squad.tier.throwsGrenades <= 0 ? 'never at this tier'
       : squad.disorganised ? 'none while the squad is disorganised'
       : squad.grenadeWaitSec > 0 ? `${squad.grenadeFailure ? `${squad.grenadeFailure}, ` : ''}next chance in ${squad.grenadeWaitSec.toFixed(1)} s`
-      : squad.heldSec < squad.tier.holdBeforeGrenadeSec ? `none yet: ${grenadeHeld}`
+      : squad.grenadeHeldSec < squad.tier.holdBeforeGrenadeSec ? `none yet: ${grenadeHeld}`
       : squad.flankers.length > 0 ? 'waits while a flank is on'
       : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;

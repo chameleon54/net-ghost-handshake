@@ -95,6 +95,10 @@ export class SquadCoordinator {
   /** Enemy grenades (4.12): who is throwing, and the time left before another throw may start (cooldown or retry). */
   private throwMember: Member | null = null;
   private grenadeWaitLeftSec = 0;
+  /** The grenade's own hold clock (decision 251): like the flank's, but with a wider radius. */
+  private readonly grenadeHoldSpot = { x: 0, z: 0 };
+  private hasGrenadeHoldSpot = false;
+  private grenadeHoldSec = 0;
   /** Why the last throw could not start, for the dev readout, or null. */
   grenadeFailure: string | null = null;
 
@@ -116,7 +120,18 @@ export class SquadCoordinator {
     if (!rook) {
       this.hasHoldSpot = false;
       this.holdSec = 0;
+      this.hasGrenadeHoldSpot = false;
+      this.grenadeHoldSec = 0;
       return;
+    }
+    // The grenade's clock: the same idea as the flank's below, with its own, wider radius (decision 251).
+    if (!this.hasGrenadeHoldSpot || Math.hypot(rook.x - this.grenadeHoldSpot.x, rook.z - this.grenadeHoldSpot.z) > enemyGrenadeConfig.grenadeHoldRadiusM) {
+      this.grenadeHoldSpot.x = rook.x;
+      this.grenadeHoldSpot.z = rook.z;
+      this.hasGrenadeHoldSpot = true;
+      this.grenadeHoldSec = 0;
+    } else {
+      this.grenadeHoldSec += dtSec;
     }
     if (!this.hasHoldSpot || Math.hypot(rook.x - this.holdSpot.x, rook.z - this.holdSpot.z) > squadConfig.holdRadiusM) {
       this.holdSpot.x = rook.x; // he moved: a new spot, and the clock starts again
@@ -541,7 +556,12 @@ export class SquadCoordinator {
   grenadeDue(enemyGrenadeLive: boolean): boolean {
     if (this.tier.throwsGrenades <= 0 || enemyGrenadeLive || this.throwMember !== null || this.flankMembers.size > 0) return false;
     if (this.grenadeWaitLeftSec > 0 || this.disorganised) return false;
-    return this.holdSec >= this.tier.holdBeforeGrenadeSec;
+    return this.grenadeHoldSec >= this.tier.holdBeforeGrenadeSec;
+  }
+
+  /** How long Rook has held his spot as the grenade counts it (within its wider radius). For the dev readout. */
+  get grenadeHeldSec(): number {
+    return this.grenadeHoldSec;
   }
 
   /**
@@ -579,7 +599,7 @@ export class SquadCoordinator {
 
   /** Dev panel testing aid: a throw is due now (if the tier throws and nobody is throwing or flanking). */
   forceGrenade(): void {
-    this.holdSec = Math.max(this.holdSec, this.tier.holdBeforeGrenadeSec);
+    this.grenadeHoldSec = Math.max(this.grenadeHoldSec, this.tier.holdBeforeGrenadeSec);
     this.grenadeWaitLeftSec = 0;
   }
 
@@ -666,5 +686,7 @@ export class SquadCoordinator {
     this.throwMember = null;
     this.grenadeWaitLeftSec = 0;
     this.grenadeFailure = null;
+    this.hasGrenadeHoldSpot = false;
+    this.grenadeHoldSec = 0;
   }
 }

@@ -3,6 +3,7 @@ import { PerspectiveCamera, Scene, Vector3 } from 'three';
 import { aggressionConfig, aggressionSetting } from '../src/config/aggression';
 import { enemyGrenadeConfig } from '../src/config/enemyGrenades';
 import { grenadeConfig } from '../src/config/grenade';
+import { squadConfig } from '../src/config/squad';
 import { EventBus } from '../src/core/events';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { Dummy } from '../src/enemies/dummy';
@@ -130,6 +131,22 @@ describe('SquadCoordinator: enemy grenades (4.12)', () => {
     hold(squad, 1);
     expect(squad.grenadeDue(false)).toBe(true);
     expect(squad.grenadeDue(true)).toBe(false); // one enemy grenade at a time
+  });
+
+  it('moving along one piece of cover keeps the grenade clock running (wider radius), while the flank clock restarts', () => {
+    const squad = new SquadCoordinator();
+    const shuffleM = (squadConfig.holdRadiusM + enemyGrenadeConfig.grenadeHoldRadiusM) / 2; // past the flank's radius, within the grenade's
+    let x = 0;
+    for (let i = 0; i < Math.round((aggressionConfig.assertive.holdBeforeGrenadeSec + 1) / dtSec); i++) {
+      if (i % 60 === 0) x = x === 0 ? shuffleM : 0; // a step left or right every second
+      squad.update(dtSec, { x, z: 0 });
+    }
+    expect(squad.heldSec).toBeLessThan(1.5); // the flank's clock keeps restarting
+    expect(squad.grenadeDue(false)).toBe(true);
+    // Leaving for good (beyond the grenade's radius) restarts the grenade clock too.
+    squad.update(dtSec, { x: -(enemyGrenadeConfig.grenadeHoldRadiusM + 1), z: 0 }); // the spot settled at one end of the shuffle
+    expect(squad.grenadeHeldSec).toBe(0);
+    expect(squad.grenadeDue(false)).toBe(false);
   });
 
   it('never at Cautious', () => {

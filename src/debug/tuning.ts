@@ -585,6 +585,7 @@ export const enemyGunSliders: Slider<EnemyGunKey>[] = [{ key: 'damagePerHit', la
 export const enemyGrenadeFolder: Folder<EnemyGrenadeKey> = {
   title: 'Enemy grenades (4.12)',
   sliders: [
+    { key: 'grenadeHoldRadiusM', label: 'You hold a spot within (m), for grenades', min: 0.5, max: 15, step: 0.25 },
     { key: 'throwMinM', label: 'Throws from at least (m from you)', min: 0, max: 20, step: 0.5 },
     { key: 'throwMaxM', label: 'Throws from at most (m from you)', min: 2, max: 40, step: 0.5 },
     { key: 'throwScatterM', label: 'Lands up to (m from your feet)', min: 0, max: 5, step: 0.1 },
