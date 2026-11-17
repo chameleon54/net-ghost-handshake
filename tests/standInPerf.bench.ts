@@ -10,6 +10,7 @@ import { Navigation } from '../src/level/navigation';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
 import { aggressionSetting } from '../src/config/aggression';
 import { enemyGrenadeConfig } from '../src/config/enemyGrenades';
+import { grenadeConfig } from '../src/config/grenade';
 import { loopConfig } from '../src/config/loop';
 import type { WeaponEvents } from '../src/weapons/events';
 import type { Noise } from '../src/stealth/noise';
@@ -93,6 +94,11 @@ test('8 stand-ins: one update step, and what it costs to plan, cast a ray and fi
     return m >= enemyGrenadeConfig.throwMinM && m <= enemyGrenadeConfig.throwMaxM && cover.hides(p, rook.eyes) && planner.world.planThrow(planner.enemy, p) !== null;
   })!;
 
+  // A grenade 3 m in front of the trooper, to run from (the blast radius as the safe distance).
+  const fleeFrom = new Vector3(planner.enemy.xM, 0, planner.enemy.zM + 3);
+  const fleeSafeM = grenadeConfig.blastRadiusM;
+  const fleeTo = new Vector3();
+
   // One ray across the arena, and one route from the north-west corner to Rook.
   const rayFrom = new Vector3(-13.5, 1.5, -9.5);
   const rayDirection = new Vector3().subVectors(rook.eyes, rayFrom);
@@ -107,6 +113,7 @@ test('8 stand-ins: one update step, and what it costs to plan, cast a ray and fi
     bench('planAdvance (a trooper)', () => planner.world.planAdvance(planner.enemy)),
     bench('planThrow (a trooper)', () => planner.world.planThrow(planner.enemy, throwFrom)),
     bench('planFlank (a flanker)', () => flanker.world.planFlank(flanker.enemy)),
+    bench('planFlee (a trooper, from a grenade 3 m away)', () => planner.world.planFlee(planner.enemy, fleeFrom, fleeSafeM, fleeTo)),
     bench('one ray across the arena', () => level.collision.rayDistance(rayFrom, rayDirection, rayM)),
     bench('one route search across the arena', () => navigation.findPath(routeFrom, rook.position, route)),
   );
