@@ -94,6 +94,38 @@ export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number;
 /** Something that can claim a spot (an enemy). */
 type Owner = object;
 
+/**
+ * The best-scoring item, with the costly checks done for as few items as possible (4.13b). `bound` gives cheaply the best
+ * score an item could possibly get (-Infinity: it does not qualify); `score` does the costly checks and gives its real
+ * score, never above its bound (-Infinity: it does not qualify). Items are checked best bound first, and the search stops
+ * once no item left can beat the best one found. `score` is handed `beats`, which says whether a score would win so far,
+ * so it can stop its own checks early. The result is the same as scoring every item in list order: the highest score,
+ * ties going to the item earlier in the list. Used by cover choice and the moving-up plan.
+ */
+export function bestByPromise<T>(
+  items: readonly T[],
+  bound: (item: T) => number,
+  score: (item: T, beats: (score: number) => boolean) => number,
+): { item: T; score: number } | null {
+  const ranked = items.map((item, index) => ({ item, index, bound: bound(item) }));
+  ranked.sort((a, b) => b.bound - a.bound || a.index - b.index); // most promising first; ties in list order
+
+  let best: { item: T; score: number } | null = null;
+  let bestScore = -Infinity;
+  let bestIndex = Infinity;
+  for (const { item, index, bound: mostM } of ranked) {
+    if (mostM === -Infinity || mostM < bestScore) break; // no item left can beat the best one found
+    if (mostM === bestScore && index > bestIndex) continue; // it could at most tie, and the earlier item wins ties
+    const beats = (s: number) => s > bestScore || (s === bestScore && index < bestIndex);
+    const s = score(item, beats);
+    if (s === -Infinity || !beats(s)) continue;
+    best = { item, score: s };
+    bestScore = s;
+    bestIndex = index;
+  }
+  return best;
+}
+
 // The cover service (architecture.md, "Cover points"): is a spot hidden from a threat, which spots are taken, and the best
 // free spot against a threat. "Hidden" is decided by rays through the level between the threat's eyes and where a body's
 // head and chest would be at the spot (crouched for low cover, standing for high), so it always matches the real props.
@@ -133,6 +165,11 @@ export class CoverPoints {
    * The spot must hide it and not be held by anyone else; then it should be in the liked range from the threat, and a
    * short walk (`walkM` gives the walking distance to a spot, Infinity if it cannot be reached). The winner is claimed
    * for `owner`, and any spot it held before is let go.
+   *
+   * Checking a spot is costly (rays for hiding and fighting, a route search for the walk), so it is done in order of
+   * promise (`bestByPromise`, 4.13b): `minWalkM` says how short the walk to a spot could possibly be (the straight line),
+   * which gives each spot the best score it could get. The result is the same as checking every spot, as long as
+   * `minWalkM` is never more than `walkM`. A test compares it with checking every spot.
    */
   best(
     owner: Owner,
@@ -143,24 +180,32 @@ export class CoverPoints {
     range: { readonly preferMinM: number; readonly preferMaxM: number } = roleConfig.trooper,
     /** True if a peek from the spot can see the threat (a fighting spot, preferred); leave out to treat all alike. */
     fights: (point: CoverPoint) => boolean = () => true,
+    /** The shortest the walk to a spot could be; never more than `walkM`. Leave out to check every spot. */
+    minWalkM: (point: CoverPoint) => number = () => 0,
   ): CoverPoint | null {
-    let best: CoverPoint | null = null;
-    let bestScore = -Infinity;
-    for (const point of this.points) {
-      const holder = this.claims.get(point);
-      if (holder && holder !== owner) continue;
-      if (!this.hides(point, eyes)) continue;
+    const outOfRangeM = (point: CoverPoint) => {
       const fromThreatM = Math.hypot(point.xM - feet.x, point.zM - feet.z);
-      const outOfRangeM = Math.max(range.preferMinM - fromThreatM, fromThreatM - range.preferMaxM, 0);
-      const walk = walkM(point);
-      if (!Number.isFinite(walk)) continue;
-      const blind = fights(point) ? 0 : coverConfig.blindSpotPenalty; // a spot it cannot shoot from is a last resort
-      const score = -(outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM + blind);
-      if (score > bestScore) {
-        bestScore = score;
-        best = point;
-      }
-    }
+      return Math.max(range.preferMinM - fromThreatM, fromThreatM - range.preferMaxM, 0);
+    };
+    const found = bestByPromise(
+      this.points,
+      (point) => {
+        const holder = this.claims.get(point);
+        if (holder && holder !== owner) return -Infinity; // taken
+        // Its range penalty, the shortest possible walk, and no blind-spot penalty.
+        return -(outOfRangeM(point) * coverConfig.rangePenaltyPerM + minWalkM(point) * coverConfig.walkPenaltyPerM);
+      },
+      (point, beats) => {
+        if (!this.hides(point, eyes)) return -Infinity;
+        const walk = walkM(point);
+        if (!Number.isFinite(walk)) return -Infinity;
+        const rangePenalty = outOfRangeM(point) * coverConfig.rangePenaltyPerM;
+        if (!beats(-(rangePenalty + walk * coverConfig.walkPenaltyPerM))) return -Infinity; // loses even if it can shoot from here: skip those rays
+        const blind = fights(point) ? 0 : coverConfig.blindSpotPenalty; // a spot it cannot shoot from is a last resort
+        return -(rangePenalty + walk * coverConfig.walkPenaltyPerM + blind);
+      },
+    );
+    const best = found?.item ?? null;
     this.release(owner);
     if (best) this.claims.set(best, owner);
     return best;

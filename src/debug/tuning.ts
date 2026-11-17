@@ -19,6 +19,7 @@ import type { RoleValues } from '../config/roles';
 import type { TierValues } from '../config/aggression';
 import type { EnemyGunValues } from '../config/enemyGuns';
 import type { EnemyGrenadeConfig } from '../config/enemyGrenades';
+import type { EnemySoundConfig } from '../config/enemySounds';
 import type { PickupConfig } from '../config/pickups';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
@@ -61,6 +62,7 @@ type TierKey = keyof TierValues;
 type EnemyGunKey = keyof EnemyGunValues;
 type EnemyGrenadeKey = keyof EnemyGrenadeConfig;
 type PickupKey = keyof PickupConfig;
+type EnemySoundKey = keyof EnemySoundConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -485,6 +487,11 @@ export const standInFolder: Folder<StandInKey> = {
   title: 'Stand-in enemy',
   sliders: [
     { key: 'turnSpeedDegPerSec', label: 'Turn speed (deg/s)', min: 30, max: 1080, step: 10 },
+    { key: 'cornerSpeedShareRightAngle', label: 'Moving: speed share through a right-angle corner', min: 0.05, max: 1, step: 0.05 },
+    { key: 'lookaheadMinM', label: 'Moving: steers at least this far ahead (m)', min: 0.1, max: 3, step: 0.05 },
+    { key: 'lookaheadSec', label: 'Moving: steers this far ahead in time (s)', min: 0, max: 1, step: 0.05 },
+    { key: 'creepSpeedMps', label: 'Moving: creeps into its spot at least (m/s)', min: 0.05, max: 2, step: 0.05 },
+    { key: 'turnAccelMps2', label: 'Moving: turns this hard on the move (m/s^2 sideways)', min: 1, max: 60, step: 1 },
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
     { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
@@ -577,6 +584,8 @@ export const roleSliders: Slider<RoleKey>[] = [
   { key: 'firesOnTheMove', label: 'Fires while it moves (0 or 1)', min: 0, max: 1, step: 1 },
   { key: 'flinchDamage', label: 'Flinches at this damage within the window', min: 1, max: 300, step: 1 },
   { key: 'grenades', label: 'Grenades carried (from next spawn)', min: 0, max: 3, step: 1 },
+  { key: 'accelMps2', label: 'Speeds up by (m/s each second)', min: 0.5, max: 30, step: 0.5 },
+  { key: 'brakeMps2', label: 'Slows down by (m/s each second)', min: 0.5, max: 30, step: 0.5 },
 ];
 
 /** The sliders for one enemy gun's values (4.12); the dev panel shows one folder of these per gun. */
@@ -603,6 +612,25 @@ export const enemyGrenadeFolder: Folder<EnemyGrenadeKey> = {
     { key: 'trailSec', label: 'Trail lasts (s)', min: 0.05, max: 1, step: 0.05 },
     { key: 'warningExtraM', label: 'Marker shows within blast radius plus (m)', min: 0, max: 10, step: 0.5 },
     { key: 'calloutShowSec', label: '"Frag out!" stays (s)', min: 0.5, max: 6, step: 0.5 },
+  ],
+};
+
+export const enemySoundFolder: Folder<EnemySoundKey> = {
+  title: 'Enemy sounds (4.14)',
+  sliders: [
+    { key: 'strideWalkM', label: 'A step every (m), walking', min: 0.3, max: 2, step: 0.05 },
+    { key: 'strideRunM', label: 'A step every (m), running', min: 0.3, max: 3, step: 0.05 },
+    { key: 'strideCrouchM', label: 'A step every (m), crouched', min: 0.2, max: 2, step: 0.05 },
+    { key: 'runFromSpeedMps', label: 'Running from (m/s)', min: 1, max: 6, step: 0.1 },
+    { key: 'stepVolumeWalk', label: 'Step volume, walking', min: 0, max: 2, step: 0.05 },
+    { key: 'stepVolumeRun', label: 'Step volume, running', min: 0, max: 2, step: 0.05 },
+    { key: 'stepVolumeCrouch', label: 'Step volume, crouched', min: 0, max: 2, step: 0.05 },
+    { key: 'heavyStepLoudness', label: 'Heavy: steps louder (x)', min: 0.5, max: 3, step: 0.05 },
+    { key: 'heavyStepPitch', label: 'Heavy: step pitch (below 1 deeper)', min: 0.5, max: 1.5, step: 0.01 },
+    { key: 'footPitchShare', label: 'Left and right foot pitched apart', min: 0, max: 0.2, step: 0.005 },
+    { key: 'pistolVolume', label: 'Pistol shot volume (flankers)', min: 0, max: 2, step: 0.05 },
+    { key: 'rifleVolume', label: 'Rifle shot volume (troopers, leader)', min: 0, max: 2, step: 0.05 },
+    { key: 'lmgVolume', label: 'Machine gun shot volume (heavy)', min: 0, max: 2, step: 0.05 },
   ],
 };
 
@@ -639,7 +667,7 @@ export const tierSliders: Slider<TierKey>[] = [
 export const squadFolder: Folder<SquadKey> = {
   title: 'Squad',
   sliders: [
-    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 4, step: 1 },
+    { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 8, step: 1 },
     { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
     { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
     { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },

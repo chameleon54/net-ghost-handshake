@@ -6,7 +6,8 @@ import type { SoundName } from './recipes';
 import type { SoundPlayer } from './soundPlayer';
 import type { Rng } from './synth';
 
-const stepSounds = { concrete: 'step-concrete', metal: 'step-metal', tile: 'step-tile' } as const satisfies Record<string, SoundName>;
+/** The footstep sound for each surface: Rook's (3.4) and the enemies' (4.14). */
+export const stepSounds = { concrete: 'step-concrete', metal: 'step-metal', tile: 'step-tile' } as const satisfies Record<string, SoundName>;
 const pitchVariationShare = 0.02; // a little random on top of the left and right foot difference
 
 // Decides which sound plays for each movement event: the footstep for the surface, quieter crouched and louder sprinting,

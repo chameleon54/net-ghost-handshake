@@ -71,10 +71,17 @@ export const testArenaDummies = [
   { xM: 8, zM: 8.5, yawRad: Math.PI }, // by the east bench
 ] as const;
 
-/** The squad's spawns: one of each role, spread over the north and the east, facing the start. */
+/**
+ * The squad's spawns, facing the start: A to D are one of each role over the north and the east; E to H (4.13b, decision
+ * 258) fill a squad of 8 over the north-west and the west. The dev panel's count takes the first few.
+ */
 export const testArenaStandIns: readonly { readonly xM: number; readonly zM: number; readonly yawRad: number; readonly role: Role }[] = [
   { xM: 0, zM: -10.8, yawRad: Math.PI, role: 'leader' }, // A: between the partitions
   { xM: -9, zM: -10.5, yawRad: Math.PI, role: 'trooper' }, // B: north-west
   { xM: 9, zM: -10.5, yawRad: Math.PI, role: 'flanker' }, // C: north-east
   { xM: 13, zM: -2.5, yawRad: Math.PI * 0.75, role: 'heavy' }, // D: the east side
+  { xM: -4.5, zM: -11, yawRad: Math.PI, role: 'trooper' }, // E: behind the west partition
+  { xM: -13.5, zM: -9.5, yawRad: Math.PI, role: 'trooper' }, // F: the north-west corner
+  { xM: -6, zM: -9, yawRad: Math.PI, role: 'flanker' }, // G: north-west, between B and E
+  { xM: -13, zM: -2.5, yawRad: Math.PI * 1.25, role: 'heavy' }, // H: the west side
 ];

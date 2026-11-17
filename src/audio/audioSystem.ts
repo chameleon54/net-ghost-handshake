@@ -6,9 +6,26 @@ import { SoundBank } from './soundBank';
 import type { PlayOptions, SoundPlayer } from './soundPlayer';
 
 const plainVoices = 20; // sounds that can play at once without a position (your own gun and handling)
-const spatialVoices = 10; // sounds that can play at once in the world (impacts, casings)
+const spatialVoices = 16; // sounds that can play at once in the world (shots, impacts, tells, grenades)
+const stepVoices = 12; // footsteps and other movement (Rook's and the enemies'): their own voices, so a step never cuts off a shot or a beep (4.14)
 const duckFadeSec = 0.6; // the lowering fades back over this long at the end
 const spatialRefDistanceM = 4; // inside this distance a positional sound is at full volume; beyond it, it fades
+
+/**
+ * Which busy voice a new sound at `newM` metres should take over: the one playing farthest away, if it is farther than the
+ * new sound; -1 if every one is nearer (the new sound is dropped). For the footstep voices (4.14).
+ */
+export function farthestBeyond(playingM: readonly number[], newM: number): number {
+  let index = -1;
+  let farthestM = newM;
+  playingM.forEach((distanceM, i) => {
+    if (distanceM > farthestM) {
+      farthestM = distanceM;
+      index = i;
+    }
+  });
+  return index;
+}
 
 const groupVolume = (group: SoundGroup): number =>
   group === 'weapon'
@@ -27,6 +44,9 @@ export class AudioSystem implements SoundPlayer {
   private bank: SoundBank | null = null;
   private plain: THREE.Audio[] = [];
   private spatial: THREE.PositionalAudio[] = [];
+  private steps: THREE.PositionalAudio[] = [];
+  private readonly ear = new THREE.Vector3();
+  private readonly distancesM: number[] = [];
   private nextPlain = 0;
   private nextSpatial = 0;
   private duckShare = 0;
@@ -75,7 +95,10 @@ export class AudioSystem implements SoundPlayer {
     const duck = this.duckShare * Math.min(this.duckLeftSec / duckFadeSec, 1);
     listener.setMasterVolume(audioConfig.masterVolume * (1 - duck));
     const volume = (options.volume ?? 1) * groupVolume(recipes[name].group);
-    const voice = options.position ? this.nextSpatialVoice() : this.nextPlainVoice();
+    const voice = !options.position ? this.nextPlainVoice()
+      : recipes[name].group === 'movement' ? this.stepVoiceFor(options.position)
+      : this.nextSpatialVoice();
+    if (!voice) return; // every footstep voice is busy with a nearer step
     if (voice.isPlaying) voice.stop(); // all voices busy: the oldest is cut off
     voice.setBuffer(buffer);
     voice.setVolume(volume);
@@ -100,11 +123,11 @@ export class AudioSystem implements SoundPlayer {
     this.listener = listener;
     this.bank = new SoundBank(listener.context);
     for (let i = 0; i < plainVoices; i++) this.plain.push(new THREE.Audio(listener));
-    for (let i = 0; i < spatialVoices; i++) {
+    for (let i = 0; i < spatialVoices + stepVoices; i++) {
       const voice = new THREE.PositionalAudio(listener);
       voice.setRefDistance(spatialRefDistanceM);
       this.scene.add(voice);
-      this.spatial.push(voice);
+      (i < spatialVoices ? this.spatial : this.steps).push(voice);
     }
     void this.bank.loadRecordings(); // real files, if any, replace the built-in sounds when they have loaded
   }
@@ -114,6 +137,17 @@ export class AudioSystem implements SoundPlayer {
     if (free) return free;
     this.nextPlain = (this.nextPlain + 1) % this.plain.length;
     return this.plain[this.nextPlain];
+  }
+
+  /** A footstep voice: a free one, or else the one playing farthest away if the new step is nearer; null if none. */
+  private stepVoiceFor(position: THREE.Vector3): THREE.PositionalAudio | null {
+    const free = this.steps.find((voice) => !voice.isPlaying);
+    if (free) return free;
+    this.camera.getWorldPosition(this.ear);
+    this.distancesM.length = 0;
+    for (const voice of this.steps) this.distancesM.push(voice.position.distanceTo(this.ear));
+    const index = farthestBeyond(this.distancesM, position.distanceTo(this.ear));
+    return index < 0 ? null : this.steps[index];
   }
 
   private nextSpatialVoice(): THREE.PositionalAudio {

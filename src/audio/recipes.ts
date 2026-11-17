@@ -50,6 +50,8 @@ export const soundNames = [
   'bullet-crack',
   'grenade-beep',
   'pickup',
+  'enemy-pistol-fire',
+  'enemy-mg-fire',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -89,6 +91,33 @@ export const recipes: Record<SoundName, Recipe> = {
       thunk(s, sr, 0, 1.1, between(rng, 120, 160), 45);
       addNoise(s, sr, { start: 0.02, duration: 0.45, decay: 0.25, gain: 0.16, lowpass: 1800, rng });
       return finish(s, sr, { peak: 0.95, drive: 2.2 });
+    },
+  },
+  // An enemy flanker's pistol (4.14): unsuppressed, sharper and lighter than the rifle, with less low body and a short tail.
+  'enemy-pistol-fire': {
+    group: 'weapon',
+    variants: 3,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.35);
+      addNoise(s, sr, { duration: 0.035, decay: 0.008, gain: 1.0, highpass: between(rng, 3000, 4000), attack: 0.0002, rng });
+      addNoise(s, sr, { duration: 0.1, decay: 0.03, gain: 0.7, highpass: 500, lowpass: between(rng, 4000, 5500), rng });
+      thunk(s, sr, 0, 0.6, between(rng, 200, 240), 80);
+      addNoise(s, sr, { start: 0.015, duration: 0.3, decay: 0.15, gain: 0.1, lowpass: 2500, rng });
+      return finish(s, sr, { peak: 0.9, drive: 2.0 });
+    },
+  },
+  // An enemy heavy's light machine gun (4.14): deeper and heavier than the rifle, a bigger thump and a longer tail.
+  'enemy-mg-fire': {
+    group: 'weapon',
+    variants: 3,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.6);
+      addNoise(s, sr, { duration: 0.05, decay: 0.012, gain: 0.85, highpass: between(rng, 1600, 2200), attack: 0.0002, rng });
+      addNoise(s, sr, { duration: 0.18, decay: 0.055, gain: 0.85, highpass: 200, lowpass: between(rng, 2200, 3000), rng });
+      addNoise(s, sr, { start: 0.002, duration: 0.3, decay: 0.11, gain: 0.7, lowpass: 900, rng });
+      thunk(s, sr, 0, 1.3, between(rng, 85, 110), 35);
+      addNoise(s, sr, { start: 0.02, duration: 0.55, decay: 0.3, gain: 0.2, lowpass: 1400, rng });
+      return finish(s, sr, { peak: 0.95, drive: 2.4 });
     },
   },
   // Suppressed: a soft "pff", a dull thud, and the clack of the slide. Never silent.

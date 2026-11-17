@@ -22,9 +22,16 @@ import { aggressionConfig, aggressionConfigDefaults, aggressionSetting, tiers } 
 import { enemyGunConfig, enemyGunConfigDefaults, enemyGuns } from '../config/enemyGuns';
 import { enemyGrenadeConfig, enemyGrenadeConfigDefaults } from '../config/enemyGrenades';
 import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
+import { enemySoundConfig, enemySoundConfigDefaults } from '../config/enemySounds';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
+import { formatPerf, PerfMeter } from './perf';
+import { debugLogStartHeader, debugLogUrl, EventLog } from './eventLog';
+import { LogWatch } from './logWatch';
+import type { EventBus } from '../core/events';
+import type { WeaponEvents } from '../weapons/events';
+import type { LevelCollision } from '../level/collision';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
 import type { SoundTap } from '../audio/soundTap';
@@ -45,7 +52,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, enemyGunSliders, enemyGrenadeFolder, pickupFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, enemyGunSliders, enemyGrenadeFolder, pickupFolder, enemySoundFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -55,6 +62,8 @@ export interface DebugTools {
   readonly freeCameraActive: boolean;
   /** Call once per screen frame before drawing. Returns true if the free camera placed the camera this frame. */
   beforeRender(camera: THREE.PerspectiveCamera): boolean;
+  /** The performance readout (4.13b): the game hands it the AI's and the drawing's time. */
+  readonly perf: PerfMeter;
 }
 
 interface Parts {
@@ -84,9 +93,17 @@ interface Parts {
   /** Rook's hidden exposure meter (4.5), and the hit chance it gives an enemy round right now. */
   exposure: Exposure;
   hitChance: () => number;
+  /** For the performance readout (4.13b): draw calls and triangles, and the rays to count. */
+  renderer: THREE.WebGLRenderer;
+  collision: LevelCollision;
+  /** The game's event bus, for the debug log (decision 260). */
+  events: EventBus<WeaponEvents>;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
+const hiddenGapMs = 1000; // a gap this long is the tab being hidden, not a slow frame
+const logFlushEverySec = 1;
+const markKey = 'F8';
 const readoutIntervalSec = 0.1;
 const markerColour = 0x33ff66;
 const eyeDotColour = 0xff4444;
@@ -94,8 +111,38 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
+  // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
+  const perf = new PerfMeter();
+  const perfState = { on: false };
+  const rayDistance = collision.rayDistance.bind(collision);
+  collision.rayDistance = (...args: Parameters<typeof rayDistance>) => {
+    perf.countRay();
+    return rayDistance(...args);
+  };
+  const raycast = collision.raycast.bind(collision);
+  collision.raycast = (...args: Parameters<typeof raycast>) => {
+    perf.countRay();
+    return raycast(...args);
+  };
+  const findPath = navigation.findPath.bind(navigation);
+  navigation.findPath = (...args: Parameters<typeof findPath>) => {
+    perf.countRoute();
+    return findPath(...args);
+  };
+  renderer.info.autoReset = false; // the frame draws twice (world, then gun): count both, reset once per frame
+  // The debug log (decision 260): lines go to the dev server once a second, which writes debug-log.txt (vite.config.ts).
+  const log = new EventLog();
+  const logWatch = new LogWatch({ log, events, standIns, activeStandIns, squad, flankFailure });
+  let logFlushSec = 0;
+  let logSendFailed = false;
+  const sendLog = (text: string, fresh: boolean) => {
+    fetch(debugLogUrl, { method: 'POST', body: text, headers: fresh ? { [debugLogStartHeader]: '1' } : {} }).catch((error) => {
+      if (!logSendFailed) console.warn('The debug log could not reach the dev server; debug-log.txt is not being written.', error);
+      logSendFailed = true;
+    });
+  };
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
 
@@ -136,6 +183,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   let enemyLines: string[] = [];
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
+  gui.add(perfState, 'on').name('Show performance (4.13b)');
+  gui.add({ mark: () => log.mark() }, 'mark').name(`Debug log: add a mark (${markKey})`);
+  gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
 
   const actions = {
     resetAll: () => {
@@ -162,6 +212,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       for (const gun of enemyGuns) resetToDefaults(enemyGunConfig[gun], enemyGunConfigDefaults[gun]);
       resetToDefaults(enemyGrenadeConfig, enemyGrenadeConfigDefaults);
       resetToDefaults(pickupConfig, pickupConfigDefaults);
+      resetToDefaults(enemySoundConfig, enemySoundConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -191,6 +242,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           ...Object.fromEntries(enemyGuns.map((gun) => [`src/config/enemyGuns.ts, ${gun}`, changedValues(enemyGunConfig[gun], enemyGunConfigDefaults[gun])])),
           'src/config/enemyGrenades.ts': changedValues(enemyGrenadeConfig, enemyGrenadeConfigDefaults),
           'src/config/pickups.ts': changedValues(pickupConfig, pickupConfigDefaults),
+          'src/config/enemySounds.ts': changedValues(enemySoundConfig, enemySoundConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -263,7 +315,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   standInPanel.add(freeze, 'frozen').name('Freeze all (stand still, hold fire)').onChange((on: boolean) => {
     for (const standIn of standIns) standIn.frozen = on;
   });
-  standInPanel.add({ respawn: respawnSquad }, 'respawn').name('Respawn all (idle, at their spots)');
+  const respawn = () => {
+    respawnSquad();
+    logWatch.reset();
+  };
+  standInPanel.add({ respawn }, 'respawn').name('Respawn all (idle, at their spots)');
   const navOverlay = new NavOverlay(scene, navigation, activeStandIns);
   standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
   standInPanel.add(navOverlay, 'pathShown').name('Show stand-in routes');
@@ -309,6 +365,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const pickupPanel = standInPanel.addFolder(pickupFolder.title);
   pickupPanel.close();
   for (const s of pickupFolder.sliders) pickupPanel.add(pickupConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const enemySoundPanel = standInPanel.addFolder(enemySoundFolder.title);
+  enemySoundPanel.close();
+  for (const s of enemySoundFolder.sliders) enemySoundPanel.add(enemySoundConfig, s.key, s.min, s.max, s.step).name(s.label);
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();
@@ -474,6 +533,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
     readoutBox.show([
+      ...(perfState.on ? formatPerf(perf.report) : []),
       `health    ${readouts.health}`,
       `position  ${readouts.position}`,
       `speed     ${readouts.speed}`,
@@ -496,8 +556,22 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     get freeCameraActive() {
       return freeCamera.active;
     },
+    perf,
     beforeRender(camera) {
       const now = performance.now();
+      const frameMs = now - lastFrameMs;
+      if (frameMs < hiddenGapMs) {
+        perf.frame(frameMs, renderer.info.render.calls, renderer.info.render.triangles);
+        log.slowFrame(frameMs, perf.lastFrame);
+      }
+      renderer.info.reset();
+      logWatch.update();
+      if (input.consumePress(markKey)) log.mark();
+      logFlushSec += frameMs / 1000;
+      if (logFlushSec >= logFlushEverySec) {
+        logFlushSec = 0;
+        log.flush(sendLog);
+      }
       const dtSec = Math.min((now - lastFrameMs) / 1000, maxFrameSec);
       lastFrameMs = now;
 

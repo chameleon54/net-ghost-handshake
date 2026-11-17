@@ -9,7 +9,7 @@ import { rifleConfig } from '../config/rifle';
 import { standInConfig } from '../config/standInEnemy';
 import type { EventBus } from '../core/events';
 import { createRayHit, type LevelCollision } from '../level/collision';
-import type { CoverPoint, CoverPoints } from '../level/cover';
+import { bestByPromise, type CoverPoint, type CoverPoints } from '../level/cover';
 import type { Navigation } from '../level/navigation';
 import { hitChance, missOffsetM, type Glimpse } from '../player/exposure';
 import { squadConfig } from '../config/squad';
@@ -99,6 +99,9 @@ export class StandInWorld implements StandInHooks {
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
   private readonly spot = new Vector3();
+  /** Where a route from its feet starts, and a spot on the floor (pickCover's shortest possible walk, 4.13b). */
+  private readonly routeStart = new Vector3();
+  private readonly spotOnFloor = new Vector3();
   private readonly target = new Vector3();
   private readonly direction = new Vector3();
   private readonly muzzle = new Vector3();
@@ -302,22 +305,36 @@ export class StandInWorld implements StandInHooks {
     const position = this.viewFeet;
     const eyes = this.viewEyes;
     const nowM = Math.hypot(enemy.xM - position.x, enemy.zM - position.z);
-    let best: FlankPlan | null = null;
-    for (const point of this.coverPoints.points) {
-      const holder = this.coverPoints.claimedBy(point);
-      if (point === enemy.cover || (holder && holder !== enemy)) continue;
-      const toM = Math.hypot(point.xM - position.x, point.zM - position.z);
-      if (toM > nowM - squadConfig.advanceMinGainM || toM < closestM) continue;
-      if (!this.coverPoints.hides(point, eyes)) continue;
-      const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
-      if (!Number.isFinite(walk)) continue;
-      const exposedM = this.exposedRouteM(this.routeToCover); // walkM left its route there
-      if (exposedM > squadConfig.moveMaxExposedM) continue;
-      const blind = this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty;
-      const cost = exposedM * exposedCostPerM + walk * coverConfig.walkPenaltyPerM + blind;
-      if (!best || cost < best.cost) best = { point, cost };
-    }
-    return best;
+    const onFloor = this.routeStartFor(enemy);
+    // The lowest cost wins; as a score, the cost turned negative. Spots are checked in order of promise (4.13b): the
+    // route's view part and the blind-spot penalty are never below 0, and the walk never below the straight line.
+    const found = bestByPromise(
+      this.coverPoints.points,
+      (point) => {
+        const holder = this.coverPoints.claimedBy(point);
+        if (point === enemy.cover || (holder && holder !== enemy)) return -Infinity;
+        const toM = Math.hypot(point.xM - position.x, point.zM - position.z);
+        if (toM > nowM - squadConfig.advanceMinGainM || toM < closestM) return -Infinity;
+        return -(this.minWalkM(onFloor, point) * coverConfig.walkPenaltyPerM);
+      },
+      (point, beats) => {
+        if (!this.coverPoints.hides(point, eyes)) return -Infinity;
+        const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
+        if (!Number.isFinite(walk)) return -Infinity;
+        if (!beats(-(walk * coverConfig.walkPenaltyPerM))) return -Infinity; // loses on the walk alone: skip the route's rays
+        // walkM left its route there; measuring stops once the route is over the limit or can no longer win.
+        const exposedM = this.exposedRouteM(
+          this.routeToCover,
+          (soFarM) => soFarM <= squadConfig.moveMaxExposedM && beats(-(soFarM * exposedCostPerM + walk * coverConfig.walkPenaltyPerM)),
+        );
+        if (exposedM > squadConfig.moveMaxExposedM) return -Infinity;
+        const costIfItFights = exposedM * exposedCostPerM + walk * coverConfig.walkPenaltyPerM;
+        if (!beats(-costIfItFights)) return -Infinity; // loses even if it can shoot from there: skip those rays
+        const blind = this.canFightFrom(point) ? 0 : coverConfig.blindSpotPenalty;
+        return -(exposedM * exposedCostPerM + walk * coverConfig.walkPenaltyPerM + blind);
+      },
+    );
+    return found ? { point: found.item, cost: -found.score } : null;
   }
 
   /** True if it could pin Rook's cover from its spot: from one of its peeks, a round at either edge of his cover gets there. */
@@ -516,8 +533,11 @@ export class StandInWorld implements StandInHooks {
     return forward.z * (point.xM - position.x) - forward.x * (point.zM - position.z) >= 0 ? -1 : 1;
   }
 
-  /** How many metres of a route Rook can see a standing body's head on (judged as `viewEyes`), checked every metre or so. */
-  private exposedRouteM(route: readonly Vector3[]): number {
+  /**
+   * How many metres of a route Rook can see a standing body's head on (judged as `viewEyes`), checked every metre or so.
+   * With `stillCounts`, it stops as soon as the metres so far no longer count (they only grow) and returns Infinity (4.13b).
+   */
+  private exposedRouteM(route: readonly Vector3[], stillCounts: (exposedM: number) => boolean = () => true): number {
     let exposedM = 0;
     for (let i = 1; i < route.length; i++) {
       const from = route[i - 1];
@@ -527,7 +547,9 @@ export class StandInWorld implements StandInHooks {
       for (let step = 1; step <= steps; step++) {
         this.sample.lerpVectors(from, to, step / steps);
         this.sample.y += standInConfig.eyeHeightM;
-        if (this.clearLine(this.viewEyes, this.sample)) exposedM += lengthM / steps;
+        if (!this.clearLine(this.viewEyes, this.sample)) continue;
+        exposedM += lengthM / steps;
+        if (!stillCounts(exposedM)) return Infinity;
       }
     }
     return exposedM;
@@ -607,6 +629,7 @@ export class StandInWorld implements StandInHooks {
   }
 
   pickCover(enemy: StandInEnemy): CoverPoint | null {
+    const onFloor = this.routeStartFor(enemy); // the most promising spots get checked first (4.13b)
     return this.coverPoints.best(
       enemy,
       this.viewEyes,
@@ -614,6 +637,7 @@ export class StandInWorld implements StandInHooks {
       (point) => this.walkM(enemy, point),
       enemy.values,
       (point) => this.canFightFrom(point), // a spot it can shoot from is preferred (decision 237)
+      (point) => this.minWalkM(onFloor, point),
     );
   }
 
@@ -665,20 +689,32 @@ export class StandInWorld implements StandInHooks {
    * none, open floor straight away from the grenade, just outside the blast (or where it stands, if the mesh has no floor there).
    */
   planFlee(enemy: StandInEnemy, grenade: Vector3, safeM: number, out: Vector3): CoverPoint | null {
+    // Nearest first by the straight line (4.13b): a spot further than its run by the straight line is never searched,
+    // and once a hiding spot is found, the search stops when no spot left could be nearer. Same choice as checking all.
+    const onFloor = this.routeStartFor(enemy);
+    const nearestFirst = this.coverPoints.points
+      .map((point, index) => ({ point, index, minM: this.minWalkM(onFloor, point) }))
+      .filter((spot) => spot.minM <= standInConfig.grenadeRunMaxM)
+      .sort((a, b) => a.minM - b.minM || a.index - b.index);
     let best: CoverPoint | null = null;
     let bestHides = false;
     let bestWalkM = Infinity;
-    for (const point of this.coverPoints.points) {
+    let bestIndex = Infinity;
+    for (const { point, index, minM } of nearestFirst) {
+      if (bestHides && (minM > bestWalkM || (minM === bestWalkM && index > bestIndex))) break; // none left can be nearer
       const holder = this.coverPoints.claimedBy(point);
       if (holder && holder !== enemy) continue;
       if (Math.hypot(point.xM - grenade.x, point.zM - grenade.z) < safeM) continue;
+      // Once a hiding spot is found, only a nearer hiding spot can win: check hiding (two rays) before the route.
+      const hides = this.coverPoints.hides(point, this.viewEyes);
+      if (bestHides && !hides) continue;
       const walk = this.walkM(enemy, point);
       if (walk > standInConfig.grenadeRunMaxM) continue;
-      const hides = this.coverPoints.hides(point, this.viewEyes);
-      if ((hides && !bestHides) || (hides === bestHides && walk < bestWalkM)) {
+      if ((hides && !bestHides) || (hides === bestHides && (walk < bestWalkM || (walk === bestWalkM && index < bestIndex)))) {
         best = point;
         bestHides = hides;
         bestWalkM = walk;
+        bestIndex = index;
       }
     }
     if (best) {
@@ -707,6 +743,23 @@ export class StandInWorld implements StandInHooks {
   grenadeSpotted(enemy: StandInEnemy): void {
     this.target.set(enemy.xM, enemy.heightM, enemy.zM);
     this.events.emit('enemy:grenade-spotted', { position: this.target });
+  }
+
+  /**
+   * Puts where a route from its feet starts (the floor nearest them) into `routeStart`; false if there is no floor near.
+   * With `minWalkM`, the cheap first step of choosing a spot in order of promise (4.13b).
+   */
+  private routeStartFor(enemy: StandInEnemy): boolean {
+    return this.navigation.closestPoint(enemy.feet, this.routeStart);
+  }
+
+  /**
+   * The shortest its walk to `point` could be: a route starts at `routeStart` and ends within the arrive distance of the
+   * spot, so it is never shorter than the straight line between those minus that distance. 0 if there is no floor near.
+   */
+  private minWalkM(onFloor: boolean, point: CoverPoint): number {
+    if (!onFloor) return 0;
+    return Math.max(this.routeStart.distanceTo(this.spotOnFloor.set(point.xM, 0, point.zM)) - standInConfig.coverArriveM, 0);
   }
 
   /**
@@ -763,7 +816,7 @@ export class StandInWorld implements StandInHooks {
         this.end.copy(this.direction).multiplyScalar(rifleConfig.maxRangeM).add(this.muzzle);
       }
     }
-    this.events.emit('enemy:fired', { position: this.muzzle });
+    this.events.emit('enemy:fired', { position: this.muzzle, gun: enemy.gun });
     this.events.emit('shot:landed', { muzzle: this.muzzle, end: this.end, hit: onSurface, normal: this.normal, shooter: 'enemy' });
     if (shot !== 'hit') this.crackIfClose();
   }
