@@ -5,6 +5,7 @@ import { EventBus } from '../src/core/events';
 import type { WeaponEvents } from '../src/weapons/events';
 import type { StandInEnemy } from '../src/enemies/standInEnemy';
 import type { SquadCoordinator } from '../src/squad/squadCoordinator';
+import { aggressionSetting } from '../src/config/aggression';
 
 /** A log whose clock starts at 14:32:07.4 and moves on 0.1 s per reading. */
 function makeLog() {
@@ -82,15 +83,20 @@ describe('what the debug log watches (decision 260)', () => {
       disorganised: false,
     };
     const standIns = [a, b, c] as unknown as StandInEnemy[];
-    const watch = new LogWatch({ log, events, standIns, activeStandIns: standIns, squad: squad as unknown as SquadCoordinator, flankFailure: () => null });
+    const clock = { ms: 0 };
+    const watch = new LogWatch({ log, events, standIns, activeStandIns: standIns, squad: squad as unknown as SquadCoordinator, flankFailure: () => null, now: () => clock.ms });
+    aggressionSetting.current = 'assertive';
     const lines = () => flush().map((batch) => batch.text).join('').split('\n').slice(1, -1); // without "session started"
-    return { watch, events, squad, a, b, c, lines };
+    return { watch, events, squad, a, b, c, lines, clock };
   }
 
-  it('says nothing while nothing changes', () => {
+  it('says the tier and the count once at the start, then nothing while nothing changes; again when the tier changes', () => {
     const { watch, lines } = makeWatch();
     for (let i = 0; i < 5; i++) watch.update();
-    expect(lines()).toEqual([]);
+    aggressionSetting.current = 'relentless';
+    watch.update();
+    watch.update();
+    expect(lines().map((line) => line.slice(12))).toEqual(['squad       tier assertive, 3 in the room', 'squad       tier relentless, 3 in the room']);
   });
 
   it('logs state changes, a flank, a pincer, and the squad getting disorganised and organised again', () => {
@@ -107,6 +113,7 @@ describe('what the debug log watches (decision 260)', () => {
     watch.update();
     const text = lines().map((line) => line.slice(12)); // without the time
     expect(text).toEqual([
+      'squad       tier assertive, 3 in the room',
       'C flanker   idle -> flank',
       'squad       flank given to C',
       'squad       pincer: C, A flank from both sides',
@@ -129,6 +136,7 @@ describe('what the debug log watches (decision 260)', () => {
     watch.update();
     const text = lines().map((line) => line.slice(12));
     expect(text).toEqual([
+      'squad       tier assertive, 3 in the room',
       'B trooper   winds up a throw',
       'B trooper   throw called off',
       'B trooper   winds up a throw',
@@ -137,12 +145,41 @@ describe('what the debug log watches (decision 260)', () => {
     ]);
   });
 
-  it('logs what happens to Rook, and a respawn', () => {
+  it('logs what happens to Rook, a respawn, and the setup again after a death and a respawn', () => {
     const { watch, events, lines } = makeWatch();
+    watch.update();
     events.emit('player:damaged', { amount: 12, health: 63, source: 'enemy' });
     events.emit('player:died', { source: 'blast' });
-    watch.reset(8);
+    watch.update();
+    watch.reset();
+    watch.update();
     const text = lines().map((line) => line.slice(12));
-    expect(text).toEqual(['Rook        took 12 from enemy fire, health 63', 'Rook        DIED (blast)', 'squad       respawned, 8 in the room']);
+    expect(text).toEqual([
+      'squad       tier assertive, 3 in the room',
+      'Rook        took 12 from enemy fire, health 63',
+      'Rook        DIED (blast)',
+      'squad       tier assertive, 3 in the room',
+      'squad       respawned',
+      'squad       tier assertive, 3 in the room',
+    ]);
+  });
+
+  it("adds up the hazard pad's slivers of damage into one line a second", () => {
+    const { watch, events, lines, clock } = makeWatch();
+    watch.update();
+    for (let i = 0; i < 90; i++) {
+      // 1.5 s on the pad at 60 updates a second, a third of a point each
+      clock.ms = (i * 1000) / 60;
+      events.emit('player:damaged', { amount: 1 / 3, health: 100 - (i + 1) / 3, source: 'hazard' });
+      watch.update();
+    }
+    clock.ms = 3000;
+    watch.update(); // off the pad: the rest is written
+    const text = lines().map((line) => line.slice(12));
+    expect(text).toEqual([
+      'squad       tier assertive, 3 in the room',
+      'Rook        took 20 from the hazard pad (added up), health 80',
+      'Rook        took 10 from the hazard pad (added up), health 70',
+    ]);
   });
 });

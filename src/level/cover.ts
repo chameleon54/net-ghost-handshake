@@ -103,11 +103,15 @@ export class CoverPoints {
   private readonly claims = new Map<CoverPoint, Owner>();
   private readonly target = new Vector3();
   private readonly direction = new Vector3();
+  /** `best`'s working list, one entry per spot, reused. */
+  private readonly ranked: { point: CoverPoint; index: number; outOfRangeM: number; bound: number }[];
 
   constructor(
     readonly points: readonly CoverPoint[],
     private readonly collision: LevelCollision,
-  ) {}
+  ) {
+    this.ranked = points.map((point, index) => ({ point, index, outOfRangeM: 0, bound: 0 }));
+  }
 
   /** True if the lines from the head and the chest of a body at this spot toward `eyes` are both blocked by the spot's own prop. */
   hides(point: CoverPoint, eyes: Vector3): boolean {
@@ -133,6 +137,12 @@ export class CoverPoints {
    * The spot must hide it and not be held by anyone else; then it should be in the liked range from the threat, and a
    * short walk (`walkM` gives the walking distance to a spot, Infinity if it cannot be reached). The winner is claimed
    * for `owner`, and any spot it held before is let go.
+   *
+   * Checking a spot is costly (rays for hiding and fighting, a route search for the walk), so it is done in order of
+   * promise (4.13b): `minWalkM` says how short the walk to a spot could possibly be (the straight line), which gives each
+   * spot the best score it could get; spots are checked best first, and the search stops once no spot left can beat the
+   * best one found. The result is the same as checking every spot (ties still go to the spot earlier in the list), as
+   * long as `minWalkM` is never more than `walkM`. A test compares it with checking every spot.
    */
   best(
     owner: Owner,
@@ -143,21 +153,41 @@ export class CoverPoints {
     range: { readonly preferMinM: number; readonly preferMaxM: number } = roleConfig.trooper,
     /** True if a peek from the spot can see the threat (a fighting spot, preferred); leave out to treat all alike. */
     fights: (point: CoverPoint) => boolean = () => true,
+    /** The shortest the walk to a spot could be; never more than `walkM`. Leave out to check every spot. */
+    minWalkM: (point: CoverPoint) => number = () => 0,
   ): CoverPoint | null {
+    // Each free spot's best possible score: its range penalty, the shortest possible walk, and no blind-spot penalty.
+    const ranked = this.ranked;
+    for (const entry of ranked) {
+      const { point } = entry;
+      const holder = this.claims.get(point);
+      if (holder && holder !== owner) {
+        entry.bound = -Infinity; // taken: never checked
+        continue;
+      }
+      const fromThreatM = Math.hypot(point.xM - feet.x, point.zM - feet.z);
+      entry.outOfRangeM = Math.max(range.preferMinM - fromThreatM, fromThreatM - range.preferMaxM, 0);
+      entry.bound = -(entry.outOfRangeM * coverConfig.rangePenaltyPerM + minWalkM(point) * coverConfig.walkPenaltyPerM);
+    }
+    ranked.sort((a, b) => b.bound - a.bound || a.index - b.index); // most promising first; each entry keeps its index
+
     let best: CoverPoint | null = null;
     let bestScore = -Infinity;
-    for (const point of this.points) {
-      const holder = this.claims.get(point);
-      if (holder && holder !== owner) continue;
+    let bestIndex = Infinity;
+    for (const { point, index, outOfRangeM, bound } of ranked) {
+      if (bound === -Infinity || bound < bestScore) break; // no spot left can beat the best one found
+      if (bound === bestScore && index > bestIndex) continue; // it could at most tie, and the earlier spot wins ties
       if (!this.hides(point, eyes)) continue;
-      const fromThreatM = Math.hypot(point.xM - feet.x, point.zM - feet.z);
-      const outOfRangeM = Math.max(range.preferMinM - fromThreatM, fromThreatM - range.preferMaxM, 0);
       const walk = walkM(point);
       if (!Number.isFinite(walk)) continue;
+      // Even if it could shoot from here, it would not win: skip the rays that check.
+      const scoreIfItFights = -(outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM);
+      if (scoreIfItFights < bestScore || (scoreIfItFights === bestScore && index > bestIndex)) continue;
       const blind = fights(point) ? 0 : coverConfig.blindSpotPenalty; // a spot it cannot shoot from is a last resort
       const score = -(outOfRangeM * coverConfig.rangePenaltyPerM + walk * coverConfig.walkPenaltyPerM + blind);
-      if (score > bestScore) {
+      if (score > bestScore || (score === bestScore && index < bestIndex)) {
         bestScore = score;
+        bestIndex = index;
         best = point;
       }
     }

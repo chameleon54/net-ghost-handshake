@@ -99,6 +99,9 @@ export class StandInWorld implements StandInHooks {
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
   private readonly spot = new Vector3();
+  /** Where a route from its feet starts, and a spot on the floor (pickCover's shortest possible walk, 4.13b). */
+  private readonly routeStart = new Vector3();
+  private readonly spotOnFloor = new Vector3();
   private readonly target = new Vector3();
   private readonly direction = new Vector3();
   private readonly muzzle = new Vector3();
@@ -607,6 +610,9 @@ export class StandInWorld implements StandInHooks {
   }
 
   pickCover(enemy: StandInEnemy): CoverPoint | null {
+    // A route starts at the floor nearest its feet and ends within the arrive distance of the spot, so it is never
+    // shorter than the straight line between those, minus that distance: the most promising spots get checked first (4.13b).
+    const onFloor = this.navigation.closestPoint(enemy.feet, this.routeStart);
     return this.coverPoints.best(
       enemy,
       this.viewEyes,
@@ -614,6 +620,7 @@ export class StandInWorld implements StandInHooks {
       (point) => this.walkM(enemy, point),
       enemy.values,
       (point) => this.canFightFrom(point), // a spot it can shoot from is preferred (decision 237)
+      (point) => (onFloor ? Math.max(this.routeStart.distanceTo(this.spotOnFloor.set(point.xM, 0, point.zM)) - standInConfig.coverArriveM, 0) : 0),
     );
   }
 

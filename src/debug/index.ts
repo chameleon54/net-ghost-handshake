@@ -314,7 +314,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   });
   const respawn = () => {
     respawnSquad();
-    logWatch.reset(activeStandIns.length);
+    logWatch.reset();
   };
   standInPanel.add({ respawn }, 'respawn').name('Respawn all (idle, at their spots)');
   const navOverlay = new NavOverlay(scene, navigation, activeStandIns);
