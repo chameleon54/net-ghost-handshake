@@ -48,6 +48,8 @@ export const soundNames = [
   'land-hard',
   'enemy-peek-tell',
   'bullet-crack',
+  'grenade-beep',
+  'pickup',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -414,6 +416,29 @@ export const recipes: Record<SoundName, Recipe> = {
       addNoise(s, sr, { duration: 0.012, decay: 0.003, gain: 1, highpass: 1500, rng });
       addNoise(s, sr, { start: 0.004, duration: 0.08, decay: between(rng, 0.02, 0.03), gain: 0.35, highpass: 3000, lowpass: 9000, rng });
       return finish(s, sr, { peak: 0.8 });
+    },
+  },
+  // An enemy grenade's warning (4.12): a short, piercing electronic beep, easy to pick out in a fight. Repeated, faster
+  // and faster as its fuse runs out.
+  'grenade-beep': {
+    group: 'weapon',
+    variants: 1,
+    make: (sr) => {
+      const s = createSamples(sr, 0.09);
+      addTone(s, sr, { duration: 0.07, freq: 2900, decay: 0.05, gain: 0.8, attack: 0.002 });
+      addTone(s, sr, { duration: 0.07, freq: 5800, decay: 0.03, gain: 0.2, attack: 0.002 });
+      return finish(s, sr, { peak: 0.6 });
+    },
+  },
+  // Something picked up off the floor (4.12): a quick rustle and a soft click into a pouch.
+  'pickup': {
+    group: 'handling',
+    variants: 2,
+    make: (sr, rng, variant) => {
+      const s = createSamples(sr, 0.25);
+      addNoise(s, sr, { duration: 0.12, decay: 0.05, gain: 0.4, highpass: 1500, lowpass: 6000, attack: 0.01, rng });
+      metalClick(s, sr, rng, 0.09, 0.45, 1900 + variant * 250);
+      return finish(s, sr, { peak: 0.45 });
     },
   },
   // A heal item opened: a snap of the cap, then a soft hiss of the dose going in.

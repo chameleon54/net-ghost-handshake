@@ -8,8 +8,8 @@ export interface BlastTarget {
   chest(out: Vector3): Vector3;
   /** False for a target that is already out of the fight (falling, lying down, dead). */
   vulnerable(): boolean;
-  /** Takes the damage. */
-  hurt(damage: number): void;
+  /** Takes the damage. `byPlayer`: false for an enemy's grenade (4.12), so no hit marker shows. */
+  hurt(damage: number, byPlayer: boolean): void;
 }
 
 /** Damage at a distance from the centre: full at the centre, falling in a straight line to the edge value at the edge, none beyond. */
@@ -45,9 +45,9 @@ export interface BlastResult {
 
 /**
  * Works out a blast at `origin`: every vulnerable target within the radius and not shielded by cover takes the damage for its
- * distance. Returns what each one took (targets that took nothing are left out).
+ * distance. Returns what each one took (targets that took nothing are left out). `byPlayer`: false for an enemy's grenade.
  */
-export function resolveBlast(origin: Vector3, collision: LevelCollision, targets: readonly BlastTarget[]): BlastResult[] {
+export function resolveBlast(origin: Vector3, collision: LevelCollision, targets: readonly BlastTarget[], byPlayer = true): BlastResult[] {
   const results: BlastResult[] = [];
   for (const target of targets) {
     if (!target.vulnerable()) continue;
@@ -55,7 +55,7 @@ export function resolveBlast(origin: Vector3, collision: LevelCollision, targets
     const distanceM = chest.distanceTo(origin);
     const damage = blastDamageAt(distanceM);
     if (damage <= 0 || isShielded(origin, chest, collision)) continue;
-    target.hurt(damage);
+    target.hurt(damage, byPlayer);
     results.push({ target, distanceM, damage });
   }
   return results;

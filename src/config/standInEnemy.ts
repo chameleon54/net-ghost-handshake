@@ -76,8 +76,7 @@ export const standInConfigDefaults = {
   ownCoverM: 1.2,
   roundIntervalSec: 0.1,
   burstPauseSec: 1.2,
-  /** The trooper's rifle (enemies.md). */
-  damagePerHit: 15,
+  // The damage of a hit comes from its gun since 4.12 (enemyGuns.ts).
   fallTimeSec: 0.4,
   /** Time down before it gets up at its spawn spot, awake. */
   respawnDelaySec: 5,

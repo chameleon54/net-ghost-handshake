@@ -12,6 +12,9 @@ import { exposureConfigDefaults } from '../src/config/exposure';
 import { squadConfigDefaults } from '../src/config/squad';
 import { roleConfigDefaults, roles } from '../src/config/roles';
 import { aggressionConfigDefaults, tiers } from '../src/config/aggression';
+import { enemyGunConfigDefaults, enemyGuns } from '../src/config/enemyGuns';
+import { enemyGrenadeConfigDefaults } from '../src/config/enemyGrenades';
+import { pickupConfigDefaults } from '../src/config/pickups';
 import { knifeConfigDefaults } from '../src/config/knife';
 import { pistolConfigDefaults } from '../src/config/pistol';
 import { rifleConfigDefaults } from '../src/config/rifle';
@@ -33,6 +36,9 @@ import {
   squadFolder,
   roleSliders,
   tierSliders,
+  enemyGunSliders,
+  enemyGrenadeFolder,
+  pickupFolder,
   exposureKeysNotOnPanel,
   standInKeysNotOnPanel,
   knifeFolder,
@@ -233,6 +239,33 @@ describe('the aggression tier panel (4.11)', () => {
       }
       const onPanel = new Set<string>(tierSliders.map((s) => s.key));
       for (const key of Object.keys(aggressionConfigDefaults[tier])) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+    }
+  });
+});
+
+describe('the enemy gun, enemy grenade and pick-up panels (4.12)', () => {
+  it('have a sensible range around every default and list every value', () => {
+    for (const gun of enemyGuns) {
+      for (const s of enemyGunSliders) {
+        expect(enemyGunConfigDefaults[gun][s.key], `${gun} ${s.key}`).toBeGreaterThanOrEqual(s.min);
+        expect(enemyGunConfigDefaults[gun][s.key], `${gun} ${s.key}`).toBeLessThanOrEqual(s.max);
+      }
+      const onPanel = new Set<string>(enemyGunSliders.map((s) => s.key));
+      for (const key of Object.keys(enemyGunConfigDefaults[gun])) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
+    }
+    const folders = [
+      [enemyGrenadeFolder, enemyGrenadeConfigDefaults],
+      [pickupFolder, pickupConfigDefaults],
+    ] as const;
+    for (const [folder, defaults] of folders) {
+      const values = defaults as Record<string, number>;
+      for (const s of folder.sliders) {
+        expect(s.min, s.key).toBeLessThan(s.max);
+        expect(values[s.key], s.key).toBeGreaterThanOrEqual(s.min);
+        expect(values[s.key], s.key).toBeLessThanOrEqual(s.max);
+      }
+      const onPanel = new Set<string>(folder.sliders.map((s) => s.key as string));
+      for (const key of Object.keys(values)) expect(onPanel.has(key), `${key} is not on the panel`).toBe(true);
     }
   });
 });

@@ -1,5 +1,7 @@
 import { Line3, Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
+import { enemyGrenadeConfig } from '../config/enemyGrenades';
+import { enemyGunConfig } from '../config/enemyGuns';
 import { exposureConfig } from '../config/exposure';
 import { grenadeConfig } from '../config/grenade';
 import { playerConfig } from '../config/player';
@@ -14,7 +16,8 @@ import { squadConfig } from '../config/squad';
 import { coverConfig } from '../config/cover';
 import { SquadCoordinator } from '../squad/squadCoordinator';
 import type { WeaponEvents } from '../weapons/events';
-import { peekEyesAt, peekGunAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot } from './standInEnemy';
+import { lobIsClear, lobVelocity } from './grenadeLob';
+import { peekEyesAt, peekGunAt, peekWays, type StandInEnemy, type StandInHooks, type StandInShot, type ThrowPlan } from './standInEnemy';
 
 /** What the stand-in needs to know about Rook. */
 export interface StandInQuarry {
@@ -43,6 +46,10 @@ const missTries = 4;
 const routeSampleM = 1;
 /** In a flank plan's cost, one metre in Rook's view counts as much as this many metres of walking: least exposed first. */
 const exposedCostPerM = 100;
+/** A grenade throw tries this many angles, from the highest to the lowest (enemyGrenades.ts). */
+const throwAngleTries = 3;
+/** A lob is aimed this far above the floor at his feet (about the grenade's own size), so the floor itself is not "in the way". */
+const lobLandLiftM = 0.05;
 
 /** Where a flank goes, and what it costs (metres in Rook's view weigh far more than metres walked). */
 export interface FlankPlan {
@@ -110,6 +117,9 @@ export class StandInWorld implements StandInHooks {
   private readonly enemyPoint = new Vector3();
   private readonly huntEyes = new Vector3();
   private readonly huntFeet = new Vector3();
+  private readonly lobFrom = new Vector3();
+  private readonly lobTarget = new Vector3();
+  private readonly lobVelocity = new Vector3();
   /** What the last flank plan turned down (dev readout). */
   readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0, sameSide: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
@@ -132,6 +142,8 @@ export class StandInWorld implements StandInHooks {
     private readonly random: () => number = Math.random,
     /** The squad it belongs to (firing slots, hit budget); a squad of its own by default. */
     private readonly squad: SquadCoordinator = new SquadCoordinator(),
+    /** Throws a grenade from `from` at `velocity` (the grenade system's `throwEnemyGrenade`, 4.12). */
+    private readonly launchGrenade: (from: Vector3, velocity: Vector3) => void = () => {},
   ) {}
 
   requestSlot(enemy: StandInEnemy): boolean {
@@ -389,6 +401,51 @@ export class StandInWorld implements StandInHooks {
 
   downed(enemy: StandInEnemy): void {
     if (enemy.role === 'leader') this.squad.leaderDown();
+    this.target.set(enemy.xM, 0, enemy.zM);
+    this.events.emit('enemy:downed', { position: this.target, role: enemy.role, grenades: enemy.grenades }); // its drops (4.12)
+  }
+
+  /**
+   * A grenade throw for this stand-in (4.12), or null: from its cover spot, within the throw range of Rook, a lob aimed
+   * at his feet (scattered a little) that nothing blocks on the way. Each peek way is tried, and for each the throw
+   * angles from the highest (a lob over his cover) down; the first clear one is taken. The nearer the thrower, the cheaper.
+   * `point` is the spot it throws from: its cover.
+   */
+  planThrow(enemy: StandInEnemy, point: CoverPoint | null = enemy.cover): ThrowPlan | null {
+    if (!point) return null;
+    const rook = this.quarry.position;
+    const { throwMinM, throwMaxM, throwScatterM, throwHandAboveEyesM, throwAngleMaxDeg, throwAngleMinDeg, throwSpeedMaxMps, throwLandToleranceM } =
+      enemyGrenadeConfig;
+    const fromRookM = Math.hypot(point.xM - rook.x, point.zM - rook.z);
+    if (fromRookM < throwMinM || fromRookM > throwMaxM) return null;
+    const scatterRad = this.random() * 2 * Math.PI;
+    const scatterM = Math.sqrt(this.random()) * throwScatterM; // evenly over the disc, not bunched at the centre
+    this.lobTarget.set(rook.x + Math.cos(scatterRad) * scatterM, rook.y + lobLandLiftM, rook.z + Math.sin(scatterRad) * scatterM);
+    for (const way of peekWays(point)) {
+      peekEyesAt(point, way, this.lobFrom);
+      this.lobFrom.y += throwHandAboveEyesM;
+      for (let i = 0; i < throwAngleTries; i++) {
+        const angleDeg = throwAngleMaxDeg - ((throwAngleMaxDeg - throwAngleMinDeg) * i) / (throwAngleTries - 1);
+        if (!lobVelocity(this.lobFrom, this.lobTarget, angleDeg * (Math.PI / 180), grenadeConfig.gravityMps2, this.lobVelocity)) continue;
+        if (this.lobVelocity.length() > throwSpeedMaxMps) continue;
+        if (!lobIsClear(this.lobFrom, this.lobVelocity, this.lobTarget, grenadeConfig.gravityMps2, this.collision, throwLandToleranceM)) continue;
+        return { way, from: this.lobFrom.clone(), velocity: this.lobVelocity.clone(), rookAt: rook.clone(), cost: fromRookM };
+      }
+    }
+    return null;
+  }
+
+  throwStillOn(_enemy: StandInEnemy, plan: ThrowPlan): boolean {
+    const rook = this.quarry.position;
+    return Math.hypot(rook.x - plan.rookAt.x, rook.z - plan.rookAt.z) <= enemyGrenadeConfig.throwCancelMovedM;
+  }
+
+  throwGrenade(_enemy: StandInEnemy, plan: ThrowPlan): void {
+    this.launchGrenade(plan.from, plan.velocity);
+  }
+
+  throwOver(enemy: StandInEnemy, thrown: boolean): void {
+    this.squad.grenadeOver(enemy, thrown);
   }
 
   /**
@@ -694,7 +751,7 @@ export class StandInWorld implements StandInHooks {
     let onSurface = false;
     if (shot === 'hit') {
       this.end.copy(this.aim);
-      this.damagePlayer(standInConfig.damagePerHit, this.muzzle);
+      this.damagePlayer(enemyGunConfig[enemy.gun].damagePerHit, this.muzzle); // the gun decides the damage (4.12)
     } else {
       if (shot === 'miss') this.placeMiss();
       this.direction.subVectors(this.aim, this.muzzle).normalize();

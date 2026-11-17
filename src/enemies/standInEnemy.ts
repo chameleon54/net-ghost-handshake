@@ -1,5 +1,7 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
+import { enemyGrenadeConfig } from '../config/enemyGrenades';
+import { gunOfRole, type EnemyGun } from '../config/enemyGuns';
 import { grenadeConfig } from '../config/grenade';
 import { roleConfig, type Role, type RoleValues } from '../config/roles';
 import { squadConfig } from '../config/squad';
@@ -108,6 +110,24 @@ export interface StandInHooks {
   huntMoveOver(enemy: StandInEnemy): void;
   /** How many times as long it holds between peeks because of the hunt (the watcher less, a careful hold more). */
   huntHoldScale(enemy: StandInEnemy): number;
+  /** At the moment of letting go (4.12): true if the throw is still on (Rook has not moved away since it was planned). */
+  throwStillOn(enemy: StandInEnemy, plan: ThrowPlan): boolean;
+  /** It lets go of its grenade as planned. */
+  throwGrenade(enemy: StandInEnemy, plan: ThrowPlan): void;
+  /** Its throw is over, `thrown` or not (called off, interrupted): tells the squad. */
+  throwOver(enemy: StandInEnemy, thrown: boolean): void;
+}
+
+/**
+ * A planned grenade throw (4.12): from which peek (`way`, see `peekWays`), where it leaves the hand, at what velocity,
+ * where Rook was when it was planned (it is called off if he moves away), and its cost (the nearest thrower goes).
+ */
+export interface ThrowPlan {
+  readonly way: number;
+  readonly from: Vector3;
+  readonly velocity: Vector3;
+  readonly rookAt: Vector3;
+  readonly cost: number;
 }
 
 /** The ways a peek from `point` can go: 0 rises over low cover; 1 and -1 step out right and left, as seen facing the cover. */
@@ -157,7 +177,9 @@ const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'gren
 // it round Rook's side to flank him (the `flank` state). Since 4.8 it has a role (trooper, flanker, heavy or squad leader)
 // whose values set its health, speeds, burst length and liked cover range. Since 4.9 the squad may have it pin Rook's
 // cover (suppressing) or move up under that fire (`advance`), and Rook's near misses pin it back into cover. Since the
-// hunt (4.11, decision 235) the squad may send it toward where it last knew Rook was (`hunt`). No drawing code here.
+// hunt (4.11, decision 235) the squad may send it toward where it last knew Rook was (`hunt`). Since 4.12 (decision 249)
+// its gun comes from its role, and a trooper or squad leader carries a grenade: the squad may have it lob it at Rook from
+// a peek (the tell, a wind-up, the throw, back in). No drawing code here.
 export class StandInEnemy implements Target {
   /** Where its feet are. It stays on the floor. */
   readonly feet = new Vector3();
@@ -232,6 +254,9 @@ export class StandInEnemy implements Target {
   private flinchLeftSec = 0;
   private flinchFreeAtSec = 0;
   private panicking = false;
+  /** Grenades it carries (its role's count, from each spawn), and the throw the squad gave it, or null (4.12). */
+  private grenadesLeft = 0;
+  private throwPlan: ThrowPlan | null = null;
   /**
    * First contact (4.5): false until Rook has seen it or it has fired its warning burst. Until then every round misses.
    * Once per life.
@@ -262,7 +287,7 @@ export class StandInEnemy implements Target {
   /** The way a peek steps (a unit vector across the cover), or zero when it rises over low cover instead. */
   private readonly peekSide = new Vector3();
   /** What this peek does once out: fire at Rook, fire at his cover, or just look. */
-  private peekMode: 'aimed' | 'cover' | 'suppress' | 'look' = 'look';
+  private peekMode: 'aimed' | 'cover' | 'suppress' | 'look' | 'throw' = 'look';
   private peekRounds = 0;
   private readonly peekEyes = new Vector3();
 
@@ -278,6 +303,21 @@ export class StandInEnemy implements Target {
   /** Its role's values (live, so the dev panel can change them): health, speeds, burst length, liked cover range. */
   get values(): RoleValues {
     return roleConfig[this.role];
+  }
+
+  /** The gun it carries, from its role (4.12): it decides the damage of its hits. */
+  get gun(): EnemyGun {
+    return gunOfRole[this.role];
+  }
+
+  /** How many grenades it still carries (4.12). */
+  get grenades(): number {
+    return this.grenadesLeft;
+  }
+
+  /** True while it has a throw to make (from the squad giving it until it throws or the throw is called off). */
+  get isThrowing(): boolean {
+    return this.throwPlan !== null;
   }
 
   get xM(): number {
@@ -472,11 +512,14 @@ export class StandInEnemy implements Target {
     if (this.hasSlot && !this.inBurst) this.giveSlotBack(); // a slot covers one burst, and goes back whatever ended it
   }
 
-  /** True during a burst: firing one, or peeking out to fire one (from the tell until it starts back in). */
+  /**
+   * True during a burst: firing one, or peeking out to fire one (from the tell until it starts back in). A throw counts
+   * as one from the moment the squad gives it (4.12): it is busy, and keeps its slot until it has thrown.
+   */
   private get inBurst(): boolean {
     if (!this.awake || this.frozen) return false;
     const peeking = this.state === 'cover' && (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire');
-    return peeking || (this.engaged && this.roundsInBurst > 0);
+    return peeking || this.throwPlan !== null || (this.engaged && this.roundsInBurst > 0);
   }
 
   /** Asks for a firing slot if it holds none. True if it holds one now. */
@@ -685,6 +728,28 @@ export class StandInEnemy implements Target {
   get canSuppress(): boolean {
     if (!this.awake || this.frozen || this.wounded || this.grenadeSeen || this.inBurst) return false;
     return this.state === 'cover' && this.coverPoint !== null && this.knowsFresh;
+  }
+
+  /**
+   * True if the squad may have it throw a grenade (4.12): it carries one, holds cover between peeks, is not wounded,
+   * frozen, suppressing or busy, and has no grenade of Rook's on its mind.
+   */
+  get canThrow(): boolean {
+    if (!this.awake || this.frozen || this.wounded || this.grenadeSeen || this.inBurst || this.suppressing) return false;
+    return this.grenadesLeft > 0 && this.state === 'cover' && this.coverPoint !== null && this.peekPhase === 'hold';
+  }
+
+  /** The squad has it throw (4.12): it peeks at once from the planned side (with the tell), winds up, and throws. */
+  beginThrow(plan: ThrowPlan): void {
+    this.throwPlan = plan;
+    this.peekTimerSec = 0;
+  }
+
+  /** Its throw is over, `thrown` or not: the squad hears of it. */
+  private endThrow(thrown: boolean): void {
+    if (!this.throwPlan) return;
+    this.throwPlan = null;
+    this.hooks.throwOver(this, thrown);
   }
 
   /** True while it pins the edge of Rook's cover for a squadmate. */
@@ -938,14 +1003,16 @@ export class StandInEnemy implements Target {
   private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
     if (this.peekPhase === 'hold') {
       // It fires from where it holds if it sees Rook and its own cover is not in the way; else it peeks (decision 239).
-      if (this.seesPlayer && this.hooks.muzzleClear(this, 'hit')) {
+      // With a throw to make it peeks to throw instead (4.12).
+      const throwing = this.throwPlan !== null;
+      if (!throwing && this.seesPlayer && this.hooks.muzzleClear(this, 'hit')) {
         this.engage(dtSec, dx, dz);
         return;
       }
       this.engaged = false;
       this.faceLastKnown(dtSec); // it watches where Rook was, never turning its back on him (decision 213)
       if (this.suppressing && !this.hooks.keepSuppressing(this)) this.endSuppress(); // the move it was to cover is over
-      if (this.suppressing) this.peekTimerSec = Math.min(this.peekTimerSec, 0); // suppressing: out again at once
+      if (this.suppressing || throwing) this.peekTimerSec = Math.min(this.peekTimerSec, 0); // out again at once
       this.peekTimerSec -= dtSec;
       if (this.peekTimerSec > 0) return;
       // A peek is a burst: it needs a firing slot from the tell on. With none free it stays in and asks again shortly.
@@ -987,7 +1054,8 @@ export class StandInEnemy implements Target {
   private startTell(point: CoverPoint): void {
     const ways = peekWays(point);
     const shotClear = (side: number) => ways.filter((way) => this.hooks.coverShotClear(this, point, way, side));
-    let choices = ways.filter((way) => this.hooks.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
+    // A throw comes out the way it was planned from (4.12); otherwise it prefers a way that lets it see Rook.
+    let choices = this.throwPlan ? [this.throwPlan.way] : ways.filter((way) => this.hooks.seesPlayerFrom(peekEyesAt(point, way, this.peekEyes)));
     // Not seeing him, it comes out where its gun can reach his cover (decision 239): a suppressor at the edge it pins (or
     // the other edge if none can), anyone else straight at it, in case this peek fires at his cover.
     if (choices.length === 0 && this.suppressing) {
@@ -1012,11 +1080,20 @@ export class StandInEnemy implements Target {
     this.peekTimerSec = standInConfig.tellSec;
   }
 
-  /** Fully out: it looks once, then fires at Rook if it sees him, at his cover by chance if not, or only looks. */
+  /**
+   * Fully out: it looks once, then fires at Rook if it sees him, at his cover by chance if not, or only looks. With a
+   * throw to make, it winds up instead (4.12).
+   */
   private startPeekFire(): void {
     this.peekPhase = 'fire';
     this.seesPlayer = this.hooks.canSeePlayer(this);
     this.sightTimerSec = 1 / standInConfig.sightChecksPerSec;
+    if (this.throwPlan) {
+      this.peekMode = 'throw';
+      this.lastPeekBlind = false;
+      this.peekTimerSec = enemyGrenadeConfig.throwWindupSec;
+      return;
+    }
     // Fire at his cover only on fresh knowledge of where he is (decision 216); old knowledge, it only looks.
     const fireAtCover = this.knowsFresh && this.random() < standInConfig.hiddenFireChance;
     this.peekMode = this.seesPlayer ? 'aimed' : this.suppressing ? 'suppress' : fireAtCover ? 'cover' : 'look';
@@ -1031,6 +1108,10 @@ export class StandInEnemy implements Target {
    * out, firing a burst at Rook whenever it sees him, until the attack ends (see `pressOver`).
    */
   private peekFire(dtSec: number, dx: number, dz: number): void {
+    if (this.peekMode === 'throw') {
+      this.windUpThrow(dtSec);
+      return;
+    }
     if (this.pressing) {
       if (this.pressOver(dtSec)) {
         this.startPeekBack();
@@ -1076,6 +1157,27 @@ export class StandInEnemy implements Target {
   }
 
   /**
+   * Out of cover with a throw to make (4.12): it faces the throw for the wind-up, then lets go if the throw is still on
+   * (Rook has not moved away) and goes back in. Called off, it keeps its grenade.
+   */
+  private windUpThrow(dtSec: number): void {
+    const plan = this.throwPlan;
+    if (!plan) {
+      this.startPeekBack();
+      return;
+    }
+    this.turnToward(plan.velocity.x, plan.velocity.z, dtSec);
+    if (this.peekTimerSec > 0) return;
+    const thrown = this.hooks.throwStillOn(this, plan);
+    if (thrown) {
+      this.hooks.throwGrenade(this, plan);
+      this.grenadesLeft--;
+    }
+    this.endThrow(thrown);
+    this.startPeekBack();
+  }
+
+  /**
    * Out in a flank attack or suppressing: true once it should go back in. A flank attack ends after its time, or once it
    * has not seen Rook for a moment; suppressing ends when the squad says the move it covers is over, or after its time.
    */
@@ -1091,6 +1193,7 @@ export class StandInEnemy implements Target {
     this.peekTimerSec = standInConfig.peekBackSec;
     this.pressing = false; // a flank attack ends when it goes back in
     this.endSuppress(); // and so does suppressing
+    this.endThrow(false); // and a throw not made by now (hurt, pinned) is called off
   }
 
   /**
@@ -1310,6 +1413,8 @@ export class StandInEnemy implements Target {
     this.grenadeSeen = false;
     this.giveSlotBack();
     this.endSuppress();
+    this.endThrow(false);
+    this.grenadesLeft = Math.max(Math.round(this.values.grenades), 0);
     this.pinnedByRook = false;
     this.contacted = false;
     this.recentHits.length = 0;
@@ -1325,6 +1430,7 @@ export class StandInEnemy implements Target {
     if (this.state === 'advance') this.hooks.advanceOver(this); // and an advance
     if (this.state === 'hunt') this.hooks.huntMoveOver(this); // and a hunt move
     this.endSuppress(); // suppressing only lives inside one stay in cover
+    this.endThrow(false); // and so does a throw
     this.panicking = false; // panic fire lives inside one run to cover
     this.state = state;
     this.stateSec = 0;

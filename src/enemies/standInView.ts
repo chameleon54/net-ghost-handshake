@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { dummyConfig } from '../config/dummy';
+import type { EnemyGun } from '../config/enemyGuns';
 import type { Role } from '../config/roles';
 import { standInConfig } from '../config/standInEnemy';
 import type { StandInEnemy } from './standInEnemy';
@@ -16,16 +17,24 @@ const leaderBandColour = 0xc0302a;
 const bandHeightM = 0.05;
 const bandWidenM = 0.01; // just outside the head, so it does not flicker against it
 const gunColour = 0x15171a;
-const gunSizeM = { width: 0.08, height: 0.1, length: 0.6 } as const;
+/**
+ * Placeholder gun shapes (4.12, until the real model in 4.13), so the threat can be read at a glance: a short pistol, a
+ * long rifle, and a long, thick machine gun with a box magazine under it.
+ */
+const gunShapes: Record<EnemyGun, { widthM: number; heightM: number; lengthM: number; boxMagM: number }> = {
+  pistol: { widthM: 0.05, heightM: 0.12, lengthM: 0.22, boxMagM: 0 },
+  rifle: { widthM: 0.07, heightM: 0.1, lengthM: 0.8, boxMagM: 0 },
+  lmg: { widthM: 0.12, heightM: 0.14, lengthM: 0.95, boxMagM: 0.16 },
+};
 
-// The drawn stand-in: the dummy's box body and sphere head with a gun block, pivoting at its feet so it can tip over.
+// The drawn stand-in: the dummy's box body and sphere head with its gun, pivoting at its feet so it can tip over.
 // It follows the enemy's position, facing and crouch every update: crouched, the body is shorter and the head and gun
-// lower, matching its hit zones. Its colour shows its role (4.8).
+// lower, matching its hit zones. Its colour shows its role (4.8), and its gun's shape shows which gun it carries (4.12).
 export class StandInView {
   readonly group = new THREE.Group();
   private readonly body: THREE.Mesh;
   private readonly head: THREE.Mesh;
-  private readonly gun: THREE.Mesh;
+  private readonly gun = new THREE.Group();
   private readonly standingBodyHeightM = dummyConfig.heightM - 2 * dummyConfig.headRadiusM;
 
   constructor(private readonly enemy: StandInEnemy) {
@@ -44,11 +53,16 @@ export class StandInView {
       this.head.add(band); // round the head at its middle, moving with it
     }
     // The gun points forward (-z in its own space) and ends at the muzzle.
-    this.gun = new THREE.Mesh(
-      new THREE.BoxGeometry(gunSizeM.width, gunSizeM.height, gunSizeM.length),
-      new THREE.MeshStandardMaterial({ color: gunColour }),
-    );
-    this.gun.position.z = -(standInConfig.muzzleForwardM - gunSizeM.length / 2);
+    const shape = gunShapes[enemy.gun];
+    const material = new THREE.MeshStandardMaterial({ color: gunColour });
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(shape.widthM, shape.heightM, shape.lengthM), material);
+    barrel.position.z = -(standInConfig.muzzleForwardM - shape.lengthM / 2);
+    this.gun.add(barrel);
+    if (shape.boxMagM > 0) {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(shape.boxMagM, shape.boxMagM, shape.boxMagM), material);
+      box.position.set(0, -(shape.heightM + shape.boxMagM) / 2, barrel.position.z);
+      this.gun.add(box);
+    }
     this.group.add(this.body, this.head, this.gun);
     this.group.rotation.order = 'YXZ'; // turn to face first, then tip over relative to that facing
   }

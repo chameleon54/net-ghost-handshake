@@ -12,6 +12,12 @@ export const uiText = {
   /** Label for the heal count, and the word shown while one is being used. */
   heals: 'Heals',
   healing: 'HEALING',
+  /** An enemy threw a grenade (4.12): the callout as text until it is voiced (phase 6). */
+  fragOut: 'Frag out!',
+  /** The word on the marker that points at a live enemy grenade nearby (ui.md, "Grenade warning"). */
+  grenadeWarning: 'GRENADE',
+  /** Shown briefly after picking up a magazine, after the gun's name: "M4-A magazine". */
+  magazinePicked: 'magazine',
   /** Temporary death text (the real death screen is milestone 7.3). */
   died: 'You died. Press Enter to restart',
   captureRefused: 'The browser did not allow that yet. Click again',

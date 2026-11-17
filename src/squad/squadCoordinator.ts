@@ -1,4 +1,5 @@
 import { aggressionConfig, aggressionSetting, type TierValues } from '../config/aggression';
+import { enemyGrenadeConfig } from '../config/enemyGrenades';
 import { squadConfig } from '../config/squad';
 
 /** Something that can hold a firing slot (an enemy). */
@@ -33,7 +34,9 @@ export type PushKind = 'dry' | 'reload' | 'jam';
 // two flankers at once, and the hearing reacts only some of the time at the lower tiers. Since the hunt (4.11, decision
 // 235), when the squad's knowledge of Rook stays old long enough it comes looking: one leads to cover near where it last
 // knew he was, others follow cover by cover, one watches; found, the hunt ends; nothing found, it holds carefully until
-// it sees or hears him. One hunt per lost contact. Rules only, no drawing.
+// it sees or hears him. One hunt per lost contact. Since 4.12 (decision 249), when Rook has held one spot even longer than
+// the flank waits for and no flank is under way, one enemy with a grenade lobs it at him (from Assertive), then the squad
+// waits a while before the next. Rules only, no drawing.
 export class SquadCoordinator {
   constructor(private readonly random: () => number = Math.random) {}
 
@@ -89,6 +92,15 @@ export class SquadCoordinator {
   huntFailure: string | null = null;
   /** How the last hunt ended, for the dev readout, or null. */
   huntResult: 'found' | 'nothing' | null = null;
+  /** Enemy grenades (4.12): who is throwing, and the time left before another throw may start (cooldown or retry). */
+  private throwMember: Member | null = null;
+  private grenadeWaitLeftSec = 0;
+  /** The grenade's own hold clock (decision 251): like the flank's, but with a wider radius. */
+  private readonly grenadeHoldSpot = { x: 0, z: 0 };
+  private hasGrenadeHoldSpot = false;
+  private grenadeHoldSec = 0;
+  /** Why the last throw could not start, for the dev readout, or null. */
+  grenadeFailure: string | null = null;
 
   /**
    * Once per game update, before the enemies. `rook`: where Rook is while the squad knows it (an awake enemy's knowledge
@@ -102,12 +114,24 @@ export class SquadCoordinator {
     this.coverGraceLeftSec = Math.max(this.coverGraceLeftSec - dtSec, 0);
     this.pushDelayLeftSec = Math.max(this.pushDelayLeftSec - dtSec, 0);
     this.pushWindowLeftSec = Math.max(this.pushWindowLeftSec - dtSec, 0);
+    this.grenadeWaitLeftSec = Math.max(this.grenadeWaitLeftSec - dtSec, 0);
     if (this.pushWindowLeftSec <= 0) this.pushWindow = null;
     this.rookHidden = rook !== null && rookHidden;
     if (!rook) {
       this.hasHoldSpot = false;
       this.holdSec = 0;
+      this.hasGrenadeHoldSpot = false;
+      this.grenadeHoldSec = 0;
       return;
+    }
+    // The grenade's clock: the same idea as the flank's below, with its own, wider radius (decision 251).
+    if (!this.hasGrenadeHoldSpot || Math.hypot(rook.x - this.grenadeHoldSpot.x, rook.z - this.grenadeHoldSpot.z) > enemyGrenadeConfig.grenadeHoldRadiusM) {
+      this.grenadeHoldSpot.x = rook.x;
+      this.grenadeHoldSpot.z = rook.z;
+      this.hasGrenadeHoldSpot = true;
+      this.grenadeHoldSec = 0;
+    } else {
+      this.grenadeHoldSec += dtSec;
     }
     if (!this.hasHoldSpot || Math.hypot(rook.x - this.holdSpot.x, rook.z - this.holdSpot.z) > squadConfig.holdRadiusM) {
       this.holdSpot.x = rook.x; // he moved: a new spot, and the clock starts again
@@ -524,6 +548,61 @@ export class SquadCoordinator {
     return this.careful ? squadConfig.huntCarefulHoldScale : 1;
   }
 
+  /**
+   * True when a grenade should be thrown (4.12, enemies.md "Grenades"): the tier throws, Rook has held one spot for the
+   * tier's grenade hold (longer than the flank's, so a flank comes first), no flank and no throw is under way, the wait
+   * is over, and the squad is not disorganised. `enemyGrenadeLive`: one is already in the air (one at a time).
+   */
+  grenadeDue(enemyGrenadeLive: boolean): boolean {
+    if (this.tier.throwsGrenades <= 0 || enemyGrenadeLive || this.throwMember !== null || this.flankMembers.size > 0) return false;
+    if (this.grenadeWaitLeftSec > 0 || this.disorganised) return false;
+    return this.grenadeHoldSec >= this.tier.holdBeforeGrenadeSec;
+  }
+
+  /** How long Rook has held his spot as the grenade counts it (within its wider radius). For the dev readout. */
+  get grenadeHeldSec(): number {
+    return this.grenadeHoldSec;
+  }
+
+  /**
+   * Gives the throw to the candidate with the cheapest plan (the nearest one with a clear lob), or nobody; then it tries
+   * again after the retry time, and `grenadeFailure` says why.
+   */
+  assignGrenade<M extends Member, P extends { readonly cost: number }>(candidates: readonly M[], plan: (member: M) => P | null): { member: M; plan: P } | null {
+    const best = cheapestOf(candidates, plan);
+    if (!best) {
+      this.grenadeFailure = candidates.length > 0 ? 'no clear lob in range' : 'nobody can throw (no grenade left, busy, or not in cover)';
+      this.grenadeWaitLeftSec = enemyGrenadeConfig.throwRetrySec;
+      return null;
+    }
+    this.grenadeFailure = null;
+    this.throwMember = best.member;
+    return best;
+  }
+
+  /** The thrower, or null. */
+  get thrower(): Member | null {
+    return this.throwMember;
+  }
+
+  /** Time before another throw may start. For the dev readout. */
+  get grenadeWaitSec(): number {
+    return this.grenadeWaitLeftSec;
+  }
+
+  /** The throw by `member` is over: thrown (the cooldown starts) or not (Rook moved, it was hurt: it tries again soon). */
+  grenadeOver(member: Member, thrown: boolean): void {
+    if (member !== this.throwMember) return;
+    this.throwMember = null;
+    this.grenadeWaitLeftSec = thrown ? this.tier.grenadeCooldownSec : enemyGrenadeConfig.throwRetrySec;
+  }
+
+  /** Dev panel testing aid: a throw is due now (if the tier throws and nobody is throwing or flanking). */
+  forceGrenade(): void {
+    this.grenadeHoldSec = Math.max(this.grenadeHoldSec, this.tier.holdBeforeGrenadeSec);
+    this.grenadeWaitLeftSec = 0;
+  }
+
   /** Dev panel testing aid: a hunt is due now, once the squad's knowledge is old (not at a tier that never hunts). */
   forceHunt(): void {
     if (this.huntOn) return;
@@ -604,5 +683,10 @@ export class SquadCoordinator {
     this.huntRetryLeftSec = 0;
     this.huntFailure = null;
     this.huntResult = null;
+    this.throwMember = null;
+    this.grenadeWaitLeftSec = 0;
+    this.grenadeFailure = null;
+    this.hasGrenadeHoldSpot = false;
+    this.grenadeHoldSec = 0;
   }
 }

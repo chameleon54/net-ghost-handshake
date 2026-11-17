@@ -50,6 +50,11 @@ export class Magazines {
     return this.pouch.reduce((sum, rounds) => sum + rounds, this.loadedRounds);
   }
 
+  /** A full magazine picked up (4.12) goes into the pouch. There is no carry limit yet (decision 249). */
+  addFull(): void {
+    this.pouch.push(this.capacityRounds);
+  }
+
   /** True if the fullest spare has more rounds than the magazine in the gun, so a reload would help. */
   get canReload(): boolean {
     const fullest = this.fullestIndex();

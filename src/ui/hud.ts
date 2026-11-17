@@ -1,16 +1,19 @@
 import { Vector3, type Camera } from 'three';
+import { enemyGrenadeConfig } from '../config/enemyGrenades';
+import { grenadeConfig } from '../config/grenade';
 import { healthFx } from '../config/healthFx';
 import type { EventBus } from '../core/events';
 import { uiText } from '../data/uiText';
 import type { MagazineCheck } from '../weapons/magazineFeel';
 import { fillShare } from '../weapons/magazineFeel';
-import type { WeaponEvents } from '../weapons/events';
+import type { GunId, WeaponEvents } from '../weapons/events';
 import type { WeaponSet } from '../weapons/weaponSet';
 
 // The minimal HUD (ui.md): a crosshair dot and hit marker, and a few quiet items that appear only when they matter and
 // then fade: the weapon name on switching, the grenade and heal counts, the jam prompt, the magazine pictures, and the
-// damage direction arc after an enemy's hit. It never shows a bullet count and never shows health (the screen does, see
-// healthScreen.ts).
+// damage direction arc after an enemy's hit. Since 4.12: "Frag out!" when an enemy throws, a marker pointing at a live
+// enemy grenade nearby, and what was picked up. It never shows a bullet count and never shows health (the screen does,
+// see healthScreen.ts).
 const crosshairSizePx = 4;
 const hitMarkerFadeMs = 150;
 const hitColour = '#ffffff';
@@ -24,6 +27,8 @@ const msPerSec = 1000;
 const arcSizePx = 180; // the damage direction arc is a quarter of a ring this wide, around the crosshair
 const arcWidthPx = 4;
 const arcColour = '#ff4444';
+const grenadeMarkColour = '#ffb040'; // the enemy grenade's trail colour, so the two read as one warning
+const grenadeMarkSizePx = 140; // inside the damage arc, so both can show at once
 
 /** Where the magazine in the gun is on screen, as a point from -1 to 1 on each axis. The viewmodel knows. */
 export interface MagazineLocator {
@@ -40,6 +45,8 @@ export interface HudState {
   healing: boolean;
   /** The game camera: where Rook is and looks, for the damage direction arc. */
   camera: Camera;
+  /** Where every live enemy grenade is (4.12), for the warning marker. */
+  enemyGrenades: readonly Vector3[];
 }
 
 export interface Hud {
@@ -97,6 +104,30 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
   document.body.appendChild(arc);
   const arcFrom = { x: 0, z: 0, atMs: -Infinity };
   const look = new Vector3();
+
+  // The grenade warning (ui.md, 4.12): while a live enemy grenade is within its blast radius plus a margin, an orange
+  // quarter ring with the word "GRENADE" points toward it, like the damage arc.
+  const grenadeMark = document.createElement('div');
+  grenadeMark.style.cssText =
+    `position:fixed;left:50%;top:50%;width:${grenadeMarkSizePx}px;height:${grenadeMarkSizePx}px;` +
+    `margin:${-grenadeMarkSizePx / 2}px 0 0 ${-grenadeMarkSizePx / 2}px;border-radius:50%;border:${arcWidthPx}px solid transparent;` +
+    `border-top-color:${grenadeMarkColour};box-sizing:border-box;filter:drop-shadow(0 0 2px #000);pointer-events:none;display:none`;
+  const grenadeWord = document.createElement('div');
+  grenadeWord.textContent = uiText.grenadeWarning;
+  grenadeWord.style.cssText =
+    `position:absolute;left:50%;top:-24px;transform:translateX(-50%);color:${grenadeMarkColour};` +
+    'font:600 13px system-ui,sans-serif;letter-spacing:0.1em;text-shadow:0 0 3px #000';
+  grenadeMark.appendChild(grenadeWord);
+  document.body.appendChild(grenadeMark);
+
+  /** The angle from where Rook looks to the point (x, z): 0 ahead, growing clockwise, like CSS rotate. */
+  const angleTo = (camera: Camera, x: number, z: number): number => {
+    camera.getWorldDirection(look);
+    const toX = x - camera.position.x;
+    const toZ = z - camera.position.z;
+    // Right of where he looks is (-look.z, look.x).
+    return Math.atan2(toX * -look.z + toZ * look.x, toX * look.x + toZ * look.z);
+  };
   events.on('player:damaged', ({ from }) => {
     if (!from) return;
     arcFrom.x = from.x;
@@ -118,8 +149,10 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
     corner.appendChild(element);
     return { element, untilMs: 0, text: '', opacity: 0 };
   };
+  const calloutLine = makePopUp(grenadeMarkColour);
   const weaponLine = makePopUp(textColour);
   const grenadeLine = makePopUp(textColour);
+  const magazineLine = makePopUp(textColour);
   const healLine = makePopUp(textColour);
   const jamLine = makePopUp(accentColour);
   document.body.appendChild(corner);
@@ -136,10 +169,22 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
   events.on('grenade:pin', () => showFor(grenadeLine, healthFx.hudShowSec));
   events.on('heal:started', () => showFor(healLine, healthFx.hudShowSec));
   events.on('player:healed', () => showFor(healLine, healthFx.hudShowSec));
+  events.on('enemy:grenade-thrown', () => showFor(calloutLine, enemyGrenadeConfig.calloutShowSec));
 
-  // The magazine pictures: a check shows how full each is (in rough steps); a reload shows only how many spares there are.
+  // The magazine pictures: a check shows how full each is (in rough steps); a reload shows only how many spares there are,
+  // and so does picking up a magazine for the gun in hand (4.12).
   let checked: { check: MagazineCheck; untilMs: number } | null = null;
   let reloadUntilMs = 0;
+  const picked = { gun: 'rifle' as GunId, untilMs: 0 };
+  events.on('pickup:taken', ({ kind }) => {
+    if (kind === 'grenade') {
+      showFor(grenadeLine, healthFx.hudShowSec);
+      return;
+    }
+    picked.gun = kind;
+    picked.untilMs = performance.now() + healthFx.magazinePictureShowSec * msPerSec;
+    showFor(magazineLine, healthFx.hudShowSec);
+  });
   events.on('weapon:magazine-checked', ({ check }) => {
     checked = { check, untilMs: performance.now() + healthFx.magazinePictureShowSec * msPerSec };
   });
@@ -164,26 +209,40 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
   };
 
   return {
-    update({ weapons, aimBlend, grenades, heals, healing, camera }) {
+    update({ weapons, aimBlend, grenades, heals, healing, camera, enemyGrenades }) {
       const nowMs = performance.now();
       dot.style.opacity = String(1 - aimBlend);
 
       const arcOpacity = Math.max(1 - (nowMs - arcFrom.atMs) / Math.max(healthFx.damageArcSec * msPerSec, 1), 0);
-      if (arcOpacity > 0) {
-        camera.getWorldDirection(look);
-        const toX = arcFrom.x - camera.position.x;
-        const toZ = arcFrom.z - camera.position.z;
-        // Right of where he looks is (-look.z, look.x); the angle is 0 ahead and grows clockwise, like CSS rotate.
-        const angleRad = Math.atan2(toX * -look.z + toZ * look.x, toX * look.x + toZ * look.z);
-        arc.style.transform = `rotate(${angleRad}rad)`;
-      }
+      if (arcOpacity > 0) arc.style.transform = `rotate(${angleTo(camera, arcFrom.x, arcFrom.z)}rad)`;
       if (arc.style.opacity !== String(arcOpacity)) arc.style.opacity = String(arcOpacity);
+
+      // The nearest live enemy grenade within the warning distance, if any.
+      const warnM = grenadeConfig.blastRadiusM + enemyGrenadeConfig.warningExtraM;
+      let nearest: Vector3 | null = null;
+      let nearestM = warnM;
+      for (const grenade of enemyGrenades) {
+        const distanceM = Math.hypot(grenade.x - camera.position.x, grenade.z - camera.position.z);
+        if (distanceM <= nearestM) {
+          nearest = grenade;
+          nearestM = distanceM;
+        }
+      }
+      const markDisplay = nearest ? 'block' : 'none';
+      if (grenadeMark.style.display !== markDisplay) grenadeMark.style.display = markDisplay;
+      if (nearest) {
+        const angleRad = angleTo(camera, nearest.x, nearest.z);
+        grenadeMark.style.transform = `rotate(${angleRad}rad)`;
+        grenadeWord.style.transform = `translateX(-50%) rotate(${-angleRad}rad)`; // the word stays upright
+      }
 
       // Heals stay up while one is being used.
       if (healing) showFor(healLine, healthFx.hudShowSec);
       const gun = weapons.gun;
+      render(calloutLine, uiText.fragOut, nowMs);
       render(weaponLine, uiText.weaponNames[weapons.current], nowMs);
       render(grenadeLine, `${uiText.grenades}: ${grenades}`, nowMs);
+      render(magazineLine, `${uiText.weaponNames[picked.gun]} ${uiText.magazinePicked}`, nowMs);
       render(healLine, `${uiText.heals}: ${heals}${healing ? `   ${uiText.healing}` : ''}`, nowMs);
       render(jamLine, uiText.jammed, nowMs, gun?.jammed ?? false);
       if (!(gun?.jammed ?? false)) jamLine.untilMs = 0;
@@ -192,7 +251,8 @@ export function createHud(events: EventBus<WeaponEvents>, locator: MagazineLocat
       // The pictures stay for as long as the check lasts (R may be held), and fade a few seconds after it ends.
       if (checked !== null && (gun?.checking ?? false) && nowMs < checked.untilMs) checked.untilMs = nowMs + healthFx.magazinePictureShowSec * msPerSec;
       const checking = checked !== null && nowMs < checked.untilMs ? checked.check : null;
-      const reloading = checking === null && gun !== null && nowMs < reloadUntilMs;
+      const pickedForGun = gun !== null && gun.id === picked.gun && nowMs < picked.untilMs;
+      const reloading = checking === null && gun !== null && (nowMs < reloadUntilMs || pickedForGun);
       const spares = checking ? checking.spares.map((spare) => fillShare(spare.feel)) : reloading && gun ? Array.from({ length: gun.magazines.spareCount }, () => null) : [];
       const key = `${checking ? 'c' : reloading ? 'r' : '-'}:${spares.length}:${spares.join(',')}`;
       if (key !== picturesKey) {
