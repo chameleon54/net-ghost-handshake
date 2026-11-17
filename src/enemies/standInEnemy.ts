@@ -28,6 +28,9 @@ export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' |
  */
 export type StandInShot = 'hit' | 'miss' | 'cover' | 'suppress';
 
+/** Who covers a move between cover (4.17): the squad's suppressor, its own fire (the heavy), or nobody (a hidden route). */
+export type MoveCover = 'squad' | 'self' | null;
+
 /** Where a peek from cover is: holding, the tell, coming out, firing, going back in (4.4). */
 type PeekPhase = 'hold' | 'tell' | 'out' | 'fire' | 'back';
 
@@ -75,10 +78,10 @@ export interface StandInHooks {
   requestSlot(enemy: StandInEnemy): boolean;
   /** Gives its firing slot back. */
   releaseSlot(enemy: StandInEnemy): void;
-  /** True if the squad's hit budget lets a round hit Rook now. */
-  mayHit(): boolean;
+  /** True if the squad's hit budget lets its round hit Rook now (only other enemies' hits hold it back, decision 270). */
+  mayHit(enemy: StandInEnemy): boolean;
   /** A round hit Rook: the squad's hit budget is spent for a while. */
-  hitLanded(): void;
+  hitLanded(enemy: StandInEnemy): void;
   /** Claims a cover spot for it (its old one let go): the flank spot the squad gave it. */
   claimCover(enemy: StandInEnemy, point: CoverPoint): void;
   /** Its flank is over (arrived, called off, or anything else): tells the squad. */
@@ -110,6 +113,12 @@ export interface StandInHooks {
   reloadStarted(enemy: StandInEnemy): void;
   /** It finished a reload. */
   reloadDone(enemy: StandInEnemy): void;
+  /** True while the squad's covering fire for its move is live: a suppressor has the job and is not reloading (4.17). */
+  coverLive(enemy: StandInEnemy): boolean;
+  /** Where a push whose covering fire stopped holds (4.17): the nearest free cover near it that hides it, nearer than `goal`; or null. */
+  pickHoldSpot(enemy: StandInEnemy, goal: CoverPoint | null): CoverPoint | null;
+  /** It holds its push and calls for cover (4.17): the `need_cover` callout hook. */
+  pushHeld(enemy: StandInEnemy): void;
   /** True while the squad hunts for Rook (decision 235); when it stops (he was found), a hunt move takes cover instead. */
   hunting(): boolean;
   /** Its hunt move is over (arrived, or anything else): tells the squad. */
@@ -304,6 +313,19 @@ export class StandInEnemy implements Target {
   private needsReload = false;
   /** Since when a squadmate has stood in its line of fire, or null (4.16). */
   private friendBlockedSinceSec: number | null = null;
+  /**
+   * Holding a push (4.17, decision 269): who covers its move; how long that cover has been gone; whether it already looked
+   * for a spot to hold at this move. Holding: the spot it was pushing to, the spot it holds at, who covered it, how long
+   * it has held, and the time to its next ask for cover.
+   */
+  private moveCover: MoveCover = null;
+  private coverGoneSec = 0;
+  private holdLooked = false;
+  private heldGoal: CoverPoint | null = null;
+  private heldAt: CoverPoint | null = null;
+  private heldCover: MoveCover = null;
+  private heldSec = 0;
+  private askLeftSec = 0;
   private speedNowMps = 0;
   private moveX = 0;
   private moveZ = 0;
@@ -560,6 +582,7 @@ export class StandInEnemy implements Target {
         this.hooks.reloadDone(this);
       }
     }
+    if (this.heldGoal) this.tickHeldPush(dtSec);
     this.think(dtSec, player);
     if (!this.walkedThisUpdate) {
       this.speedNowMps = 0; // standing (its walks brake to a stop before they end), and the next walk sets off afresh
@@ -825,9 +848,13 @@ export class StandInEnemy implements Target {
     this.beginMove(point, 'flank');
   }
 
-  /** The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). */
-  beginAdvance(point: CoverPoint): void {
+  /**
+   * The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). `cover` says who covers it: if
+   * that fire stops on the way, it holds at near cover and asks again (4.17); null for a move nobody covers.
+   */
+  beginAdvance(point: CoverPoint, cover: MoveCover = null): void {
     this.beginMove(point, 'advance');
+    this.moveCover = cover;
   }
 
   /**
@@ -851,6 +878,10 @@ export class StandInEnemy implements Target {
   }
 
   private beginMove(point: CoverPoint, state: 'flank' | 'advance' | 'hunt'): void {
+    this.moveCover = null;
+    this.coverGoneSec = 0;
+    this.holdLooked = false;
+    this.dropHeldPush(); // a new move ends any held push
     this.hooks.claimCover(this, point);
     this.setCover(point);
     this.crouched = false;
@@ -929,6 +960,7 @@ export class StandInEnemy implements Target {
         }
       }
     }
+    if (this.state === 'advance' && this.moveCover !== null && this.holdForCover(dtSec)) return;
     // Every move between cover is at least a run (decision 246); flanks and the hunt's leader go at their flank speed if faster.
     const fast = flanking || (this.state === 'hunt' && this.huntLeads);
     const speedMps = fast ? Math.max(this.values.flankSpeedMps, this.values.runSpeedMps) : this.values.runSpeedMps;
@@ -1292,8 +1324,8 @@ export class StandInEnemy implements Target {
   }
 
   /** The squad sends it to another spot (decision 237): like an advance (covered, not turned back), not necessarily closer. */
-  beginReposition(point: CoverPoint): void {
-    this.beginMove(point, 'advance');
+  beginReposition(point: CoverPoint, cover: MoveCover = null): void {
+    this.beginAdvance(point, cover);
   }
 
   /** True if it fires while it moves (the heavy, decision 237): it is its own covering fire. */
@@ -1352,6 +1384,78 @@ export class StandInEnemy implements Target {
     if (this.state === 'approach') return;
     this.setState('approach');
     this.repathTimerSec = 0; // a fresh route from here
+  }
+
+  /**
+   * A covered advance checks its cover as it goes (4.17): gone for longer than `coverLostSec`, it holds at the nearest
+   * free cover that hides it, if that is nearer than its goal (else it keeps going: stopping in the open is worse). True
+   * if it turned off to hold.
+   */
+  private holdForCover(dtSec: number): boolean {
+    const live = this.moveCover === 'self' ? !this.reloading && !this.needsReload : this.hooks.coverLive(this);
+    this.coverGoneSec = live ? 0 : this.coverGoneSec + dtSec;
+    if (this.coverGoneSec <= squadConfig.coverLostSec || this.holdLooked) return false;
+    this.holdLooked = true; // looked once this move: no spot now means it runs on
+    const goal = this.coverPoint;
+    const hold = this.hooks.pickHoldSpot(this, goal);
+    if (!hold || !goal) return false;
+    const cover = this.moveCover;
+    this.startWalking(); // the advance is over for the squad (its play ends); it takes cover at the hold spot as usual
+    this.hooks.claimCover(this, hold);
+    this.setCover(hold);
+    this.heldGoal = goal;
+    this.heldAt = hold;
+    this.heldCover = cover;
+    this.heldSec = 0;
+    this.askLeftSec = 0; // it asks as soon as it is in cover
+    this.hooks.pushHeld(this);
+    return true;
+  }
+
+  /** Holding a push (4.17): the clocks; it gives the push up after a while, or once it has left the spot it held at. */
+  private tickHeldPush(dtSec: number): void {
+    this.heldSec += dtSec;
+    this.askLeftSec = Math.max(this.askLeftSec - dtSec, 0);
+    if (this.heldSec >= squadConfig.pushGiveUpSec || this.coverPoint !== this.heldAt) this.dropHeldPush();
+  }
+
+  /** True while it holds a push at near cover, waiting for covering fire (4.17). */
+  get holdingPush(): boolean {
+    return this.heldGoal !== null;
+  }
+
+  /** The spot it was pushing to while it holds, or null. */
+  get heldPushGoal(): CoverPoint | null {
+    return this.heldGoal;
+  }
+
+  /** True if the held push was its own cover (the heavy): it goes on once its reload is done, needing nobody. */
+  get heldBySelf(): boolean {
+    return this.heldCover === 'self';
+  }
+
+  /** Holding at its spot and due to ask for covering fire again (every `askCoverEverySec`): the squad answers (main.ts). */
+  get asksForCover(): boolean {
+    return this.heldGoal !== null && this.state === 'cover' && this.askLeftSec <= 0;
+  }
+
+  /** It asked; the next ask is a while later. */
+  askedForCover(): void {
+    this.askLeftSec = squadConfig.askCoverEverySec;
+  }
+
+  /** Covered again: it goes on to the spot it was pushing to, covered by `cover`. */
+  resumePush(cover: 'squad' | 'self'): void {
+    const goal = this.heldGoal;
+    if (!goal) return;
+    this.beginAdvance(goal, cover);
+  }
+
+  /** The push is given up (too long without cover, the goal gone, or it moved off): it fights from where it is. */
+  dropHeldPush(): void {
+    this.heldGoal = null;
+    this.heldAt = null;
+    this.heldCover = null;
   }
 
   /** Its gun's magazine size (4.16). */
@@ -1575,8 +1679,8 @@ export class StandInEnemy implements Target {
    */
   private aimedShot(hitShare: number): StandInShot {
     if (!this.contacted) return 'miss';
-    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.hooks.mayHit(); // the squad's hit budget
-    if (hits) this.hooks.hitLanded();
+    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.hooks.mayHit(this); // the squad's hit budget
+    if (hits) this.hooks.hitLanded(this);
     return hits ? 'hit' : 'miss';
   }
 
@@ -1661,6 +1765,8 @@ export class StandInEnemy implements Target {
     this.reloadLeftSec = 0;
     this.needsReload = false;
     this.friendBlockedSinceSec = null;
+    this.moveCover = null;
+    this.dropHeldPush();
     this.pinnedByRook = false;
     this.contacted = false;
     this.recentHits.length = 0;

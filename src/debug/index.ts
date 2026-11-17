@@ -25,6 +25,7 @@ import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
 import { enemySoundConfig, enemySoundConfigDefaults } from '../config/enemySounds';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
+import { EnemySpeech } from './speech';
 import { ReadoutBox } from './readoutBox';
 import { formatPerf, PerfMeter } from './perf';
 import { debugLogStartHeader, debugLogUrl, EventLog } from './eventLog';
@@ -327,6 +328,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
   standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning, green: hunting)');
+  // Callouts above heads (4.17): placeholder words for each callout hook, over the enemy who says it.
+  const speech = new EnemySpeech(scene, activeStandIns);
+  events.on('enemy:callout', ({ kind, speaker, side }) => speech.say(speaker, kind, side));
+  standInPanel.add(speech, 'shown').name('Show callouts above heads');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
   // The aggression tier (4.11): the game starts on Assertive; switch between the four here, even mid-fight.
   squadPanel
@@ -464,7 +469,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
     enemyLines = activeStandIns.map(
       (s, i) =>
-        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}${s.reloading ? ', RELOADING' : ''}, mag ${s.rounds}/${s.magazineRounds}` +
+        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}${s.reloading ? ', RELOADING' : ''}${s.holdingPush ? ', HOLDING PUSH (no cover)' : ''}, mag ${s.rounds}/${s.magazineRounds}` +
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
@@ -580,6 +585,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       navOverlay.update();
       coverOverlay.update(dtSec);
       labels.update();
+      speech.update(dtSec);
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);

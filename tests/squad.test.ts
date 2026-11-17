@@ -29,18 +29,34 @@ describe('SquadCoordinator firing slots (4.6)', () => {
 });
 
 describe('SquadCoordinator hit budget (4.6)', () => {
-  it('allows one hit per window for the whole squad, whoever lands it', () => {
+  it('after one enemy hits, no other may within the window; its own next rounds may (decision 270)', () => {
     const squad = new SquadCoordinator();
-    expect(squad.mayHit()).toBe(true);
-    squad.hitLanded(); // one enemy hits
-    expect(squad.mayHit()).toBe(false); // so no one else may
+    const a = {};
+    const b = {};
+    expect(squad.mayHit(a)).toBe(true);
+    squad.hitLanded(a); // one enemy hits
+    expect(squad.mayHit(b)).toBe(false); // so no one else may
+    expect(squad.mayHit(a)).toBe(true); // but the rest of its burst may
     squad.update(squadConfig.hitGapSec - 0.01);
-    expect(squad.mayHit()).toBe(false);
+    expect(squad.mayHit(b)).toBe(false);
     squad.update(0.02);
-    expect(squad.mayHit()).toBe(true);
-    squad.hitLanded();
+    expect(squad.mayHit(b)).toBe(true);
+    squad.hitLanded(b);
+    expect(squad.mayHit(a)).toBe(false); // now b holds it
     squad.reset();
-    expect(squad.mayHit()).toBe(true);
+    expect(squad.mayHit(a)).toBe(true);
+  });
+
+  it('a window of 0 switches the budget off', () => {
+    const squad = new SquadCoordinator();
+    const was = squadConfig.hitGapSec;
+    squadConfig.hitGapSec = 0;
+    try {
+      squad.hitLanded({});
+      expect(squad.mayHit({})).toBe(true);
+    } finally {
+      squadConfig.hitGapSec = was;
+    }
   });
 });
 

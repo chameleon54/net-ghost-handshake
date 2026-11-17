@@ -196,7 +196,8 @@ function startPlay(movers: number): void {
     (enemy) => enemy.firesOnTheMove,
   );
   if (!play) return;
-  play.advancer.member.beginAdvance(play.advancer.plan.point); // claims its spot before the next one plans
+  // Who covers each mover (4.17): the suppressor, or the heavy's own fire; if that stops on the way, the mover holds.
+  play.advancer.member.beginAdvance(play.advancer.plan.point, play.suppressor ? 'squad' : 'self'); // claims its spot before the next one plans
   callout('advance_start', play.advancer.member);
   if (play.suppressor) {
     play.suppressor.beginSuppress(); // none when the mover is the heavy: it fires on the move (decision 237)
@@ -210,7 +211,7 @@ function startPlay(movers: number): void {
     if (moving >= movers) break;
     const plan = worldOf.get(enemy)?.planAdvance(enemy);
     if (!plan) continue;
-    enemy.beginAdvance(plan.point);
+    enemy.beginAdvance(plan.point, play.suppressor ? 'squad' : null); // behind a moving heavy, nobody's fire is theirs to wait for
     callout('advance_start', enemy);
     squad.addAdvancer(enemy);
     moving++;
@@ -249,7 +250,7 @@ function reposition(enemy: StandInEnemy): void {
     return;
   }
   squad.assignReposition(enemy);
-  enemy.beginReposition(plan.point);
+  enemy.beginReposition(plan.point, selfCovers ? 'self' : cover ? 'squad' : null); // a hidden route needs no cover
   callout('advance_start', enemy);
   if (cover) {
     cover.beginSuppress();
@@ -647,6 +648,28 @@ const loop = new Loop(
     // Repositioning (decision 237): one stand-in that has used its spot enough moves on, if the squad allows it.
     const mover = activeEnemies.find((enemy) => enemy.wantsToReposition);
     if (mover) reposition(mover);
+    // Held pushes (4.17): a mover whose covering fire stopped holds at near cover and asks again every so often. Covered
+    // again (a free suppressor, the heavy first; one already pinning; or the heavy's own reload done), it goes on.
+    for (const enemy of activeEnemies) {
+      if (!enemy.asksForCover) continue;
+      enemy.askedForCover();
+      const goal = enemy.heldPushGoal;
+      if (!goal || !worldOf.get(enemy)?.canResumeTo(enemy, goal)) {
+        enemy.dropHeldPush(); // its spot was taken or no longer hides it: it fights from where it is
+        continue;
+      }
+      if (enemy.heldBySelf) {
+        if (enemy.reloading) continue;
+      } else if (squad.suppressor === null) {
+        const cover = squad.assignCover(coverers(enemy), (other) => other.role === 'heavy');
+        if (!cover) continue;
+        cover.beginSuppress();
+        callout('suppress_start', cover);
+      }
+      enemy.resumePush(enemy.heldBySelf ? 'self' : 'squad');
+      squad.addAdvancer(enemy);
+      callout('advance_start', enemy);
+    }
     glimpses.length = 0;
     for (const { enemy, world, view } of activeStandIns) {
       enemy.update(stepSec, player.position);

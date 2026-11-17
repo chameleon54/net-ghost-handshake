@@ -160,12 +160,12 @@ export class StandInWorld implements StandInHooks {
     this.squad.releaseSlot(enemy);
   }
 
-  mayHit(): boolean {
-    return this.squad.mayHit();
+  mayHit(enemy: StandInEnemy): boolean {
+    return this.squad.mayHit(enemy);
   }
 
-  hitLanded(): void {
-    this.squad.hitLanded();
+  hitLanded(enemy: StandInEnemy): void {
+    this.squad.hitLanded(enemy);
   }
 
   claimCover(enemy: StandInEnemy, point: CoverPoint): void {
@@ -378,6 +378,40 @@ export class StandInWorld implements StandInHooks {
   reloadDone(enemy: StandInEnemy): void {
     this.target.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
     this.events.emit('enemy:reload', { phase: 'end', position: this.target, gun: enemy.gun });
+  }
+
+  coverLive(_enemy: StandInEnemy): boolean {
+    const suppressor = this.squad.suppressor as StandInEnemy | null; // the squad's members are the stand-ins
+    return suppressor !== null && suppressor.isSuppressing && !suppressor.reloading;
+  }
+
+  pickHoldSpot(enemy: StandInEnemy, goal: CoverPoint | null): CoverPoint | null {
+    const goalM = goal ? Math.hypot(goal.xM - enemy.xM, goal.zM - enemy.zM) : Infinity;
+    let best: CoverPoint | null = null;
+    let bestM = Math.min(squadConfig.holdSpotMaxM, goalM); // only a spot nearer than its goal is worth stopping at
+    for (const point of this.coverPoints.points) {
+      if (point === goal || Math.hypot(point.xM - enemy.xM, point.zM - enemy.zM) >= bestM) continue; // a walk is never shorter than the straight line
+      const holder = this.coverPoints.claimedBy(point);
+      if (holder && holder !== enemy) continue;
+      if (!this.coverPoints.hides(point, this.viewEyes)) continue;
+      const walkM = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
+      if (walkM < bestM) {
+        best = point;
+        bestM = walkM;
+      }
+    }
+    return best;
+  }
+
+  /** True if a held push may go on to `goal` (4.17): nobody else has taken it and it still hides from Rook. */
+  canResumeTo(enemy: StandInEnemy, goal: CoverPoint): boolean {
+    const holder = this.coverPoints.claimedBy(goal);
+    return (!holder || holder === enemy) && this.coverPoints.hides(goal, this.viewEyes);
+  }
+
+  pushHeld(enemy: StandInEnemy): void {
+    this.target.set(enemy.xM, enemy.heightM, enemy.zM);
+    this.events.emit('enemy:callout', { kind: 'need_cover', speaker: enemy, role: enemy.role, position: this.target }); // truthful: its cover really stopped
   }
 
   /**

@@ -3,7 +3,10 @@
 export const squadConfigDefaults = {
   /** At most this many enemies fire at the same time (3 comes with the endless scaling, 7.1). */
   firingSlots: 2,
-  /** The hit budget: at most one damaging hit on Rook within this window, from the whole squad. It never loosens. */
+  /**
+   * The hit budget: after an enemy lands a hit on Rook, no other enemy may for this long (its own next rounds may: decision
+   * 270, so a whole burst can land). 0 switches the budget off. It never loosens.
+   */
   hitGapSec: 0.5,
   /** A peek refused a slot stays in cover and asks again after this long. */
   slotRetrySec: 0.3,
@@ -51,6 +54,15 @@ export const squadConfigDefaults = {
   pinnedByFireM: 1,
   /** ...sends it back into cover, holding this many times longer. */
   pinnedHoldScale: 1.5,
+  // Holding a push (4.17, decision 269): a covered move whose covering fire stops holds at near cover and asks again.
+  /** Its covering fire gone (the suppressor stopped, or the heavy's own gun is reloading) this long counts as lost... */
+  coverLostSec: 0.5,
+  /** ...and it holds at the nearest free cover that hides it within this distance (if nearer than its goal)... */
+  holdSpotMaxM: 4,
+  /** ...asks the squad for covering fire again this often... */
+  askCoverEverySec: 1,
+  /** ...and gives the push up after holding this long without it. */
+  pushGiveUpSec: 6,
   // Hearing Rook's weapon (4.10, decision 233). Whether it reacts, and how many push, is per tier (aggression.ts).
   /** After the squad hears him run dry, reload or jam, it pushes this long later (if he is still vulnerable). */
   pushReactionSec: 1,

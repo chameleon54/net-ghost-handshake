@@ -12,7 +12,7 @@ export type GunId = 'rifle' | 'pistol';
  * What an enemy can call out (dialogue.md, Contractors). Sent only when the AI really does it (4.14); phase 6 voices them.
  * "Frag out" and "Grenade, move" have their own events (`enemy:grenade-thrown`, `enemy:grenade-spotted`).
  */
-export type CalloutKind = 'reloading' | 'flank_start' | 'suppress_start' | 'advance_start' | 'player_dry' | 'player_jammed' | 'squadmate_down' | 'suppressed' | 'player_lost';
+export type CalloutKind = 'reloading' | 'flank_start' | 'suppress_start' | 'advance_start' | 'player_dry' | 'player_jammed' | 'squadmate_down' | 'suppressed' | 'player_lost' | 'need_cover';
 export type WeaponId = GunId | 'knife';
 /** What can lie on the floor to pick up (4.12): a grenade, or a magazine for the rifle or the pistol. */
 export type PickupKind = 'grenade' | GunId;

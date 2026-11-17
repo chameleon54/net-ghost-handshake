@@ -31,6 +31,8 @@ interface Seen {
   flinching: boolean;
   throwing: boolean;
   throwStartedAt: number;
+  /** Holding a push for covering fire (4.17). */
+  holding: boolean;
 }
 
 export class LogWatch {
@@ -109,11 +111,13 @@ export class LogWatch {
     this.squadLine('setup', `tier ${aggressionSetting.current}, ${activeStandIns.length} in the room`);
     if (this.hazardTaken > 0 && this.now() - this.hazardSinceMs >= hazardLineEveryMs) this.writeHazard();
     for (const enemy of activeStandIns) {
-      const now: Seen = { state: enemy.state, flinching: enemy.flinching, throwing: enemy.isThrowing, throwStartedAt: 0 };
+      const now: Seen = { state: enemy.state, flinching: enemy.flinching, throwing: enemy.isThrowing, throwStartedAt: 0, holding: enemy.holdingPush };
       const before = this.seen.get(enemy);
       if (before) {
         if (now.state !== before.state) log.add(this.who(enemy), `${before.state} -> ${now.state}`);
         if (now.flinching && !before.flinching) log.add(this.who(enemy), 'flinches');
+        if (now.holding && !before.holding) log.add(this.who(enemy), 'holds its push at near cover: its covering fire stopped');
+        if (!now.holding && before.holding) log.add(this.who(enemy), now.state === 'advance' ? 'covered again: its push goes on' : 'gave its push up');
         if (now.throwing && !before.throwing) log.add(this.who(enemy), 'winds up a throw');
         if (!now.throwing && before.throwing) log.add(this.who(enemy), this.grenadesThrown > before.throwStartedAt ? 'threw its grenade' : 'throw called off');
         now.throwStartedAt = now.throwing && before.throwing ? before.throwStartedAt : this.grenadesThrown;

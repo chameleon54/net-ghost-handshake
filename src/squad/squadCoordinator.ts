@@ -23,7 +23,8 @@ export type PushKind = 'dry' | 'reload' | 'jam';
 
 // The squad coordinator (enemies.md, milestone 4.6): it makes the squad act together. It hands out firing slots (only a
 // few enemies fire at once; an enemy asks for a slot before a burst and gives it back after) and keeps the hit budget for
-// the whole squad (at most one damaging hit on Rook within any 0.5 s, so several enemies can never hit him at once).
+// the whole squad (at most one damaging hit on Rook within any 0.5 s, so several enemies can never hit him at once; since decision 270 an
+// enemy's own rounds are never held back by its own hits, so a whole burst can land).
 // Since 4.7 it watches how long Rook holds one spot, and when he holds it too long it gives one enemy the flank job (one
 // flank at a time, with a wait between them). Since 4.8 flankers get that job first, and when the squad leader goes down
 // the squad is disorganised for a while. Since 4.9, while Rook hides, it runs suppress and advance: one enemy pins his
@@ -41,8 +42,9 @@ export class SquadCoordinator {
   constructor(private readonly random: () => number = Math.random) {}
 
   private readonly holders = new Set<Member>();
-  /** Game time since any enemy last landed a damaging hit. */
+  /** Game time since any enemy last landed a damaging hit, and which one (its own rounds are never held back, decision 270). */
   private sinceHitSec = Infinity;
+  private lastHitter: Member | null = null;
   /** Where Rook settled, and how long he has stayed near it (while the squad knew where he was). */
   private readonly holdSpot = { x: 0, z: 0 };
   private hasHoldSpot = false;
@@ -645,20 +647,25 @@ export class SquadCoordinator {
     return this.holders.size;
   }
 
-  /** True if a round may hit Rook now: no enemy has hit him within the hit budget's window. */
-  mayHit(): boolean {
-    return this.sinceHitSec >= squadConfig.hitGapSec;
+  /**
+   * True if a round from `member` may hit Rook now: no other enemy has hit him within the hit budget's window. Its own
+   * earlier hits do not count, so a whole burst can land; only different enemies are kept apart (decision 270).
+   */
+  mayHit(member: Member): boolean {
+    return member === this.lastHitter || this.sinceHitSec >= squadConfig.hitGapSec;
   }
 
-  /** A round hit Rook: the budget is spent for the next window. */
-  hitLanded(): void {
+  /** A round from `member` hit Rook: the budget is spent for the next window, for every other enemy. */
+  hitLanded(member: Member): void {
     this.sinceHitSec = 0;
+    this.lastHitter = member;
   }
 
   /** No slots held, the budget fresh, no flank and no hold time (instant restart). */
   reset(): void {
     this.holders.clear();
     this.sinceHitSec = Infinity;
+    this.lastHitter = null;
     this.hasHoldSpot = false;
     this.holdSec = 0;
     this.flankMembers.clear();
