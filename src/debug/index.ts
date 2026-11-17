@@ -22,6 +22,7 @@ import { aggressionConfig, aggressionConfigDefaults, aggressionSetting, tiers } 
 import { enemyGunConfig, enemyGunConfigDefaults, enemyGuns } from '../config/enemyGuns';
 import { enemyGrenadeConfig, enemyGrenadeConfigDefaults } from '../config/enemyGrenades';
 import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
+import { enemySoundConfig, enemySoundConfigDefaults } from '../config/enemySounds';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
@@ -51,7 +52,7 @@ import { audioConfig, audioConfigDefaults } from '../config/audio';
 import { viewmodelConfig, viewmodelConfigDefaults } from '../config/viewmodel';
 import { FreeCamera } from './freeCamera';
 import { movementConfig, movementConfigDefaults } from '../config/movement';
-import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, enemyGunSliders, enemyGrenadeFolder, pickupFolder, toCodeSnippet } from './tuning';
+import { movementFolder, healthFxFolders, healthFolder, audioFolder, casingFolder, grenadeFolder, noiseFolder, changedValues, dummyFolder, viewmodelFolders, inputFolder, knifeFolder, pistolFolders, playerFolders, resetToDefaults, rifleFolders, standInFolder, coverFolder, exposureFolder, squadFolder, roleSliders, tierSliders, enemyGunSliders, enemyGrenadeFolder, pickupFolder, enemySoundFolder, toCodeSnippet } from './tuning';
 
 // Developer tools: the tuning panel and the free camera. Loaded only by the dev server (see src/main.ts),
 // so none of this, including lil-gui, is in the game players get.
@@ -211,6 +212,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       for (const gun of enemyGuns) resetToDefaults(enemyGunConfig[gun], enemyGunConfigDefaults[gun]);
       resetToDefaults(enemyGrenadeConfig, enemyGrenadeConfigDefaults);
       resetToDefaults(pickupConfig, pickupConfigDefaults);
+      resetToDefaults(enemySoundConfig, enemySoundConfigDefaults);
       gui.controllersRecursive().forEach((controller) => controller.updateDisplay());
       readouts.status = 'All values reset';
     },
@@ -240,6 +242,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
           ...Object.fromEntries(enemyGuns.map((gun) => [`src/config/enemyGuns.ts, ${gun}`, changedValues(enemyGunConfig[gun], enemyGunConfigDefaults[gun])])),
           'src/config/enemyGrenades.ts': changedValues(enemyGrenadeConfig, enemyGrenadeConfigDefaults),
           'src/config/pickups.ts': changedValues(pickupConfig, pickupConfigDefaults),
+          'src/config/enemySounds.ts': changedValues(enemySoundConfig, enemySoundConfigDefaults),
         },
       );
       navigator.clipboard.writeText(snippet).then(
@@ -362,6 +365,9 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const pickupPanel = standInPanel.addFolder(pickupFolder.title);
   pickupPanel.close();
   for (const s of pickupFolder.sliders) pickupPanel.add(pickupConfig, s.key, s.min, s.max, s.step).name(s.label);
+  const enemySoundPanel = standInPanel.addFolder(enemySoundFolder.title);
+  enemySoundPanel.close();
+  for (const s of enemySoundFolder.sliders) enemySoundPanel.add(enemySoundConfig, s.key, s.min, s.max, s.step).name(s.label);
   for (const s of standInFolder.sliders) standInPanel.add(standInConfig, s.key, s.min, s.max, s.step).name(s.label);
   const coverPanel = standInPanel.addFolder(coverFolder.title);
   coverPanel.close();

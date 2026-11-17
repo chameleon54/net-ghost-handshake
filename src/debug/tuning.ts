@@ -19,6 +19,7 @@ import type { RoleValues } from '../config/roles';
 import type { TierValues } from '../config/aggression';
 import type { EnemyGunValues } from '../config/enemyGuns';
 import type { EnemyGrenadeConfig } from '../config/enemyGrenades';
+import type { EnemySoundConfig } from '../config/enemySounds';
 import type { PickupConfig } from '../config/pickups';
 import type { ViewmodelConfig } from '../config/viewmodel';
 
@@ -61,6 +62,7 @@ type TierKey = keyof TierValues;
 type EnemyGunKey = keyof EnemyGunValues;
 type EnemyGrenadeKey = keyof EnemyGrenadeConfig;
 type PickupKey = keyof PickupConfig;
+type EnemySoundKey = keyof EnemySoundConfig;
 
 // Ranges stop obviously broken values: a crouch shorter than the capsule is wide (0.6 m), a reach of zero, and so on.
 export const playerFolders: Folder<PlayerKey>[] = [
@@ -603,6 +605,25 @@ export const enemyGrenadeFolder: Folder<EnemyGrenadeKey> = {
     { key: 'trailSec', label: 'Trail lasts (s)', min: 0.05, max: 1, step: 0.05 },
     { key: 'warningExtraM', label: 'Marker shows within blast radius plus (m)', min: 0, max: 10, step: 0.5 },
     { key: 'calloutShowSec', label: '"Frag out!" stays (s)', min: 0.5, max: 6, step: 0.5 },
+  ],
+};
+
+export const enemySoundFolder: Folder<EnemySoundKey> = {
+  title: 'Enemy sounds (4.14)',
+  sliders: [
+    { key: 'strideWalkM', label: 'A step every (m), walking', min: 0.3, max: 2, step: 0.05 },
+    { key: 'strideRunM', label: 'A step every (m), running', min: 0.3, max: 3, step: 0.05 },
+    { key: 'strideCrouchM', label: 'A step every (m), crouched', min: 0.2, max: 2, step: 0.05 },
+    { key: 'runFromSpeedMps', label: 'Running from (m/s)', min: 1, max: 6, step: 0.1 },
+    { key: 'stepVolumeWalk', label: 'Step volume, walking', min: 0, max: 2, step: 0.05 },
+    { key: 'stepVolumeRun', label: 'Step volume, running', min: 0, max: 2, step: 0.05 },
+    { key: 'stepVolumeCrouch', label: 'Step volume, crouched', min: 0, max: 2, step: 0.05 },
+    { key: 'heavyStepLoudness', label: 'Heavy: steps louder (x)', min: 0.5, max: 3, step: 0.05 },
+    { key: 'heavyStepPitch', label: 'Heavy: step pitch (below 1 deeper)', min: 0.5, max: 1.5, step: 0.01 },
+    { key: 'footPitchShare', label: 'Left and right foot pitched apart', min: 0, max: 0.2, step: 0.005 },
+    { key: 'pistolVolume', label: 'Pistol shot volume (flankers)', min: 0, max: 2, step: 0.05 },
+    { key: 'rifleVolume', label: 'Rifle shot volume (troopers, leader)', min: 0, max: 2, step: 0.05 },
+    { key: 'lmgVolume', label: 'Machine gun shot volume (heavy)', min: 0, max: 2, step: 0.05 },
   ],
 };
 

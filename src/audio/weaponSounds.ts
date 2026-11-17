@@ -63,8 +63,7 @@ export class WeaponSounds {
         this.play('pistol-fire', audioConfig.pistolLoudness); // suppressed: quieter, never silent
       }
     });
-    // Decision 201: the stand-in enemy reuses the M4-A shot, from where it stands, until enemies get their own sounds (4.14).
-    events.on('enemy:fired', ({ position }) => this.player.play('rifle-fire', { position, rate: this.rate(), note: 'enemy shot' }));
+    // Enemy shots and footsteps are in EnemySounds (4.14).
     // A near miss cracks from where the bullet passed, louder as Rook's exposure rises (4.5).
     events.on('shot:near-miss', ({ position, exposure }) => {
       const volume = exposureConfig.crackQuietVolume + (1 - exposureConfig.crackQuietVolume) * exposure;

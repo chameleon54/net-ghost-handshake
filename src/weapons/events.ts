@@ -1,5 +1,6 @@
 import type { Vector3 } from 'three';
 import type { Role } from '../config/roles';
+import type { EnemyGun } from '../config/enemyGuns';
 import type { HitZone } from '../enemies/dummy';
 import type { Surface } from '../data/greyboxRoom';
 import type { DamageSource } from '../player/playerHealth';
@@ -7,6 +8,11 @@ import type { Noise } from '../stealth/noise';
 import type { MagazineCheck } from './magazineFeel';
 
 export type GunId = 'rifle' | 'pistol';
+/**
+ * What an enemy can call out (dialogue.md, Contractors). Sent only when the AI really does it (4.14); phase 6 voices them.
+ * "Frag out" and "Grenade, move" have their own events (`enemy:grenade-thrown`, `enemy:grenade-spotted`).
+ */
+export type CalloutKind = 'flank_start' | 'suppress_start' | 'advance_start' | 'player_dry' | 'player_jammed' | 'squadmate_down' | 'suppressed' | 'player_lost';
 export type WeaponId = GunId | 'knife';
 /** What can lie on the floor to pick up (4.12): a grenade, or a magazine for the rifle or the pistol. */
 export type PickupKind = 'grenade' | GunId;
@@ -55,8 +61,18 @@ export type WeaponEvents = {
   /** A different weapon was taken out. */
   'weapon:switched': { weapon: WeaponId };
   'shot:landed': ShotLanded;
-  /** An enemy fired a round from its muzzle at `position` (a reused vector). For its gunshot sound. */
-  'enemy:fired': { position: Vector3 };
+  /** An enemy fired a round from its muzzle at `position` (a reused vector), from `gun`. For its gunshot sound. */
+  'enemy:fired': { position: Vector3; gun: EnemyGun };
+  /**
+   * An enemy took a step (4.14): where its foot came down (a reused vector), on what, which foot, and how it moves.
+   * Timed by distance moved until enemy animation (7b).
+   */
+  'enemy:step': { position: Vector3; surface: Surface; foot: 0 | 1; role: Role; gait: 'walk' | 'run' | 'crouch' };
+  /**
+   * A callout hook (4.14): an enemy really started doing `kind`. `speaker` is the enemy who would say it (for the dev log),
+   * `position` its head (a reused vector). A flank also says which side it goes round, as Rook sees it.
+   */
+  'enemy:callout': { kind: CalloutKind; speaker: object; role: Role; position: Vector3; side?: 'left' | 'right' };
   /** Suppressing fire landed on one side of Rook's cover (4.9): `anchor` is where he hides, `side` points to that side. */
   'cover:pinned': { anchor: Vector3; side: Vector3 };
   /** An enemy round passed close by Rook's head without hitting him (4.5): `position` is the nearest point of its path. */

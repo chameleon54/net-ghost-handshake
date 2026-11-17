@@ -66,6 +66,9 @@ export class LogWatch {
       this.squadSeen.delete('setup'); // the restart's tier and count get a line again
     });
     events.on('pickup:taken', ({ kind }) => log.add('Rook', `picked up: ${kind}`));
+    // The callout hooks (4.14): what phase 6 will voice, written next to the action that caused it.
+    events.on('enemy:callout', ({ kind, speaker, side }) => log.add(this.who(speaker), `callout ${kind}${side ? ` (${side}, as you see it)` : ''}`));
+    events.on('enemy:grenade-spotted', () => log.add('squad', 'callout grenade_spotted (an enemy saw your grenade)'));
   }
 
   /** "C flanker". The squad keeps its members as plain objects, so they are looked up by identity. */

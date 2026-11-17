@@ -820,13 +820,14 @@ export class StandInEnemy implements Target {
 
   /**
    * One of Rook's rounds passed or landed close while it was out of cover (the Suppressed state, 4.9): it ducks back in at
-   * once and holds longer.
+   * once and holds longer. True if it was out and is pinned now.
    */
-  pinDown(): void {
-    if (this.state !== 'cover' || (this.peekPhase !== 'tell' && this.peekPhase !== 'out' && this.peekPhase !== 'fire')) return;
+  pinDown(): boolean {
+    if (this.state !== 'cover' || (this.peekPhase !== 'tell' && this.peekPhase !== 'out' && this.peekPhase !== 'fire')) return false;
     this.pinnedByRook = true;
     this.wantsMove = true; // pinned: this spot is known, it moves on (decision 237)
     this.startPeekBack();
+    return true; // it was out and is pinned now (its "Pinned" callout, 4.14)
   }
 
   /**

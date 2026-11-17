@@ -34,6 +34,10 @@ import { describeFlankRejects, StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
 import { squadConfig } from './config/squad';
 import { SquadCoordinator, type PushKind } from './squad/squadCoordinator';
+import { downCaller, pushCaller, sideWord } from './squad/callouts';
+import { EnemySteps } from './enemies/enemySteps';
+import { EnemySounds } from './audio/enemySounds';
+import type { CalloutKind } from './weapons/events';
 import type { NoiseKind } from './stealth/noise';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
@@ -168,6 +172,12 @@ const standIns = testArenaStandIns.map((spawn) => {
   return { enemy, world, view };
 });
 const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
+/** A callout hook (4.14, dialogue.md): sent only when the AI really does the thing; phase 6 voices it. */
+const calloutAt = new THREE.Vector3();
+function callout(kind: CalloutKind, enemy: StandInEnemy, side?: 'left' | 'right'): void {
+  calloutAt.set(enemy.xM, enemy.heightM, enemy.zM);
+  weaponEvents.emit('enemy:callout', { kind, speaker: enemy, role: enemy.role, position: calloutAt, side });
+}
 /** Dev readout: why the last flank attempt found nothing, or null. */
 let flankFailure: string | null = null;
 /**
@@ -185,7 +195,11 @@ function startPlay(movers: number): void {
   );
   if (!play) return;
   play.advancer.member.beginAdvance(play.advancer.plan.point); // claims its spot before the next one plans
-  play.suppressor?.beginSuppress(); // none when the mover is the heavy: it fires on the move (decision 237)
+  callout('advance_start', play.advancer.member);
+  if (play.suppressor) {
+    play.suppressor.beginSuppress(); // none when the mover is the heavy: it fires on the move (decision 237)
+    callout('suppress_start', play.suppressor);
+  }
   const nearestFirst = candidates
     .filter((enemy) => enemy !== play.advancer.member && enemy !== play.suppressor)
     .sort((a, b) => a.feet.distanceTo(player.position) - b.feet.distanceTo(player.position));
@@ -195,6 +209,7 @@ function startPlay(movers: number): void {
     const plan = worldOf.get(enemy)?.planAdvance(enemy);
     if (!plan) continue;
     enemy.beginAdvance(plan.point);
+    callout('advance_start', enemy);
     squad.addAdvancer(enemy);
     moving++;
   }
@@ -233,7 +248,11 @@ function reposition(enemy: StandInEnemy): void {
   }
   squad.assignReposition(enemy);
   enemy.beginReposition(plan.point);
-  cover?.beginSuppress();
+  callout('advance_start', enemy);
+  if (cover) {
+    cover.beginSuppress();
+    callout('suppress_start', cover);
+  }
 }
 /**
  * Starts the hunt (decision 235) once the squad's knowledge of Rook is old: they all take the freshest last known spot,
@@ -253,6 +272,7 @@ function startHunt(): void {
   );
   if (!lead) return;
   lead.member.beginHunt(lead.plan.point, true);
+  callout('player_lost', lead.member);
   squad.assignWatcher(
     activeEnemies.filter((enemy) => enemy !== lead.member && enemy.canAdvance),
     (enemy) => enemy.role === 'heavy',
@@ -274,6 +294,7 @@ function huntStep(): void {
     const plan = worldOf.get(enemy)?.planAdvance(enemy, closestM);
     if (!plan) continue;
     enemy.beginHunt(plan.point, false); // claims its spot before the next one plans
+    callout('advance_start', enemy);
     squad.addHuntFollower(enemy);
     moving++;
   }
@@ -285,7 +306,7 @@ const coverers = (mover: StandInEnemy | null): StandInEnemy[] =>
 weaponEvents.on('cover:pinned', ({ anchor, side }) => exposure.pin(anchor, side));
 weaponEvents.on('shot:landed', ({ shooter, muzzle, end }) => {
   if (shooter !== 'player') return;
-  for (const enemy of activeEnemies) if (worldOf.get(enemy)?.nearMiss(enemy, muzzle, end)) enemy.pinDown();
+  for (const enemy of activeEnemies) if (worldOf.get(enemy)?.nearMiss(enemy, muzzle, end) && enemy.pinDown()) callout('suppressed', enemy);
 });
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
@@ -306,6 +327,13 @@ new NoiseReporter(weaponEvents, () => camera.position);
 // Movement sounds (3.4): the reporter says what the player did, the sounds and the noise service listen.
 const movement = new MovementReporter(weaponEvents, player, (x, y, z) => surfaceAt(x, y, z, testArena, testArenaLayout.floors));
 new MovementSounds(weaponEvents, sounds);
+// Enemy sounds (4.14): footsteps counted by distance moved, and each gun's shot.
+new EnemySounds(weaponEvents, sounds);
+const enemySteps = new EnemySteps(weaponEvents, (x, y, z) => surfaceAt(x, y, z, testArena, testArenaLayout.floors));
+weaponEvents.on('enemy:downed', ({ position }) => {
+  const caller = downCaller(activeEnemies, position); // the one that fell is no longer awake
+  if (caller) callout('squadmate_down', caller);
+});
 player.onLanded = (speedMps) => {
   playerHealth.damage(fallDamage(speedMps), 'fall');
   movement.landed(speedMps);
@@ -553,6 +581,8 @@ const loop = new Loop(
     const push = squad.pushDue;
     if (push) {
       squad.pushStarted(); // one push per window
+      const caller = pushCaller(activeEnemies, player.position);
+      if (caller) callout(push === 'jam' ? 'player_jammed' : 'player_dry', caller); // a reload push: "he's reloading, push"
       if (push === 'jam') squad.forceFlank(); // "flankers commit": the flank below starts this update
       const { pushMoversDry, pushMoversReload, pushMoversJam } = squad.tier; // per aggression tier (4.11)
       const movers = { dry: pushMoversDry, reload: pushMoversReload, jam: pushMoversJam }[push];
@@ -570,14 +600,22 @@ const loop = new Loop(
         job.member.beginFlank(job.plan.point);
         // The pincer (4.11, Aggressive and up): a second flanker round his other side at the same time, if one can go.
         const side = worldOf.get(job.member)?.flankSide(job.plan.point) ?? 0;
+        callout('flank_start', job.member, sideWord(side));
         const second = squad.assignPincer(
           candidates.filter((enemy) => enemy !== job.member),
           (enemy) => worldOf.get(enemy)?.planFlank(enemy, -side) ?? null,
           (enemy) => enemy.role === 'flanker',
         );
-        second?.member.beginFlank(second.plan.point);
+        if (second) {
+          second.member.beginFlank(second.plan.point);
+          callout('flank_start', second.member, sideWord(worldOf.get(second.member)?.flankSide(second.plan.point) ?? 0));
+        }
         // Covering fire for the flank if someone is free (decision 225); the flank does not wait for it.
-        squad.assignCover(coverers(job.member), (enemy) => enemy.role === 'heavy')?.beginSuppress();
+        const flankCover = squad.assignCover(coverers(job.member), (enemy) => enemy.role === 'heavy');
+        if (flankCover) {
+          flankCover.beginSuppress();
+          callout('suppress_start', flankCover);
+        }
       }
       // For the dev readout: why the attempt found nothing (the spot rules, as the first candidate saw them).
       const first = candidates.find((enemy) => enemy.role === 'flanker') ?? candidates[0];
@@ -606,6 +644,7 @@ const loop = new Loop(
       glimpses.push(world.glimpse(enemy, stepSec));
     }
     exposure.update(stepSec, glimpses, player.stance.stance === 'crouching', camera.position);
+    enemySteps.update(stepSec, activeEnemies);
     debug?.perf.addAi(performance.now() - aiStartMs);
   },
   (alpha) => {

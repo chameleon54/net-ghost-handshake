@@ -816,7 +816,7 @@ export class StandInWorld implements StandInHooks {
         this.end.copy(this.direction).multiplyScalar(rifleConfig.maxRangeM).add(this.muzzle);
       }
     }
-    this.events.emit('enemy:fired', { position: this.muzzle });
+    this.events.emit('enemy:fired', { position: this.muzzle, gun: enemy.gun });
     this.events.emit('shot:landed', { muzzle: this.muzzle, end: this.end, hit: onSurface, normal: this.normal, shooter: 'enemy' });
     if (shot !== 'hit') this.crackIfClose();
   }
