@@ -1,4 +1,5 @@
 import { Line3, Vector3 } from 'three';
+import { bodyInLine } from './bodies';
 import { dummyConfig } from '../config/dummy';
 import { enemyGrenadeConfig } from '../config/enemyGrenades';
 import { enemyGunConfig } from '../config/enemyGuns';
@@ -96,6 +97,8 @@ export function describeFlankRejects(r: FlankRejects): string {
 // its stand-in last saw Rook from. While the squad searches for him (the hunt, decision 235), cover and routes are judged
 // from where the squad last knew he was, not where he is.
 export class StandInWorld implements StandInHooks {
+  /** The enemies in the room (the game's list, changed in place), for keeping its line of fire clear of them (4.16). */
+  squadmates: readonly StandInEnemy[] = [];
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
   private readonly spot = new Vector3();
@@ -353,6 +356,28 @@ export class StandInWorld implements StandInHooks {
     peekGunAt(point, way, this.peekEyes);
     this.edgeAim(this.peekEyes, enemy.lastKnown, side, this.aim);
     return this.lineHitM(this.peekEyes, this.aim) >= this.peekEyes.distanceTo(this.aim) - exposureConfig.missNearSurfaceM;
+  }
+
+  /** True if a squadmate's body (one still standing) is in the line of the round it is about to fire (4.16, decision 266). */
+  friendInLine(enemy: StandInEnemy, shot: StandInShot): boolean {
+    this.muzzle.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.aimAt(enemy, shot, this.muzzle, this.aim);
+    const reachM = standInConfig.capsuleRadiusM + standInConfig.friendLineMarginM;
+    return this.squadmates.some(
+      (other) => other !== enemy && other.state !== 'down' && other.state !== 'falling' && bodyInLine(this.muzzle, this.aim, other.xM, other.zM, other.heightM, reachM),
+    );
+  }
+
+  reloadStarted(enemy: StandInEnemy): void {
+    this.target.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.events.emit('enemy:reload', { phase: 'start', position: this.target, gun: enemy.gun });
+    this.target.y = enemy.heightM;
+    this.events.emit('enemy:callout', { kind: 'reloading', speaker: enemy, role: enemy.role, position: this.target }); // truthful: it really reloads
+  }
+
+  reloadDone(enemy: StandInEnemy): void {
+    this.target.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.events.emit('enemy:reload', { phase: 'end', position: this.target, gun: enemy.gun });
   }
 
   /**

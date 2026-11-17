@@ -33,6 +33,8 @@ import { StandInView } from './enemies/standInView';
 import { describeFlankRejects, StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
 import { squadConfig } from './config/squad';
+import { standInConfig } from './config/standInEnemy';
+import { keepApart } from './enemies/bodies';
 import { SquadCoordinator, type PushKind } from './squad/squadCoordinator';
 import { downCaller, pushCaller, sideWord } from './squad/callouts';
 import { EnemySteps } from './enemies/enemySteps';
@@ -311,6 +313,14 @@ weaponEvents.on('shot:landed', ({ shooter, muzzle, end }) => {
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
+// Each stand-in keeps its line of fire clear of the others in the room (4.16).
+for (const { world } of standIns) world.squadmates = activeEnemies;
+/** Keeping apart (4.16): each stand-in's body, and whether it holds its spot (in cover, or standing) this update. */
+const spacedBodies = standIns.map(({ enemy }) => ({ feet: enemy.feet, fixed: false, enemy }));
+const spacedMoved: typeof spacedBodies = [];
+const spacedNow: typeof spacedBodies = [];
+/** Playtests (4.16): how long every stand-in in the room has been down. */
+let allDownSec = 0;
 weaponEvents.on('noise:made', (noise) => activeEnemies.forEach((enemy) => enemy.hear(noise)));
 // Everything the player's bullets, knife and grenades can hurt. Filled by `placeSquad`, which changes it in place.
 const targets: Target[] = [];
@@ -644,7 +654,28 @@ const loop = new Loop(
       glimpses.push(world.glimpse(enemy, stepSec));
     }
     exposure.update(stepSec, glimpses, player.stance.stance === 'crouching', camera.position);
+    // Keeping apart (4.16): bodies that ended this update overlapping are pushed apart (a moving one steps aside), then
+    // out of walls and props again. The ones lying down are left out.
+    spacedNow.length = 0;
+    for (const body of spacedBodies) {
+      if (!activeEnemies.includes(body.enemy) || body.enemy.state === 'down' || body.enemy.state === 'falling') continue;
+      body.fixed = body.enemy.state === 'cover' || body.enemy.speedMps === 0;
+      spacedNow.push(body);
+    }
+    keepApart(spacedNow, 2 * standInConfig.capsuleRadiusM, spacedMoved);
+    for (const { enemy } of spacedMoved) worldOf.get(enemy)?.pushOut(enemy.feet);
     enemySteps.update(stepSec, activeEnemies);
+    // Playtests (4.16): the whole squad comes back together, the respawn delay after the last one is down.
+    if (squadConfig.respawnTogether && activeEnemies.length > 0 && activeEnemies.every((enemy) => enemy.state === 'down')) {
+      allDownSec += stepSec;
+      if (allDownSec >= standInConfig.respawnDelaySec) {
+        allDownSec = 0;
+        placeSquad();
+        for (const enemy of activeEnemies) enemy.getUpWithSquad();
+      }
+    } else {
+      allDownSec = 0;
+    }
     debug?.perf.addAi(performance.now() - aiStartMs);
   },
   (alpha) => {

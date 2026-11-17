@@ -103,8 +103,17 @@ export const standInConfigDefaults = {
   crouchMuzzleHeightM: 0.7,
   /** How far in front of its body the gun's muzzle is. */
   muzzleForwardM: 0.5,
-  /** Its collision capsule against walls and props. */
+  /** Its collision capsule against walls and props, and against other enemies (they keep this far apart twice over, 4.16). */
   capsuleRadiusM: 0.3,
+  // Squad basics (4.16, decision 266).
+  /** A squadmate counts as in its line of fire within this much more than a body's radius of the line. */
+  friendLineMarginM: 0.1,
+  /** A squadmate in its line of fire this long makes it want to move on to another spot. */
+  friendBlockedMoveSec: 2,
+  /** In cover with less than this share of a magazine left... */
+  topUpBelowShare: 1 / 3,
+  /** ...and no sight or sound of Rook for this long, it tops up its magazine. */
+  topUpCalmSec: 5,
   /** Where on Rook it aims and sees: this share of his eye height (about the chest). */
   aimHeightShareOfEyes: 0.75,
 } as const;

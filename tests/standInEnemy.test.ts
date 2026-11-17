@@ -80,6 +80,10 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     /** Which peeks' guns can reach Rook's cover (way, side); all by default. And whether its own cover blocks its gun. */
     coverShotFrom: null as ((way: number, side: number) => boolean) | null,
     muzzleClear: true,
+    /** Whether a squadmate stands in its line of fire (4.16), and how many reloads it started and finished. */
+    friendInLine: false,
+    reloadStarts: 0,
+    reloadDones: 0,
     /** Where the nearest hiding cover is after a flinch on the move (none by default). */
     nearestCover: null as CoverPoint | null,
     /** Grenade throws (4.12): whether a throw is still on at the release, the throws made, and each throw's end (thrown or not). */
@@ -139,6 +143,9 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     noiseBlocked: () => world.wallBetween,
     coverShotClear: (_e, _point, way, side) => (world.coverShotFrom ? world.coverShotFrom(way, side) : true),
     muzzleClear: () => world.muzzleClear,
+    friendInLine: () => world.friendInLine,
+    reloadStarted: () => world.reloadStarts++,
+    reloadDone: () => world.reloadDones++,
     hunting: () => squad.hunting,
     huntMoveOver: (e) => squad.huntMoveOver(e),
     huntHoldScale: (e) => squad.huntHoldScale(e),
@@ -1001,19 +1008,39 @@ describe('StandInEnemy walking and shooting', () => {
 });
 
 describe('StandInEnemy death and reset', () => {
-  it('falls, lies down, then gets up at its spawn spot awake and at full health', () => {
+  it('getting up alone (decision 201, the respawn rule before 4.16): falls, lies down, then gets up at its spawn spot awake and at full health', () => {
+    const together = squadConfig.respawnTogether;
+    squadConfig.respawnTogether = 0;
+    try {
+      const { enemy, world, run } = setup();
+      world.sees = false;
+      enemy.hit('body', 1);
+      run(new Vector3(0, 0, -20), 1);
+      enemy.kill();
+      run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + 0.05);
+      expect(enemy.state).toBe('down');
+      expect(enemy.fallProgress).toBe(1);
+      run(new Vector3(0, 0, -20), standInConfig.respawnDelaySec);
+      expect(enemy.awake).toBe(true);
+      expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
+      expect(Math.abs(enemy.feet.z)).toBeLessThan(0.1); // back at the spot (it may have taken one step)
+    } finally {
+      squadConfig.respawnTogether = together;
+    }
+  });
+
+  it('respawning together (4.16): a downed one stays down until the squad comes back, then gets up awake', () => {
     const { enemy, world, run } = setup();
     world.sees = false;
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -20), 1);
     enemy.kill();
-    run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + 0.05);
-    expect(enemy.state).toBe('down');
-    expect(enemy.fallProgress).toBe(1);
-    run(new Vector3(0, 0, -20), standInConfig.respawnDelaySec);
+    run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + standInConfig.respawnDelaySec * 2);
+    expect(enemy.state).toBe('down'); // it waits for the rest of the squad
+    enemy.reset(); // what the game does when the last one is down: the whole squad back at its spawns...
+    enemy.getUpWithSquad(); // ...awake
     expect(enemy.awake).toBe(true);
     expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
-    expect(Math.abs(enemy.feet.z)).toBeLessThan(0.1); // back at the spot (it may have taken one step)
   });
 
   it('a reset puts it back at its spot, idle and at full health', () => {
@@ -2257,5 +2284,97 @@ describe('StandInEnemy throwing a grenade (4.12)', () => {
     enemy.kill();
     expect(world.throwOvers).toEqual([false]);
     expect(enemy.isThrowing).toBe(false);
+  });
+});
+
+describe('StandInEnemy squad basics (4.16)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const far = new Vector3(0, 0, 10);
+  /** A trooper holding `spot`, its rifle's magazine `rounds` big for the test (put back afterwards by `withMagazine`). */
+  const holding = () => {
+    const s = setup();
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(far, 2.5);
+    expect(s.enemy.state).toBe('cover');
+    s.shots.length = 0;
+    return s;
+  };
+  const withMagazine = (rounds: number, test: () => void) => {
+    const was = enemyGunConfig.rifle.magazineRounds;
+    enemyGunConfig.rifle.magazineRounds = rounds;
+    try {
+      test();
+    } finally {
+      enemyGunConfig.rifle.magazineRounds = was;
+    }
+  };
+  /** Runs in single updates until `done` (at most `maxSec`). */
+  const runUntil = (run: (target: Vector3, sec: number) => void, done: () => boolean, maxSec = 20) => {
+    for (let t = 0; t < maxSec && !done(); t += dtSec) run(far, dtSec);
+    expect(done()).toBe(true);
+  };
+
+  it('fires its magazine dry, reloads in cover for its gun\'s reload time without firing, then fires again', () =>
+    withMagazine(6, () => {
+      const { enemy, world, shots, run } = holding();
+      world.sees = true; // it fires from where it holds
+      runUntil(run, () => world.reloadStarts === 1);
+      expect(shots).toHaveLength(6);
+      expect(enemy.reloading).toBe(true);
+      expect(enemy.rounds).toBe(0);
+      run(far, enemyGunConfig.rifle.reloadSec - 0.1);
+      expect(shots).toHaveLength(6); // nothing while reloading
+      expect(world.tells).toHaveLength(0); // and no peeks
+      run(far, 0.2);
+      expect(world.reloadDones).toBe(1);
+      expect(enemy.reloading).toBe(false);
+      expect(enemy.rounds).toBe(6);
+      run(far, 2);
+      expect(shots.length).toBeGreaterThan(6); // and fires again
+    }));
+
+  it('a flinch cuts a reload short; it reloads again later', () =>
+    withMagazine(3, () => {
+      const { enemy, world, run } = holding();
+      world.sees = true;
+      runUntil(run, () => enemy.reloading);
+      enemy.hit('body', 15);
+      enemy.hit('body', 15); // two quick rifle hits: a flinch
+      expect(enemy.flinching).toBe(true);
+      expect(enemy.reloading).toBe(false);
+      expect(world.reloadDones).toBe(0);
+      runUntil(run, () => world.reloadDones === 1);
+      expect(world.reloadStarts).toBe(2);
+      expect(enemy.rounds).toBe(3);
+    }));
+
+  it('tops up in cover when low and calm, not while it still knows fresh where Rook is', () =>
+    withMagazine(12, () => {
+      const { enemy, world, shots, run } = holding();
+      world.sees = true;
+      runUntil(run, () => shots.length >= 9);
+      world.sees = false; // 3 left: below a third of 12
+      expect(enemy.rounds).toBeLessThan(12 / 3);
+      expect(enemy.rounds).toBeGreaterThan(0);
+      run(far, standInConfig.topUpCalmSec - 0.5);
+      expect(world.reloadStarts).toBe(0); // it saw Rook too recently
+      runUntil(run, () => world.reloadStarts === 1, 2);
+    }));
+
+  it('holds fire while a squadmate is in its line of fire; after a while it wants to move on; fires again once clear', () => {
+    const { enemy, world, shots, run } = holding();
+    world.sees = true;
+    world.friendInLine = true;
+    run(far, standInConfig.friendBlockedMoveSec - 0.5);
+    expect(shots).toHaveLength(0);
+    expect(enemy.wantsToReposition).toBe(false);
+    run(far, 1);
+    expect(shots).toHaveLength(0);
+    expect(enemy.wantsToReposition).toBe(true); // moving on, as when pinned (decision 237)
+    world.friendInLine = false;
+    run(far, 1);
+    expect(shots.length).toBeGreaterThan(0);
   });
 });

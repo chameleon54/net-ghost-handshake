@@ -12,7 +12,7 @@ export type GunId = 'rifle' | 'pistol';
  * What an enemy can call out (dialogue.md, Contractors). Sent only when the AI really does it (4.14); phase 6 voices them.
  * "Frag out" and "Grenade, move" have their own events (`enemy:grenade-thrown`, `enemy:grenade-spotted`).
  */
-export type CalloutKind = 'flank_start' | 'suppress_start' | 'advance_start' | 'player_dry' | 'player_jammed' | 'squadmate_down' | 'suppressed' | 'player_lost';
+export type CalloutKind = 'reloading' | 'flank_start' | 'suppress_start' | 'advance_start' | 'player_dry' | 'player_jammed' | 'squadmate_down' | 'suppressed' | 'player_lost';
 export type WeaponId = GunId | 'knife';
 /** What can lie on the floor to pick up (4.12): a grenade, or a magazine for the rifle or the pistol. */
 export type PickupKind = 'grenade' | GunId;
@@ -67,6 +67,8 @@ export type WeaponEvents = {
    * An enemy took a step (4.14): where its foot came down (a reused vector), on what, which foot, and how it moves.
    * Timed by distance moved until enemy animation (7b).
    */
+  /** An enemy began (`start`) or finished (`end`) a reload of its `gun`, at `position` (a reused vector), 4.16. For its sounds. */
+  'enemy:reload': { phase: 'start' | 'end'; position: Vector3; gun: EnemyGun };
   'enemy:step': { position: Vector3; surface: Surface; foot: 0 | 1; role: Role; gait: 'walk' | 'run' | 'crouch' };
   /**
    * A callout hook (4.14): an enemy really started doing `kind`. `speaker` is the enemy who would say it (for the dev log),

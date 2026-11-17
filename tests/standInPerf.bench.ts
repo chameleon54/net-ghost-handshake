@@ -46,10 +46,13 @@ const shot: Noise = { kind: 'rifle-shot', position: rook.position, radiusM: shot
 
 function makeSquad() {
   const squad = new SquadCoordinator();
-  return testArenaStandIns.map((spawn) => {
+  const members = testArenaStandIns.map((spawn) => {
     const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rook, () => {}, () => [], Math.random, squad);
     return { enemy: new StandInEnemy(spawn, world), world };
   });
+  const enemies = members.map(({ enemy }) => enemy);
+  for (const { world } of members) world.squadmates = enemies; // each keeps its line of fire clear of the others (4.16)
+  return members;
 }
 
 beforeAll(async () => {

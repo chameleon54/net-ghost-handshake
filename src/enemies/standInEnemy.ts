@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
 import { enemyGrenadeConfig } from '../config/enemyGrenades';
-import { gunOfRole, type EnemyGun } from '../config/enemyGuns';
+import { enemyGunConfig, gunOfRole, type EnemyGun } from '../config/enemyGuns';
 import { grenadeConfig } from '../config/grenade';
 import { roleConfig, type Role, type RoleValues } from '../config/roles';
 import { squadConfig } from '../config/squad';
@@ -104,6 +104,12 @@ export interface StandInHooks {
   coverShotClear(enemy: StandInEnemy, point: CoverPoint, way: number, side: number): boolean;
   /** False if the round it is about to fire (aimed as `shot` aims) would strike its own cover near its muzzle. */
   muzzleClear(enemy: StandInEnemy, shot: StandInShot): boolean;
+  /** True if a squadmate's body is in the line of the round it is about to fire (aimed as `shot` aims), 4.16. */
+  friendInLine(enemy: StandInEnemy, shot: StandInShot): boolean;
+  /** It began a reload (4.16): its sound and the `reloading` callout hook. */
+  reloadStarted(enemy: StandInEnemy): void;
+  /** It finished a reload. */
+  reloadDone(enemy: StandInEnemy): void;
   /** True while the squad hunts for Rook (decision 235); when it stops (he was found), a hunt move takes cover instead. */
   hunting(): boolean;
   /** Its hunt move is over (arrived, or anything else): tells the squad. */
@@ -160,6 +166,8 @@ export function peekGunAt(point: CoverPoint, way: number, out: Vector3): Vector3
 const degToRad = Math.PI / 180;
 /** Getting this much closer to a walk's goal counts as progress (smaller changes are jitter). */
 const progressStepM = 0.05;
+/** A reload of 0 s still takes one moment (so a 0 on the dev panel cannot fire forever without reloading). */
+const dtFloorSec = 0.01;
 /** How many steps the carrot may take along the route in one update (a bound for very short route pieces). */
 const carrotMaxMoves = 20;
 /**
@@ -287,6 +295,15 @@ export class StandInEnemy implements Target {
    * corners become arcs; how fast it is going now (it speeds up and slows down); which way it is moving (a unit vector).
    */
   private readonly carrot = new Vector3();
+  /**
+   * Reloading (4.16, decision 266): rounds left in its magazine, how long its reload has left (0: not reloading), and
+   * whether its magazine is empty and wants a reload as soon as it can.
+   */
+  private roundsLeft = 0;
+  private reloadLeftSec = 0;
+  private needsReload = false;
+  /** Since when a squadmate has stood in its line of fire, or null (4.16). */
+  private friendBlockedSinceSec: number | null = null;
   private speedNowMps = 0;
   private moveX = 0;
   private moveZ = 0;
@@ -497,6 +514,7 @@ export class StandInEnemy implements Target {
     this.flinchFreeAtSec = this.clockSec + flinchSec + flinchImmuneSec;
     this.roundsInBurst = 0; // the burst is cut off...
     this.cooldownSec = Math.max(this.cooldownSec, flinchSec); // ...and nothing fires during the flinch
+    this.cancelReload(); // a reload starts over later (4.16)
     const peeking = this.state === 'cover' && (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire');
     if (peeking) {
       this.pinnedByRook = true; // its next hold is longer
@@ -535,6 +553,13 @@ export class StandInEnemy implements Target {
     this.clockSec += dtSec;
     this.flinchLeftSec = Math.max(this.flinchLeftSec - dtSec, 0);
     this.walkedThisUpdate = false;
+    if (this.reloadLeftSec > 0) {
+      this.reloadLeftSec = Math.max(this.reloadLeftSec - dtSec, 0);
+      if (this.reloadLeftSec === 0) {
+        this.roundsLeft = this.magazineRounds;
+        this.hooks.reloadDone(this);
+      }
+    }
     this.think(dtSec, player);
     if (!this.walkedThisUpdate) {
       this.speedNowMps = 0; // standing (its walks brake to a stop before they end), and the next walk sets off afresh
@@ -573,7 +598,7 @@ export class StandInEnemy implements Target {
       return;
     }
     if (this.state === 'down') {
-      if (this.stateSec >= standInConfig.respawnDelaySec) {
+      if (!squadConfig.respawnTogether && this.stateSec >= standInConfig.respawnDelaySec) {
         this.placeAtSpawn();
         this.wake(); // decision 201: it gets up awake
       }
@@ -937,8 +962,10 @@ export class StandInEnemy implements Target {
     if (this.faceLastKnown(dtSec) > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    if (!this.hooks.muzzleClear(this, 'suppress')) {
-      this.cooldownSec = standInConfig.roundIntervalSec; // something close is in the way: try again a step on (decision 239)
+    if (this.needsReload) this.startReload(); // empty: it reloads where it is (4.16)
+    if (this.reloading) return;
+    if (!this.lineClear('suppress')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // something close (or a squadmate) is in the way: try again a step on (decision 239)
       return;
     }
     if (!this.takeSlot()) {
@@ -946,6 +973,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, 'suppress');
+    this.roundFired();
     this.roundsInBurst++;
     if (this.roundsInBurst < squadConfig.suppressBurstRounds) {
       this.cooldownSec += standInConfig.roundIntervalSec;
@@ -965,6 +993,7 @@ export class StandInEnemy implements Target {
     if (point) this.coverSpot.set(point.xM, 0, point.zM);
     this.crouched = false;
     this.engaged = false;
+    this.cancelReload(); // running for its life: the reload starts over later (4.16)
     this.setState('flee');
     this.repathTimerSec = 0;
   }
@@ -1034,11 +1063,18 @@ export class StandInEnemy implements Target {
    * burst, back in (4.4). Its body moves with the peek, so its hit zones go out and come back with it.
    */
   private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
+    if (this.peekPhase === 'hold' && (this.reloading || this.needsReload || this.wantsTopUp)) {
+      // Reloading behind its cover (4.16): no peeks meanwhile; it keeps watching where Rook was.
+      if (!this.reloading) this.startReload();
+      this.engaged = false;
+      this.faceLastKnown(dtSec);
+      return;
+    }
     if (this.peekPhase === 'hold') {
       // It fires from where it holds if it sees Rook and its own cover is not in the way; else it peeks (decision 239).
       // With a throw to make it peeks to throw instead (4.12).
       const throwing = this.throwPlan !== null;
-      if (!throwing && this.seesPlayer && this.hooks.muzzleClear(this, 'hit')) {
+      if (!throwing && this.seesPlayer && this.lineClear('hit')) {
         this.engage(dtSec, dx, dz);
         return;
       }
@@ -1163,8 +1199,12 @@ export class StandInEnemy implements Target {
     if (this.cooldownSec > 0) return;
     const suppressFire = this.peekMode === 'suppress';
     const aimedAs: StandInShot = this.peekMode === 'cover' ? 'cover' : suppressFire ? 'suppress' : 'hit';
-    if (!this.hooks.muzzleClear(this, aimedAs)) {
-      this.startPeekBack(); // its own cover is in the way: no clear shot from this peek (decision 239)
+    if (this.needsReload) {
+      this.startPeekBack(); // empty: back into cover to reload there (4.16)
+      return;
+    }
+    if (!this.lineClear(aimedAs)) {
+      this.startPeekBack(); // its own cover (or a squadmate) is in the way: no clear shot from this peek (decisions 239, 266)
       return;
     }
     if (this.peekRounds === 0 && !this.takeSlot()) {
@@ -1172,6 +1212,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, aimedAs === 'hit' ? this.aimedShot(1) : aimedAs);
+    this.roundFired();
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
     if (this.peekRounds < (suppressFire ? squadConfig.suppressBurstRounds : this.values.burstRounds)) return;
@@ -1311,6 +1352,71 @@ export class StandInEnemy implements Target {
     if (this.state === 'approach') return;
     this.setState('approach');
     this.repathTimerSec = 0; // a fresh route from here
+  }
+
+  /** Its gun's magazine size (4.16). */
+  get magazineRounds(): number {
+    return Math.max(Math.round(enemyGunConfig[this.gun].magazineRounds), 1);
+  }
+
+  /** Rounds left in its magazine (4.16). */
+  get rounds(): number {
+    return this.roundsLeft;
+  }
+
+  /** True while it reloads (4.16): it neither peeks nor fires. */
+  get reloading(): boolean {
+    return this.reloadLeftSec > 0;
+  }
+
+  /** In cover, low on rounds and with no sight or sound of Rook for a while: it tops up its magazine (4.16). */
+  private get wantsTopUp(): boolean {
+    return (
+      this.state === 'cover' &&
+      this.throwPlan === null &&
+      !this.suppressing &&
+      this.roundsLeft < this.magazineRounds * standInConfig.topUpBelowShare &&
+      this.lastKnownAgeSec >= standInConfig.topUpCalmSec
+    );
+  }
+
+  private startReload(): void {
+    this.needsReload = false;
+    this.reloadLeftSec = Math.max(enemyGunConfig[this.gun].reloadSec, dtFloorSec);
+    this.roundsInBurst = 0; // its burst is over: the firing slot goes back
+    this.hooks.reloadStarted(this);
+  }
+
+  /** A reload cut short (a flinch, a grenade, going down): it keeps its rounds and reloads again later. */
+  private cancelReload(): void {
+    if (this.reloadLeftSec <= 0) return;
+    this.reloadLeftSec = 0;
+    this.needsReload = this.roundsLeft === 0;
+  }
+
+  private roundFired(): void {
+    this.roundsLeft = Math.max(this.roundsLeft - 1, 0);
+    if (this.roundsLeft === 0) this.needsReload = true;
+  }
+
+  /**
+   * True if the round it is about to fire (aimed as `shot` aims) has a clear line: its own cover is not in the way
+   * (decision 239) and no squadmate stands in it (4.16). A squadmate in the way for a while makes it want to move on.
+   */
+  private lineClear(shot: StandInShot): boolean {
+    if (!this.hooks.muzzleClear(this, shot)) return false;
+    if (!this.hooks.friendInLine(this, shot)) {
+      this.friendBlockedSinceSec = null;
+      return true;
+    }
+    this.friendBlockedSinceSec ??= this.clockSec;
+    if (this.clockSec - this.friendBlockedSinceSec >= standInConfig.friendBlockedMoveSec) this.wantsMove = true; // decision 237's moving on
+    return false;
+  }
+
+  /** The whole squad came back together (4.16): it gets up awake at its spawn, as one getting up alone does (decision 201). */
+  getUpWithSquad(): void {
+    this.wake();
   }
 
   /** How fast it is going now (m/s): it speeds up and slows down like a person (4.15). 0 while standing. */
@@ -1475,10 +1581,12 @@ export class StandInEnemy implements Target {
   }
 
   private shoot(dtSec: number, hitShare: number): void {
+    if (this.needsReload) this.startReload(); // empty: it reloads where it is, or on the move (the heavy), 4.16
+    if (this.reloading) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    if (!this.hooks.muzzleClear(this, 'hit')) {
-      this.cooldownSec = standInConfig.roundIntervalSec; // its own cover is in the way: keep aiming, try again (decision 239)
+    if (!this.lineClear('hit')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // its own cover (or a squadmate) is in the way: keep aiming, try again (decisions 239, 266)
       return;
     }
     if (!this.takeSlot()) {
@@ -1486,6 +1594,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, this.aimedShot(hitShare));
+    this.roundFired();
     this.roundsInBurst++;
     if (this.roundsInBurst >= this.values.burstRounds) {
       this.contacted = true; // a whole burst fired: the warning has been given
@@ -1522,6 +1631,7 @@ export class StandInEnemy implements Target {
   }
 
   private die(): void {
+    this.cancelReload();
     this.setState('falling');
     this.leaveCover();
     this.hooks.downed(this);
@@ -1547,6 +1657,10 @@ export class StandInEnemy implements Target {
     this.endSuppress();
     this.endThrow(false);
     this.grenadesLeft = Math.max(Math.round(this.values.grenades), 0);
+    this.roundsLeft = this.magazineRounds;
+    this.reloadLeftSec = 0;
+    this.needsReload = false;
+    this.friendBlockedSinceSec = null;
     this.pinnedByRook = false;
     this.contacted = false;
     this.recentHits.length = 0;

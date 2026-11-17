@@ -9,6 +9,8 @@ export const squadConfigDefaults = {
   slotRetrySec: 0.3,
   /** Dev testing aid: how many stand-ins are in the test room (1 to 4), from the next restart or Respawn. */
   standInCount: 4,
+  /** Playtests (4.16): 1 = the downed stay down and the whole squad comes back together, the respawn delay after the last one falls; 0 = each gets up alone (decision 201). */
+  respawnTogether: 1,
   // Flanking (4.7, decision 225)
   /** Rook "holds a spot" while he stays within this distance of where he settled; how long until a flank is per tier (aggression.ts). */
   holdRadiusM: 2.5,

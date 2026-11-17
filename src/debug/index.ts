@@ -464,7 +464,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
     enemyLines = activeStandIns.map(
       (s, i) =>
-        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}${s.reloading ? ', RELOADING' : ''}, mag ${s.rounds}/${s.magazineRounds}` +
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));

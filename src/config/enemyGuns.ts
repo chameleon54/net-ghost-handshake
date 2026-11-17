@@ -2,17 +2,17 @@ import type { GunId } from '../weapons/events';
 import type { Role } from './roles';
 
 // Enemy guns (milestone 4.12, decision 249; enemies.md "Weapons and damage"). Damage comes from the gun, not the role, and
-// the gun is visible so the player can read the threat. The gun decides only the damage for now: rounds per burst and
-// their timing stay on the role (roles.ts). Starting values.
+// the gun is visible so the player can read the threat. The gun decides the damage, and since 4.16 (decision 266) its
+// magazine and reload time; rounds per burst and their timing stay on the role (roles.ts). Starting values.
 export type EnemyGun = 'pistol' | 'rifle' | 'lmg';
 
 export const enemyGunConfigDefaults = {
   /** Flankers: the least lethal gun in the game, the same class as Rook's P9. */
-  pistol: { damagePerHit: 8 },
+  pistol: { damagePerHit: 8, magazineRounds: 15, reloadSec: 2 },
   /** Troopers and the squad leader: the same class as Rook's M4-A. */
-  rifle: { damagePerHit: 15 },
+  rifle: { damagePerHit: 15, magazineRounds: 30, reloadSec: 2.5 },
   /** Heavies: the light machine gun, lower per hit but far more shots. */
-  lmg: { damagePerHit: 12 },
+  lmg: { damagePerHit: 12, magazineRounds: 100, reloadSec: 5 },
 } as const;
 
 /** One gun's values. */

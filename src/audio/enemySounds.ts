@@ -30,6 +30,10 @@ export class EnemySounds {
       const rate = (heavy ? c.heavyStepPitch : 1) * (1 + footPitch + this.jitter());
       this.player.play(stepSounds[surface], { position, volume, rate, note: `enemy ${role}, ${gait}, ${surface}` });
     });
+    // A reload (4.16): Rook's magazine sounds from where the enemy is, so a reload nearby can be heard (and pushed).
+    events.on('enemy:reload', ({ phase, position, gun }) =>
+      this.player.play(phase === 'start' ? 'mag-out' : 'mag-in', { position, volume: enemySoundConfig.reloadVolume, rate: 1 + this.jitter(), note: `enemy ${gun} reload ${phase}` }),
+    );
     events.on('enemy:fired', ({ position, gun }) =>
       this.player.play(gunSounds[gun], { position, volume: gunVolume(gun), rate: 1 + this.jitter(), note: `enemy ${gun} shot` }),
     );
