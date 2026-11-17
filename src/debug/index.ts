@@ -26,6 +26,10 @@ import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { ReadoutBox } from './readoutBox';
 import { formatPerf, PerfMeter } from './perf';
+import { debugLogStartHeader, debugLogUrl, EventLog } from './eventLog';
+import { LogWatch } from './logWatch';
+import type { EventBus } from '../core/events';
+import type { WeaponEvents } from '../weapons/events';
 import type { LevelCollision } from '../level/collision';
 import type { Input } from '../core/input';
 import type { Player } from '../player/player';
@@ -91,9 +95,14 @@ interface Parts {
   /** For the performance readout (4.13b): draw calls and triangles, and the rays to count. */
   renderer: THREE.WebGLRenderer;
   collision: LevelCollision;
+  /** The game's event bus, for the debug log (decision 260). */
+  events: EventBus<WeaponEvents>;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
+const hiddenGapMs = 1000; // a gap this long is the tab being hidden, not a slow frame
+const logFlushEverySec = 1;
+const markKey = 'F8';
 const readoutIntervalSec = 0.1;
 const markerColour = 0x33ff66;
 const eyeDotColour = 0xff4444;
@@ -101,7 +110,7 @@ const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
   const perf = new PerfMeter();
@@ -122,6 +131,17 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     return findPath(...args);
   };
   renderer.info.autoReset = false; // the frame draws twice (world, then gun): count both, reset once per frame
+  // The debug log (decision 260): lines go to the dev server once a second, which writes debug-log.txt (vite.config.ts).
+  const log = new EventLog();
+  const logWatch = new LogWatch({ log, events, standIns, activeStandIns, squad, flankFailure });
+  let logFlushSec = 0;
+  let logSendFailed = false;
+  const sendLog = (text: string, fresh: boolean) => {
+    fetch(debugLogUrl, { method: 'POST', body: text, headers: fresh ? { [debugLogStartHeader]: '1' } : {} }).catch((error) => {
+      if (!logSendFailed) console.warn('The debug log could not reach the dev server; debug-log.txt is not being written.', error);
+      logSendFailed = true;
+    });
+  };
   let lastFrameMs = performance.now();
   let readoutTimerSec = 0;
 
@@ -163,6 +183,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   const readoutBox = new ReadoutBox();
   gui.add(readoutBox, 'shown').name('Show readouts (top left)');
   gui.add(perfState, 'on').name('Show performance (4.13b)');
+  gui.add({ mark: () => log.mark() }, 'mark').name(`Debug log: add a mark (${markKey})`);
+  gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
 
   const actions = {
     resetAll: () => {
@@ -290,7 +312,11 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   standInPanel.add(freeze, 'frozen').name('Freeze all (stand still, hold fire)').onChange((on: boolean) => {
     for (const standIn of standIns) standIn.frozen = on;
   });
-  standInPanel.add({ respawn: respawnSquad }, 'respawn').name('Respawn all (idle, at their spots)');
+  const respawn = () => {
+    respawnSquad();
+    logWatch.reset(activeStandIns.length);
+  };
+  standInPanel.add({ respawn }, 'respawn').name('Respawn all (idle, at their spots)');
   const navOverlay = new NavOverlay(scene, navigation, activeStandIns);
   standInPanel.add(navOverlay, 'meshShown').name('Show navigation mesh');
   standInPanel.add(navOverlay, 'pathShown').name('Show stand-in routes');
@@ -527,8 +553,19 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     perf,
     beforeRender(camera) {
       const now = performance.now();
-      perf.frame(now - lastFrameMs, renderer.info.render.calls, renderer.info.render.triangles);
+      const frameMs = now - lastFrameMs;
+      if (frameMs < hiddenGapMs) {
+        perf.frame(frameMs, renderer.info.render.calls, renderer.info.render.triangles);
+        log.slowFrame(frameMs, perf.lastFrame);
+      }
       renderer.info.reset();
+      logWatch.update();
+      if (input.consumePress(markKey)) log.mark();
+      logFlushSec += frameMs / 1000;
+      if (logFlushSec >= logFlushEverySec) {
+        logFlushSec = 0;
+        log.flush(sendLog);
+      }
       const dtSec = Math.min((now - lastFrameMs) / 1000, maxFrameSec);
       lastFrameMs = now;
 

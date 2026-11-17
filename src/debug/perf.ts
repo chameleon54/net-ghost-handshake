@@ -3,6 +3,8 @@
 // Rays and routes are counted, not timed: the browser's clock is too coarse (about 0.1 ms) to time one ray, so their
 // cost per call comes from `npm run bench`, and count x cost gives their share.
 
+import type { FrameCost } from './eventLog';
+
 export interface PerfReport {
   fps: number;
   frameMsAvg: number;
@@ -25,6 +27,8 @@ const msPerSec = 1000;
 export class PerfMeter {
   /** The last full second, or null until one has passed. */
   report: PerfReport | null = null;
+  /** What the frame just closed by `frame()` cost (for the debug log's slow-frame lines). Reused. */
+  readonly lastFrame: FrameCost = { aiMs: 0, rays: 0, routes: 0 };
 
   private elapsedMs = 0;
   private frames = 0;
@@ -35,6 +39,8 @@ export class PerfMeter {
   private renderMsSum = 0;
   private rays = 0;
   private routes = 0;
+  private raysThisFrame = 0;
+  private routesThisFrame = 0;
 
   /** The AI's time in one update step (a frame can hold none, one or several). */
   addAi(ms: number): void {
@@ -48,10 +54,12 @@ export class PerfMeter {
 
   countRay(): void {
     this.rays++;
+    this.raysThisFrame++;
   }
 
   countRoute(): void {
     this.routes++;
+    this.routesThisFrame++;
   }
 
   /**
@@ -63,7 +71,12 @@ export class PerfMeter {
     this.elapsedMs += frameMs;
     this.frameMsWorst = Math.max(this.frameMsWorst, frameMs);
     this.aiMsWorst = Math.max(this.aiMsWorst, this.aiMsThisFrame);
+    this.lastFrame.aiMs = this.aiMsThisFrame;
+    this.lastFrame.rays = this.raysThisFrame;
+    this.lastFrame.routes = this.routesThisFrame;
     this.aiMsThisFrame = 0;
+    this.raysThisFrame = 0;
+    this.routesThisFrame = 0;
     if (this.elapsedMs < windowSec * msPerSec) return;
 
     const seconds = this.elapsedMs / msPerSec;
