@@ -4,6 +4,11 @@ import { generateSoloNavMesh } from 'recast-navigation/generators';
 import { navigationConfig } from '../config/navigation';
 
 /** Metres to whole grid cells, rounding up so the margin is never smaller than asked. */
+/** A path that ends this close to its goal is good enough: the other height is not tried. */
+const nearEnoughM = 0.5;
+/** Recast puts the mesh one cell height above the real floor; heights going in and out of this class are real floor heights. */
+const meshLiftM = navigationConfig.cellHeightM;
+
 const cells = (metres: number, cellM: number): number => Math.ceil(metres / cellM);
 
 // The navigation mesh (architecture.md, "Navigation"): the floor an enemy can walk on, kept clear of walls and props by its
@@ -55,20 +60,35 @@ export class Navigation {
    */
   findPath(from: Vector3, to: Vector3, out: Vector3[]): boolean {
     out.length = 0;
-    const start = this.onFloor(from);
-    const end = start && this.onFloor(to);
-    if (!this.query || !start || !end) return false;
-    const { success, path } = this.query.computePath(start, end, { halfExtents: this.searchBox });
-    if (!success) return false;
-    for (const point of path) out.push(new Vector3(point.x, point.y, point.z)); // a few times a second, so a little garbage is fine
-    return out.length > 0;
+    if (!this.query) return false;
+    // The start is on the floor it stands on. The end is tried at its own height first (a stair, the upper level), then at
+    // floor level (Rook on a crate: his own height is an unreachable patch). The path that ends nearer the end wins.
+    let best: { x: number; y: number; z: number }[] | null = null;
+    let bestM = Infinity;
+    for (const toY of to.y === 0 ? [0] : [to.y, 0]) {
+      const start = this.onFloor(from, from.y) ?? this.onFloor(from, 0);
+      const end = this.onFloor(to, toY);
+      if (!start || !end) continue;
+      const { success, path } = this.query.computePath(start, end, { halfExtents: this.searchBox });
+      if (!success || path.length === 0) continue;
+      const last = path[path.length - 1];
+      const endM = Math.hypot(last.x - to.x, last.z - to.z) + Math.abs(last.y - meshLiftM - to.y);
+      if (endM < bestM) {
+        best = path;
+        bestM = endM;
+      }
+      if (endM < nearEnoughM) break;
+    }
+    if (!best) return false;
+    for (const point of best) out.push(new Vector3(point.x, point.y - meshLiftM, point.z)); // a few times a second, so a little garbage is fine
+    return true;
   }
 
   /** The walkable floor nearest to `position`, written into `out`. Returns false if there is none within reach. */
   closestPoint(position: Vector3, out: Vector3): boolean {
-    const point = this.onFloor(position);
+    const point = this.onFloor(position, position.y) ?? this.onFloor(position, 0);
     if (!point) return false;
-    out.set(point.x, point.y, point.z);
+    out.set(point.x, point.y - meshLiftM, point.z);
     return true;
   }
 
@@ -77,15 +97,11 @@ export class Navigation {
     return this.navMesh ? getNavMeshPositionsAndIndices(this.navMesh) : [[], []];
   }
 
-  /**
-   * The nearest point of the mesh at floor level below or beside `position`.
-   * shortcut: the floor is at height 0, so a point on a crate or platform looks for the floor under it rather than the
-   * crate's own top (which is a separate patch nobody can reach). Upgrade when a level has walkways or stairs.
-   */
-  private onFloor(position: Vector3): { x: number; y: number; z: number } | null {
+  /** The nearest point of the mesh around `position`'s x and z at height `y`. Null if there is none within reach. */
+  private onFloor(position: Vector3, y: number): { x: number; y: number; z: number } | null {
     if (!this.query) return null;
     this.floorPoint.x = position.x;
-    this.floorPoint.y = 0;
+    this.floorPoint.y = y + meshLiftM;
     this.floorPoint.z = position.z;
     const { success, polyRef, point } = this.query.findClosestPoint(this.floorPoint, { halfExtents: this.searchBox });
     // Detour reports success with polygon 0 when nothing is within reach. The point is a new object each call.

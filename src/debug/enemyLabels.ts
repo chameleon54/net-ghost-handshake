@@ -59,7 +59,7 @@ export class EnemyLabels {
       const standIn = this.standIns[i];
       sprite.visible = this.shown && standIn !== undefined;
       if (!sprite.visible) return;
-      sprite.position.set(standIn.xM, standIn.heightM + aboveHeadM, standIn.zM);
+      sprite.position.set(standIn.xM, standIn.yM + standIn.heightM + aboveHeadM, standIn.zM);
       const moving = standIn.state === 'flank' || standIn.state === 'advance';
       const colour = standIn.state === 'hunt' ? huntingColour : moving ? flankingColour : standIn.isSuppressing ? suppressingColour : this.holdsSlot(standIn) ? firingColour : idleColour;
       sprite.material.color.setHex(colour);

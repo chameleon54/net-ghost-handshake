@@ -50,6 +50,8 @@ export interface StandInHooks {
   peekTell(enemy: StandInEnemy): void;
   /** The best free cover spot that hides it from Rook, claimed for it (its old one let go), or null if none hides it. */
   pickCover(enemy: StandInEnemy): CoverPoint | null;
+  /** True if it stands on Rook's floor (the storey push, decision 277); left out, true. */
+  onRookFloor?(enemy: StandInEnemy): boolean;
   /** True if this spot still hides a body from Rook where he is now. */
   coverHides(point: CoverPoint): boolean;
   /** Lets go of the spot it holds. */
@@ -162,13 +164,13 @@ export function peekEyesAt(point: CoverPoint, way: number, out: Vector3): Vector
   const eyeM = low && way !== 0 ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
   const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
   const rightZ = -Math.sin(point.facingYawRad);
-  return out.set(point.xM + way * rightX * stepM, eyeM, point.zM + way * rightZ * stepM);
+  return out.set(point.xM + way * rightX * stepM, (point.yM ?? 0) + eyeM, point.zM + way * rightZ * stepM);
 }
 
 /** Where its gun is (over its feet, at gun height) when fully out of a peek from `point` going `way`. */
 export function peekGunAt(point: CoverPoint, way: number, out: Vector3): Vector3 {
   peekEyesAt(point, way, out);
-  out.y = point.height === 'low' && way !== 0 ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM;
+  out.y = (point.yM ?? 0) + (point.height === 'low' && way !== 0 ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM);
   return out;
 }
 
@@ -260,6 +262,9 @@ export class StandInEnemy implements Target {
    * until Rook hurts it, it has not seen him for a moment, or the time is up. How long it has been out, and unseeing.
    */
   private pressing = false;
+  /** On its way up (or down) to Rook's floor with no cover, sent by the squad's storey push (decision 277). */
+  private climbing = false;
+  private climbSec = 0;
   private pressSec = 0;
   private pressUnseenSec = 0;
   /** Suppressing (4.9): pinning the edge of Rook's cover for a squadmate, and which side of it (1 or -1). */
@@ -385,12 +390,28 @@ export class StandInEnemy implements Target {
     return this.throwPlan !== null;
   }
 
+  get isClimbing(): boolean {
+    return this.climbing;
+  }
+
+  /** True if the squad could send it up now: not the heavy, not wounded, and in cover or walking (no throw, no covering fire). */
+  get canClimb(): boolean {
+    return (
+      this.awake && !this.frozen && !this.wounded && !this.grenadeSeen && !this.inBurst && !this.suppressing && !this.pressing && !this.climbing &&
+      this.role !== 'heavy' && (this.state === 'cover' || this.state === 'approach' || this.state === 'shoot')
+    );
+  }
+
   get xM(): number {
     return this.feet.x;
   }
 
   get zM(): number {
     return this.feet.z;
+  }
+
+  get yM(): number {
+    return this.feet.y;
   }
 
   get heightM(): number {
@@ -469,12 +490,12 @@ export class StandInEnemy implements Target {
 
   /**
    * A noise Rook caused: if it carries to its ears, it wakes up if it was idle. A noise made where he is (a shot, a step)
-   * also tells it where he was; one made where his bullet or grenade landed does not (decision 219).
+   * also tells it where he was (`rookFeetYM`: the floor he is on); one made where his bullet or grenade landed does not (decision 219).
    */
-  hear(noise: Noise): void {
+  hear(noise: Noise, rookFeetYM = 0): void {
     if (!this.canHear(noise)) return;
     if (!awayFromRook.has(noise.kind)) {
-      this.lastKnown.set(noise.position.x, 0, noise.position.z);
+      this.lastKnown.set(noise.position.x, rookFeetYM, noise.position.z); // the noise is at his eyes, so his floor comes from the caller
       this.knowsWhere = true;
       this.lastKnownAgeSec = 0;
     }
@@ -484,7 +505,7 @@ export class StandInEnemy implements Target {
   /** True if this noise carries to its ears: within its range, or half of it through a wall or prop (4.10). */
   canHear(noise: Noise): boolean {
     if (this.state === 'falling' || this.state === 'down') return false;
-    this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
+    this.ears.set(this.feet.x, this.feet.y + this.eyeHeightNowM, this.feet.z);
     return hearsNoise(noise, this.ears, () => this.hooks.noiseBlocked(noise.position, this.ears));
   }
 
@@ -647,7 +668,7 @@ export class StandInEnemy implements Target {
     // Seeing him tells it where he is. Woken by a hit, or just up again, it starts from where he is too.
     this.lastKnownAgeSec += dtSec;
     if (this.seesPlayer || !this.knowsWhere) {
-      this.lastKnown.set(player.x, 0, player.z);
+      this.lastKnown.set(player.x, player.y, player.z);
       this.knowsWhere = true;
       this.lastKnownAgeSec = 0;
     }
@@ -708,7 +729,7 @@ export class StandInEnemy implements Target {
     }
 
     // No cover hides it: the 4.1 behaviour. Head for Rook, and stop to fire once it sees him within range.
-    if (this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
+    if (!this.climbing && this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
       this.setState('shoot');
       this.engage(dtSec, dx, dz);
       return;
@@ -723,6 +744,17 @@ export class StandInEnemy implements Target {
    */
   private checkCover(dtSec: number): void {
     if (this.state === 'fight' || this.state === 'retreat' || this.state === 'flee') return; // those pick their own next spot
+    if (this.climbing) {
+      // On its way to Rook's floor: no cover on the way (it would pick the floor it is leaving). Done once there, or given up.
+      this.climbSec += dtSec;
+      if (this.hooks.onRookFloor?.(this) !== false || this.climbSec > squadConfig.climbGiveUpSec) {
+        this.climbing = false;
+        this.coverTimerSec = 0;
+      } else {
+        if (this.coverPoint) this.leaveCover();
+        return;
+      }
+    }
     this.coverTimerSec -= dtSec;
     if (this.coverTimerSec > 0) return;
     this.coverTimerSec = standInConfig.coverCheckIntervalSec;
@@ -749,7 +781,7 @@ export class StandInEnemy implements Target {
     }
     this.coverPoint = next;
     this.spotHides = next !== null; // a picked spot hides it (that is how it was picked)
-    if (next) this.coverSpot.set(next.xM, 0, next.zM);
+    if (next) this.coverSpot.set(next.xM, next.yM ?? 0, next.zM);
     this.repathTimerSec = 0; // a fresh route to the new spot
   }
 
@@ -849,6 +881,22 @@ export class StandInEnemy implements Target {
   }
 
   /**
+   * The squad's storey push (decision 277): Rook fights from another floor, so it leaves its cover and walks to him (no cover
+   * on the way, no stopping to shoot from the wrong floor) until it is on his floor; then it picks cover there, or fights.
+   */
+  beginClimb(): void {
+    this.climbing = true;
+    this.climbSec = 0;
+    this.leaveCover();
+    this.resetPeek();
+    this.dropHeldPush();
+    this.crouched = false;
+    this.engaged = false;
+    this.setState('approach');
+    this.repathTimerSec = 0;
+  }
+
+  /**
    * The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). `cover` says who covers it: if
    * that fire stops on the way, it holds at near cover and asks again (4.17); null for a move nobody covers.
    */
@@ -872,7 +920,7 @@ export class StandInEnemy implements Target {
    */
   shareLastKnown(spot: Vector3, ageSec: number): void {
     if (this.knowsWhere && this.lastKnownAgeSec <= ageSec) return;
-    this.lastKnown.set(spot.x, 0, spot.z);
+    this.lastKnown.set(spot.x, spot.y, spot.z);
     this.knowsWhere = true;
     this.lastKnownAgeSec = ageSec;
   }
@@ -1017,12 +1065,13 @@ export class StandInEnemy implements Target {
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
   private startFlee(): void {
+    this.climbing = false;
     this.grenadeSeen = false;
     this.hooks.grenadeSpotted(this);
     const point = this.hooks.planFlee(this, this.grenadeAt, this.grenadeDangerM, this.fleeSpot);
     this.coverPoint = point;
     this.spotHides = false; // a flee spot may not hide it; it checks once it is there
-    if (point) this.coverSpot.set(point.xM, 0, point.zM);
+    if (point) this.coverSpot.set(point.xM, point.yM ?? 0, point.zM);
     this.crouched = false;
     this.engaged = false;
     this.cancelReload(); // running for its life: the reload starts over later (4.16)
@@ -1603,8 +1652,8 @@ export class StandInEnemy implements Target {
       if (faceRoute) this.turnToward(this.moveX, this.moveZ, dtSec);
     }
     this.hooks.pushOut(this.feet); // a safety net: the route already keeps clear of walls
-    this.feet.y = 0;
-    const toGoalM = Math.hypot(destination.x - this.feet.x, destination.z - this.feet.z);
+    this.feet.y = this.routeHeightAt(this.feet);
+    const toGoalM = this.routeLeftM(destination);
     if (toGoalM < this.walkClosestM - progressStepM) {
       this.walkClosestM = toGoalM;
       this.walkStuckForSec = 0;
@@ -1612,6 +1661,40 @@ export class StandInEnemy implements Target {
       this.walkStuckForSec += dtSec;
     }
     return this.routeFound && this.walkStuckForSec < standInConfig.walkStuckSec;
+  }
+
+  /** How far is left to walk: along the route (a stair leads away from the goal first), or in a straight line if there is no route. */
+  private routeLeftM(destination: Vector3): number {
+    if (this.path.length === 0) return Math.hypot(destination.x - this.feet.x, destination.z - this.feet.z);
+    let leftM = 0;
+    let fromX = this.feet.x;
+    let fromZ = this.feet.z;
+    for (let i = Math.min(this.pathIndex, this.path.length - 1); i < this.path.length; i++) {
+      leftM += Math.hypot(this.path[i].x - fromX, this.path[i].z - fromZ);
+      fromX = this.path[i].x;
+      fromZ = this.path[i].z;
+    }
+    return leftM;
+  }
+
+  /** The route's height under `at` (a stair or ramp goes up): from the nearest of the few segments around the carrot; its own height if no route. */
+  private routeHeightAt(at: Vector3): number {
+    let bestM = Infinity;
+    let y = at.y;
+    for (let i = Math.max(1, this.pathIndex - 2); i <= Math.min(this.pathIndex, this.path.length - 1); i++) {
+      const a = this.path[i - 1];
+      const b = this.path[i];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const lenSq = dx * dx + dz * dz;
+      const t = lenSq > 1e-9 ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.z - a.z) * dz) / lenSq)) : 0;
+      const m = Math.hypot(a.x + dx * t - at.x, a.z + dz * t - at.z);
+      if (m < bestM) {
+        bestM = m;
+        y = a.y + (b.y - a.y) * t;
+      }
+    }
+    return y;
   }
 
   /** Moves the carrot on along the route until it is `lookaheadM` from its feet, or at the route's end. It never goes back. */
@@ -1727,6 +1810,7 @@ export class StandInEnemy implements Target {
   }
 
   private wake(): void {
+    this.climbing = false;
     this.setState('approach');
     this.sightTimerSec = 0; // look straight away
     this.coverTimerSec = 0; // and pick cover straight away
@@ -1735,6 +1819,7 @@ export class StandInEnemy implements Target {
   }
 
   private die(): void {
+    this.climbing = false;
     this.cancelReload();
     this.setState('falling');
     this.leaveCover();

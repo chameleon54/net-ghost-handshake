@@ -36,7 +36,9 @@ import { describeFlankRejects, StandInWorld } from './enemies/standInWorld';
 import type { Target } from './enemies/target';
 import { squadConfig } from './config/squad';
 import { standInConfig } from './config/standInEnemy';
+import { dummyConfig } from './config/dummy';
 import { keepApart } from './enemies/bodies';
+import { StoreyPush } from './squad/storeyPush';
 import { SquadCoordinator, type PushKind } from './squad/squadCoordinator';
 import { downCaller, pushCaller, sideWord } from './squad/callouts';
 import { EnemySteps } from './enemies/enemySteps';
@@ -115,9 +117,11 @@ try {
 // Cover spots generated from the level's props, with the level file's hand fixes (decision 236; 5.2), keeping only those
 // an enemy can stand on.
 const spotOnMesh = new THREE.Vector3();
+/** A spot counts as on the mesh if the mesh's floor there is within this far of its own height (the mesh floor sits a cell above 0). */
+const onMeshUpM = 0.5;
 const levelCoverPoints = levelCover(levelData).filter((point) => {
-  const feet = new THREE.Vector3(point.xM, 0, point.zM);
-  return navigation.closestPoint(feet, spotOnMesh) && Math.hypot(spotOnMesh.x - feet.x, spotOnMesh.z - feet.z) < 0.05;
+  const feet = new THREE.Vector3(point.xM, point.yM ?? 0, point.zM);
+  return navigation.closestPoint(feet, spotOnMesh) && Math.hypot(spotOnMesh.x - feet.x, spotOnMesh.z - feet.z) < 0.05 && Math.abs(spotOnMesh.y - feet.y) < onMeshUpM;
 });
 const coverPoints = new CoverPoints(levelCoverPoints, level.collision);
 const player = new Player(level.collision, spotRad(levelData.start));
@@ -183,7 +187,7 @@ const worldOf = new Map(standIns.map(({ enemy, world }) => [enemy, world]));
 /** A callout hook (4.14, dialogue.md): sent only when the AI really does the thing; phase 6 voices it. */
 const calloutAt = new THREE.Vector3();
 function callout(kind: CalloutKind, enemy: StandInEnemy, side?: 'left' | 'right'): void {
-  calloutAt.set(enemy.xM, enemy.heightM, enemy.zM);
+  calloutAt.set(enemy.xM, enemy.yM + enemy.heightM, enemy.zM);
   weaponEvents.emit('enemy:callout', { kind, speaker: enemy, role: enemy.role, position: calloutAt, side });
 }
 /** Dev readout: why the last flank attempt found nothing, or null. */
@@ -317,6 +321,8 @@ weaponEvents.on('shot:landed', ({ shooter, muzzle, end }) => {
   if (shooter !== 'player') return;
   for (const enemy of activeEnemies) if (worldOf.get(enemy)?.nearMiss(enemy, muzzle, end) && enemy.pinDown()) callout('suppressed', enemy);
 });
+/** The storey push (decision 277): sends a climber when Rook fights from another floor and the squad only waits below. */
+const storeyPush = new StoreyPush();
 /** The stand-ins in the room now (the first few of `standIns`); changed in place by `placeSquad`. */
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
@@ -328,7 +334,7 @@ const spacedMoved: typeof spacedBodies = [];
 const spacedNow: typeof spacedBodies = [];
 /** Playtests (4.16): how long every stand-in in the room has been down. */
 let allDownSec = 0;
-weaponEvents.on('noise:made', (noise) => activeEnemies.forEach((enemy) => enemy.hear(noise)));
+weaponEvents.on('noise:made', (noise) => activeEnemies.forEach((enemy) => enemy.hear(noise, player.position.y)));
 // Everything the player's bullets, knife and grenades can hurt. Filled by `placeSquad`, which changes it in place.
 const targets: Target[] = [];
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
@@ -386,6 +392,7 @@ function placeSquad(): void {
   });
   activeEnemies.length = 0;
   activeEnemies.push(...activeStandIns.map((standIn) => standIn.enemy));
+  storeyPush.reset();
   targets.length = 0;
   targets.push(...dummies, ...activeEnemies);
   blastTargets.length = 0;
@@ -639,6 +646,18 @@ const loop = new Loop(
       const rejects = first ? worldOf.get(first)?.flankRejects : undefined;
       flankFailure = job ? null : rejects ? describeFlankRejects(rejects) : 'nobody can be sent (wounded, busy, or heavies only)';
     }
+    // The storey push (decision 277): Rook fights from another floor and part of the squad only waits below: one of them,
+    // not the leader if another can, leaves cover and climbs to him, a squadmate pinning his cover meanwhile.
+    const inTheFight = activeEnemies.filter((enemy) => enemy.awake && enemy.state !== 'down' && enemy.state !== 'falling');
+    const climber = storeyPush.update(stepSec, squadKnows ? player.position.y : null, inTheFight, squad.tier, squadConfig.sameFloorM, squadConfig.storeyPushGapSec, (enemy) => enemy.role !== 'leader');
+    if (climber) {
+      climber.beginClimb();
+      const climbCover = squad.assignCover(coverers(climber), (enemy) => enemy.role === 'heavy');
+      if (climbCover) {
+        climbCover.beginSuppress();
+        callout('suppress_start', climbCover);
+      }
+    }
     // Enemy grenades (4.12): when Rook has held one spot well past the flank, the nearest enemy with a grenade and a clear
     // lob throws it from a peek. One in the air at a time, and a wait between throws.
     if (squad.grenadeDue(grenades.enemyGrenadeLive)) {
@@ -691,7 +710,7 @@ const loop = new Loop(
       body.fixed = body.enemy.state === 'cover' || body.enemy.speedMps === 0;
       spacedNow.push(body);
     }
-    keepApart(spacedNow, 2 * standInConfig.capsuleRadiusM, spacedMoved);
+    keepApart(spacedNow, 2 * standInConfig.capsuleRadiusM, spacedMoved, dummyConfig.heightM);
     for (const { enemy } of spacedMoved) worldOf.get(enemy)?.pushOut(enemy.feet);
     enemySteps.update(stepSec, activeEnemies);
     // Playtests (4.16): the whole squad comes back together, the respawn delay after the last one is down.

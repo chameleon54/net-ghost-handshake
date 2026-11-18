@@ -86,6 +86,12 @@ export const squadConfigDefaults = {
   // The hunt (4.11, decision 235). When it starts and how many follow is per tier (aggression.ts).
   /** The hunt's leader goes to cover within this distance of where the squad last knew Rook was... */
   huntNearM: 6,
+  /** A flank, an advance or a hunt goes only to cover on Rook's floor: its height within this of his feet (the upper level is 4.5 m up), so the squad climbs the stairs to him instead of flanking on the wrong storey (5.3b). */
+  sameFloorM: 2,
+  /** The storey push (decision 277): a second climber is sent no sooner than this after the first... */
+  storeyPushGapSec: 6,
+  /** ...and a climb that has not reached Rook's floor after this long is given up (it picks cover again). */
+  climbGiveUpSec: 25,
   /** ...and looks from there this long; then, with no follower still walking, the hunt is over. */
   huntLookSec: 4,
   /** When nobody can lead a hunt (no reachable cover near that spot), it tries again after this long. */

@@ -13,15 +13,17 @@ export interface SpacedBody {
 /**
  * Pushes apart any two bodies whose centres are closer than `minGapM` (two body radii: they may touch, never overlap).
  * A moving one steps aside from a fixed one by the whole overlap; two moving ones share it; two fixed ones stay (a
- * moment's brush during a side peek). Writes the ones it moved into `moved` (cleared first). One pass per update.
+ * moment's brush during a side peek). Bodies on different floors (`bodyHeightM` or more apart in height) never touch: one on the
+ * stairs does not shove one standing beneath it. Writes the ones it moved into `moved` (cleared first). One pass per update.
  */
-export function keepApart<T extends SpacedBody>(bodies: readonly T[], minGapM: number, moved: T[]): void {
+export function keepApart<T extends SpacedBody>(bodies: readonly T[], minGapM: number, moved: T[], bodyHeightM = Infinity): void {
   moved.length = 0;
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i];
       const b = bodies[j];
       if (a.fixed && b.fixed) continue;
+      if (Math.abs(b.feet.y - a.feet.y) >= bodyHeightM) continue; // one above the other
       const dx = b.feet.x - a.feet.x;
       const dz = b.feet.z - a.feet.z;
       const apartM = Math.hypot(dx, dz);

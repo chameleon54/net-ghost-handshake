@@ -22,7 +22,7 @@ const trailPointCount = 64; // enough for the longest trail the panel allows at 
 export function dummyBlastTarget(dummy: Target, events: EventBus<WeaponEvents>): BlastTarget {
   return {
     // A crouched target's chest is lower, so cover it crouches behind also shields it from a blast.
-    chest: (out) => out.set(dummy.xM, Math.min(grenadeConfig.targetChestHeightM, dummy.heightM * grenadeConfig.targetChestShareOfHeight), dummy.zM),
+    chest: (out) => out.set(dummy.xM, (dummy.yM ?? 0) + Math.min(grenadeConfig.targetChestHeightM, dummy.heightM * grenadeConfig.targetChestShareOfHeight), dummy.zM),
     vulnerable: () => dummy.hittable,
     hurt: (damage, byPlayer) => {
       const killed = dummy.hit('body', damage);

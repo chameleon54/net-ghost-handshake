@@ -446,7 +446,7 @@ describe('SquadCoordinator: the hunt (4.11, decision 235)', () => {
     }, (member) => member === flanker);
     expect(lead?.member).toBe(flanker);
     expect(plannedWhileHunting).toBe(true);
-    expect(squad.huntSpot).toEqual(spot);
+    expect(squad.huntSpot).toEqual({ ...spot, y: 0 });
     expect(squad.huntDue).toBe(false);
 
     const none = new SquadCoordinator();

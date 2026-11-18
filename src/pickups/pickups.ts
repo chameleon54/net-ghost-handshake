@@ -9,6 +9,8 @@ export interface PickupItem {
   readonly kind: PickupKind;
   readonly xM: number;
   readonly zM: number;
+  /** The floor's height where it lies. */
+  readonly yM: number;
 }
 
 /** Takes an item for Rook: true if he could (a grenade only below his carry limit). */
@@ -25,7 +27,7 @@ export class Pickups {
     private readonly events: EventBus<WeaponEvents>,
     private readonly take: TakeItem,
   ) {
-    events.on('enemy:downed', ({ position, role, grenades }) => this.drop(position.x, position.z, role, grenades));
+    events.on('enemy:downed', ({ position, role, grenades }) => this.drop(position.x, position.z, role, grenades, position.y));
   }
 
   /** What lies on the floor now. */
@@ -34,18 +36,19 @@ export class Pickups {
   }
 
   /** A body at (x, z) drops its grenades and a magazine, side by side. */
-  drop(xM: number, zM: number, role: Role, grenades: number): void {
+  drop(xM: number, zM: number, role: Role, grenades: number, yM = 0): void {
     const spreadM = pickupConfig.dropSpreadM;
-    for (let i = 0; i < grenades; i++) this.lying.push({ kind: 'grenade', xM: xM + spreadM * (i + 1), zM });
+    for (let i = 0; i < grenades; i++) this.lying.push({ kind: 'grenade', xM: xM + spreadM * (i + 1), zM, yM });
     const magazine = magazineFits[gunOfRole[role]];
-    if (magazine) this.lying.push({ kind: magazine, xM: xM - spreadM, zM });
+    if (magazine) this.lying.push({ kind: magazine, xM: xM - spreadM, zM, yM });
   }
 
   /** Once per game update: Rook takes every item within reach of his feet that he can carry. */
-  update(feet: { readonly x: number; readonly z: number }): void {
+  update(feet: { readonly x: number; readonly y?: number; readonly z: number }): void {
     for (let i = this.lying.length - 1; i >= 0; i--) {
       const item = this.lying[i];
       if (Math.hypot(item.xM - feet.x, item.zM - feet.z) > pickupConfig.pickupRadiusM) continue;
+      if (Math.abs(item.yM - (feet.y ?? 0)) > pickupConfig.pickupReachUpM) continue; // not through the floor above or below
       if (!this.take(item.kind)) continue; // he cannot carry it: it stays where it is
       this.lying.splice(i, 1);
       this.events.emit('pickup:taken', { kind: item.kind });

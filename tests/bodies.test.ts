@@ -15,6 +15,19 @@ describe('keeping apart (4.16)', () => {
     expect(moved).toEqual([mover]);
   });
 
+  it('a body on the stairs does not shove one standing on the floor beneath it (5.3b)', () => {
+    const below = body(0, 0, true);
+    const above = body(0.2, 0, false);
+    above.feet.y = 3;
+    const moved: (typeof above)[] = [];
+    keepApart([below, above], 0.6, moved, 1.8);
+    expect(above.feet.x).toBe(0.2);
+    expect(moved).toEqual([]);
+    above.feet.y = 0.5; // on the same floor, a little higher (a step): still keeps apart
+    keepApart([below, above], 0.6, moved, 1.8);
+    expect(above.feet.x).toBeCloseTo(0.6, 9);
+  });
+
   it('two moving bodies share the overlap; two holding theirs stay; touching is fine', () => {
     const a = body(0, 0, false);
     const b = body(0.4, 0, false);

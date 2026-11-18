@@ -11,6 +11,8 @@ import { EventBus } from '../src/core/events';
 import { StandInEnemy, type StandInShot } from '../src/enemies/standInEnemy';
 import { StandInWorld } from '../src/enemies/standInWorld';
 import { SquadCoordinator } from '../src/squad/squadCoordinator';
+import { StoreyPush } from '../src/squad/storeyPush';
+import { aggressionConfig } from '../src/config/aggression';
 import { aggressionSetting } from '../src/config/aggression';
 import { loopConfig } from '../src/config/loop';
 import { standInConfig } from '../src/config/standInEnemy';
@@ -51,8 +53,8 @@ beforeAll(async () => {
   navigation = await Navigation.create(level.navigationGeometry);
   const onMesh = new Vector3();
   cover = levelCover(chamberLevel).filter((p) => {
-    const feet = new Vector3(p.xM, 0, p.zM);
-    return navigation.closestPoint(feet, onMesh) && Math.hypot(onMesh.x - feet.x, onMesh.z - feet.z) < 0.05;
+    const feet = new Vector3(p.xM, p.yM ?? 0, p.zM);
+    return navigation.closestPoint(feet, onMesh) && Math.hypot(onMesh.x - feet.x, onMesh.z - feet.z) < 0.05 && Math.abs(onMesh.y - feet.y) < 0.5;
   });
 });
 
@@ -71,18 +73,20 @@ describe('the central chamber (5.3)', () => {
     }
   });
 
-  it('the navigation mesh covers both stairs and the upper level (routes up there come with 5.3b)', () => {
-    // shortcut: Navigation's queries still snap to the floor (its onFloor), so this checks the mesh's triangles, not routes;
-    // 5.3b makes the queries work on every level and turns this into route checks.
-    const [positions] = navigation.triangles();
-    const covered = (x: number, y: number, z: number) => {
-      for (let i = 0; i < positions.length; i += 3) {
-        if (Math.abs(positions[i] - x) < 1.5 && Math.abs(positions[i + 1] - y) < 0.3 && Math.abs(positions[i + 2] - z) < 1.5) return true;
-      }
-      return false;
-    };
-    const places = { 'NW catwalk': [-8, upM, -11], core: [4, upM, -7.8], 'ring W': [-16.5, upM, 0], 'ring S': [0, upM, 13.5], 'ring E': [16.5, upM, -6], 'W stairs': [-14.25, 2.3, -5.5], 'S stairs': [8.5, 2.3, 11.25] } as const;
-    for (const [name, [x, y, z]] of Object.entries(places)) expect(covered(x, y, z), name).toBe(true);
+  it('routes from the floor up both stairs to the catwalk, the core and every side of the ring, and back down (5.3b)', () => {
+    const places = { 'NW catwalk': [-8, upM, -11], core: [4, upM, -7.8], 'ring W': [-16.5, upM, 0], 'ring S': [0, upM, 13.5], 'ring E': [16.5, upM, -6] } as const;
+    for (const [name, [x, y, z]] of Object.entries(places)) {
+      const up = new Vector3(x, y, z);
+      expect(reaches(alcoves.W, up, 1), `W alcove up to ${name}`).toBe(true);
+      expect(reaches(up, alcoves.S, 1), `${name} down to S alcove`).toBe(true);
+    }
+  });
+
+  it("a route over the floor is at floor height (not the mesh's lifted one), and up the stairs it rises to the catwalk", () => {
+    expect(navigation.findPath(alcoves.W, new Vector3(-1, 0, 6), route)).toBe(true);
+    for (const p of route) expect(Math.abs(p.y)).toBeLessThan(0.05);
+    expect(navigation.findPath(alcoves.W, new Vector3(-8, upM, -11), route)).toBe(true);
+    expect(Math.max(...route.map((p) => p.y))).toBeCloseTo(upM, 0);
   });
 
   it('no spot on the floor sees all four doors; the core cannot see the north door', () => {
@@ -103,9 +107,9 @@ describe('the central chamber (5.3)', () => {
     for (let x = -1; x <= 9; x += 1) for (let z = -11.5; z <= -7.5; z += 1) expect(clear(new Vector3(x, upM + 1.6, z), doorMouths.N)).toBe(false);
   });
 
-  it('has cover across the floor that enemies can reach', () => {
+  it('has cover on the floor and upstairs that enemies can reach', () => {
     expect(cover.length).toBeGreaterThanOrEqual(60);
-    const unreachable = cover.filter((p) => !reaches(alcoves.W, new Vector3(p.xM, 0, p.zM), standInConfig.coverArriveM));
+    const unreachable = cover.filter((p) => !reaches(alcoves.W, new Vector3(p.xM, p.yM ?? 0, p.zM), standInConfig.coverArriveM));
     expect(unreachable).toEqual([]);
   });
 });
@@ -175,6 +179,70 @@ describe('Rook in the chamber (5.3)', () => {
 });
 
 describe('a squad in the chamber (5.3)', () => {
+  it('an enemy waiting in cover below climbs to Rook on the ring after the push time, and stays up there (the storey push, decision 277)', () => {
+    aggressionSetting.current = 'assertive';
+    const at = new Vector3(-3, upM, 14.5); // the ring's south walkway: no cover up there
+    const rook = { position: at, eyeHeightNowM: 1.05, eyes: new Vector3(at.x, at.y + 1.05, at.z), forward: new Vector3(0, 0, -1), inView: () => true, exposure: 0.9, movingFast: false };
+    const points = new CoverPoints(cover, level.collision);
+    const squad = new SquadCoordinator();
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, points, rook, () => {}, () => [], Math.random, squad);
+    const enemy = new StandInEnemy(spotRad(chamberLevel.spawns[2]), world);
+    world.squadmates = [enemy];
+    const push = new StoreyPush();
+    const shot = { kind: 'rifle-shot' as const, position: rook.position, radiusM: 80 };
+    const stepSec = 1 / loopConfig.updateRateHz;
+    let sentAtSec = Infinity;
+    let upAtSec = Infinity;
+    for (let i = 0; i < 90 * loopConfig.updateRateHz; i++) {
+      const t = i * stepSec;
+      if (i % loopConfig.updateRateHz === 0) enemy.hear(shot, at.y);
+      squad.update(stepSec, rook.position, false);
+      const sent = push.update(stepSec, at.y, [enemy], aggressionConfig.assertive, 2, 6);
+      if (sent) {
+        sent.beginClimb();
+        sentAtSec = Math.min(sentAtSec, t);
+      }
+      enemy.update(stepSec, rook.position);
+      world.glimpse(enemy, stepSec);
+      if (enemy.feet.y > upM - 0.3) upAtSec = Math.min(upAtSec, t);
+    }
+    expect(sentAtSec).toBeGreaterThanOrEqual(aggressionConfig.assertive.storeyPushAfterSec);
+    expect(upAtSec).toBeLessThan(sentAtSec + 25);
+    expect(enemy.feet.y).toBeGreaterThan(upM - 0.3); // and it is still up there at the end: it did not pick cover back on the floor
+    expect(enemy.isClimbing).toBe(false);
+  });
+
+  it('an enemy sent to cover on the upper level climbs the west stairs and ends up near Rook on the catwalk (5.3b)', () => {
+    aggressionSetting.current = 'relentless';
+    const at = new Vector3(-8, upM, -11);
+    const rook = { position: at, eyeHeightNowM: 1.6, eyes: new Vector3(at.x, at.y + 1.6, at.z), forward: new Vector3(0, 0, 1), inView: () => false, exposure: 0.9, movingFast: false };
+    const points = new CoverPoints(cover, level.collision);
+    const squad = new SquadCoordinator();
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, points, rook, () => {}, () => [], Math.random, squad);
+    const enemy = new StandInEnemy(spotRad(chamberLevel.spawns[2]), world);
+    world.squadmates = [enemy];
+    const shot = { kind: 'rifle-shot' as const, position: rook.position, radiusM: 80 };
+    const stepSec = 1 / loopConfig.updateRateHz;
+    enemy.hear(shot, at.y);
+    const upstairs = cover.filter((p) => (p.yM ?? 0) > 0);
+    expect(upstairs.length).toBeGreaterThan(5);
+    const goal = upstairs.reduce((a, b) => (Math.hypot(a.xM - at.x, a.zM - at.z) < Math.hypot(b.xM - at.x, b.zM - at.z) ? a : b));
+    enemy.beginFlank(goal);
+    let highestM = 0;
+    let topAtSec = Infinity;
+    for (let i = 0; i < 60 * loopConfig.updateRateHz; i++) {
+      squad.update(stepSec, rook.position, false);
+      enemy.update(stepSec, rook.position);
+      world.glimpse(enemy, stepSec);
+      highestM = Math.max(highestM, enemy.feet.y);
+      if (highestM > upM - 0.3 && topAtSec === Infinity) topAtSec = i * stepSec;
+    }
+    expect(topAtSec).toBeLessThan(11); // at stair speed: the ramp must not hold it back (it took 12 s and more when it was pushed down the slope)
+    expect(highestM).toBeGreaterThan(upM - 0.3);
+    expect(enemy.feet.y).toBeGreaterThan(upM - 0.3); // and it stays up there
+    expect(Math.hypot(enemy.feet.x - at.x, enemy.feet.z - at.z)).toBeLessThan(8); // close to Rook on the catwalk
+  });
+
   it('four enemies from the alcoves wake, reach cover and fire at Rook standing at the start', () => {
     aggressionSetting.current = 'assertive';
     const start = spotRad(chamberLevel.start);

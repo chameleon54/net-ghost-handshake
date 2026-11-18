@@ -81,6 +81,7 @@ function lineTexture(text: string): { texture: THREE.CanvasTexture; aspect: numb
 interface Placed {
   readonly xM: number;
   readonly zM: number;
+  readonly yM?: number;
   readonly heightM: number;
 }
 
@@ -126,7 +127,7 @@ export class EnemySpeech {
         entry.text = text;
       }
       entry.sprite.visible = true;
-      entry.sprite.position.set(speaker.xM, speaker.heightM + aboveHeadM, speaker.zM);
+      entry.sprite.position.set(speaker.xM, (speaker.yM ?? 0) + speaker.heightM + aboveHeadM, speaker.zM);
     }
   }
 }

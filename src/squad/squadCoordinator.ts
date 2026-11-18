@@ -82,7 +82,7 @@ export class SquadCoordinator {
   private huntOn = false;
   private huntSpent = false;
   private careful = false;
-  private readonly lastSpot = { x: 0, z: 0 };
+  private readonly lastSpot = { x: 0, y: 0, z: 0 };
   private huntLeaderMember: Member | null = null;
   private leaderDone = false;
   private readonly huntFollowerMembers = new Set<Member>();
@@ -458,7 +458,7 @@ export class SquadCoordinator {
   }
 
   /** Where the squad last knew Rook was, as the hunt took it (his feet). */
-  get huntSpot(): { readonly x: number; readonly z: number } {
+  get huntSpot(): { readonly x: number; readonly y: number; readonly z: number } {
     return this.lastSpot;
   }
 
@@ -486,12 +486,13 @@ export class SquadCoordinator {
    * nothing starts and it tries again later; `huntFailure` says why.
    */
   beginHunt<M extends Member, P extends { readonly cost: number }>(
-    spot: { readonly x: number; readonly z: number },
+    spot: { readonly x: number; readonly y?: number; readonly z: number },
     candidates: readonly M[],
     plan: (member: M) => P | null,
     preferred: (member: M) => boolean,
   ): { member: M; plan: P } | null {
     this.lastSpot.x = spot.x;
+    this.lastSpot.y = spot.y ?? 0;
     this.lastSpot.z = spot.z;
     this.huntOn = true;
     const best = cheapestOf(candidates.filter(preferred), plan) ?? cheapestOf(candidates.filter((member) => !preferred(member)), plan);

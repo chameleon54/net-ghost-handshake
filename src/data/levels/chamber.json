@@ -165,7 +165,16 @@
     {"id":"ppe-cabinet","label":"PPE cabinet","kind":"prop","xM":-3.5,"zM":9.5,"widthM":1,"depthM":1,"heightM":2.2},
     {"id":"decon-bench","label":"decon bench","kind":"prop","xM":-8.5,"zM":9,"widthM":3,"depthM":1,"heightM":1},
     {"id":"gas-cylinder-store","label":"gas cylinder store","kind":"prop","xM":2.75,"zM":8.75,"widthM":1.5,"depthM":1.5,"heightM":1.5},
-    {"id":"parts-crate","label":"parts crate","kind":"prop","xM":5.5,"zM":6.5,"widthM":1,"depthM":1,"heightM":1}
+    {"id":"parts-crate","label":"parts crate","kind":"prop","xM":5.5,"zM":6.5,"widthM":1,"depthM":1,"heightM":1},
+    {"id":"ring-s-desk","label":"observation desk (ring S, cover)","kind":"prop","xM":-8,"zM":14.4,"widthM":2.4,"depthM":0.8,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-s-locker","label":"equipment locker (ring S, cover)","kind":"prop","xM":-0.5,"zM":14.4,"widthM":1,"depthM":0.8,"heightM":1.9,"yM":4.5,"surface":"metal"},
+    {"id":"ring-s-planter","label":"planter (ring S, cover)","kind":"prop","xM":6.5,"zM":14.4,"widthM":1.4,"depthM":0.8,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-w-desk","label":"observation desk (ring W, cover)","kind":"prop","xM":-17.4,"zM":-6,"widthM":0.8,"depthM":2.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-w-locker","label":"equipment locker (ring W, cover)","kind":"prop","xM":-17.4,"zM":1,"widthM":0.8,"depthM":1,"heightM":1.9,"yM":4.5,"surface":"metal"},
+    {"id":"ring-w-planter","label":"planter (ring W, cover)","kind":"prop","xM":-17.4,"zM":9,"widthM":0.8,"depthM":1.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-e-desk","label":"observation desk (ring E, cover)","kind":"prop","xM":17.4,"zM":-6,"widthM":0.8,"depthM":2.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-e-planter","label":"planter (ring E, cover)","kind":"prop","xM":17.4,"zM":7,"widthM":0.8,"depthM":1.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
+    {"id":"ring-e-locker-2","label":"equipment locker (ring E, cover)","kind":"prop","xM":15.7,"zM":0.5,"widthM":0.8,"depthM":1,"heightM":1.9,"yM":4.5,"surface":"metal"}
   ],
   "coverAdd": [],
   "coverRemove": [],

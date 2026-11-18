@@ -8,6 +8,8 @@ export interface Target {
   /** Where its feet are. */
   readonly xM: number;
   readonly zM: number;
+  /** The height of its feet (an enemy on the upper level); left out, the ground floor. */
+  readonly yM?: number;
   /** False once it is dying or down: it is out of the fight. */
   readonly hittable: boolean;
   /** How tall it is right now: 1.8 m standing, less when crouched (the head sits at the top). */

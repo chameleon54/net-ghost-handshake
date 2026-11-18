@@ -648,6 +648,7 @@ export const pickupFolder: Folder<PickupKey> = {
   title: 'Drops and pick-ups (4.12)',
   sliders: [
     { key: 'pickupRadiusM', label: 'Picked up within (m of your feet)', min: 0.2, max: 4, step: 0.1 },
+    { key: 'pickupReachUpM', label: 'Picked up within (m up or down)', min: 0.5, max: 5, step: 0.1 },
     { key: 'dropSpreadM', label: 'Drops lie apart (m)', min: 0, max: 1.5, step: 0.05 },
     { key: 'glowPulseSec', label: 'Glow pulses every (s)', min: 0.2, max: 5, step: 0.1 },
   ],
@@ -672,6 +673,9 @@ export const tierSliders: Slider<TierKey>[] = [
   { key: 'throwsGrenades', label: 'Grenades: throws at all (0 or 1)', min: 0, max: 1, step: 1 },
   { key: 'holdBeforeGrenadeSec', label: 'Grenades: after you hold a spot for (s)', min: 1, max: 60, step: 0.5 },
   { key: 'grenadeCooldownSec', label: 'Grenades: wait before the next (s)', min: 0, max: 120, step: 1 },
+  { key: 'storeyPush', label: 'Storeys: climbs to you at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'storeyPushAfterSec', label: 'Storeys: after you fight from another floor for (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'storeyPushMax', label: 'Storeys: climbing at once (at most)', min: 1, max: 8, step: 1 },
 ];
 
 export const squadFolder: Folder<SquadKey> = {
@@ -714,6 +718,9 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'repositionMaxExposedM', label: 'Reposition: uncovered, route in your view at most (m)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'storeyPushGapSec', label: 'Storeys: wait between climbers (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'climbGiveUpSec', label: 'Storeys: a climb is given up after (s)', min: 5, max: 90, step: 1 },
+    { key: 'sameFloorM', label: 'Flank, advance, hunt: cover within (m up or down) of his floor', min: 0.5, max: 6, step: 0.5 },
     { key: 'huntNearM', label: 'Hunt: leader goes to cover within (m) of your last spot', min: 1, max: 20, step: 0.5 },
     { key: 'huntLookSec', label: 'Hunt: leader looks from there for (s)', min: 0, max: 30, step: 0.5 },
     { key: 'huntRetrySec', label: 'Hunt: nobody can lead, try again after (s)', min: 0.2, max: 10, step: 0.1 },

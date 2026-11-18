@@ -10,6 +10,8 @@ import type { StandInState } from './standInEnemy';
 export interface Walker {
   readonly xM: number;
   readonly zM: number;
+  /** Its feet's height; left out, the ground floor. */
+  readonly yM?: number;
   readonly role: Role;
   readonly state: StandInState;
   readonly crouched: boolean;
@@ -60,8 +62,8 @@ export class EnemySteps {
       track.sinceStepM += movedM;
       if (track.sinceStepM < strideM) continue;
       track.sinceStepM %= strideM; // at most one step per update; the rest carries over
-      this.at.set(walker.xM, 0, walker.zM);
-      this.events.emit('enemy:step', { position: this.at, surface: this.surfaceAt(walker.xM, 0, walker.zM), foot: track.foot, role: walker.role, gait });
+      this.at.set(walker.xM, walker.yM ?? 0, walker.zM);
+      this.events.emit('enemy:step', { position: this.at, surface: this.surfaceAt(walker.xM, walker.yM ?? 0, walker.zM), foot: track.foot, role: walker.role, gait });
       track.foot = track.foot === 0 ? 1 : 0;
     }
   }

@@ -75,7 +75,7 @@ export class StandInView {
     this.body.position.y = bodyHeightM / 2;
     this.head.position.y = bodyHeightM + dummyConfig.headRadiusM;
     this.gun.position.y = enemy.muzzleHeightNowM;
-    this.group.position.set(enemy.xM, 0, enemy.zM);
+    this.group.position.set(enemy.xM, enemy.feet.y, enemy.zM);
     this.group.rotation.y = enemy.yawRad;
     // Tips over backwards when it falls, and a little during a flinch (decision 246).
     this.group.rotation.x = (Math.PI / 2) * enemy.fallProgress + standInConfig.flinchTiltDeg * (Math.PI / 180) * enemy.flinchShare;

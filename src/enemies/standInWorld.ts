@@ -5,6 +5,7 @@ import { enemyGrenadeConfig } from '../config/enemyGrenades';
 import { enemyGunConfig } from '../config/enemyGuns';
 import { exposureConfig } from '../config/exposure';
 import { grenadeConfig } from '../config/grenade';
+import { navigationConfig } from '../config/navigation';
 import { playerConfig } from '../config/player';
 import { rifleConfig } from '../config/rifle';
 import { standInConfig } from '../config/standInEnemy';
@@ -49,6 +50,8 @@ const routeSampleM = 1;
 const exposedCostPerM = 100;
 /** A grenade throw tries this many angles, from the highest to the lowest (enemyGrenades.ts). */
 const throwAngleTries = 3;
+const down = new Vector3(0, -1, 0);
+
 /** A lob is aimed this far above the floor at his feet (about the grenade's own size), so the floor itself is not "in the way". */
 const lobLandLiftM = 0.05;
 
@@ -69,6 +72,8 @@ export interface FlankRejects {
   routeSeen: number;
   /** On the first flanker's side of Rook (a pincer's second flank goes round the other side, 4.11). */
   sameSide: number;
+  /** On another floor than Rook's (5.3b): a flank is on his floor. */
+  otherFloor: number;
 }
 
 /** Why no flank spot was found, in a few words (dev readout): "20 in front of you, 3 not hidden by their cover, ...". */
@@ -82,6 +87,7 @@ export function describeFlankRejects(r: FlankRejects): string {
     [r.nearGrenade, 'near a grenade'],
     [r.taken, 'taken'],
     [r.sameSide, "on the first flanker's side"],
+    [r.otherFloor, "on another floor than you"],
   ];
   const listed = parts.filter(([count]) => count > 0).map(([count, why]) => `${count} ${why}`);
   return `no flank spot (${listed.length > 0 ? listed.join(', ') : 'no cover spots'})`;
@@ -108,6 +114,8 @@ export class StandInWorld implements StandInHooks {
   private readonly target = new Vector3();
   private readonly direction = new Vector3();
   private readonly muzzle = new Vector3();
+  private readonly groundProbe = new Vector3();
+  private readonly groundHit = createRayHit();
   private readonly aim = new Vector3();
   private readonly side = new Vector3();
   private readonly end = new Vector3();
@@ -127,7 +135,7 @@ export class StandInWorld implements StandInHooks {
   private readonly lobTarget = new Vector3();
   private readonly lobVelocity = new Vector3();
   /** What the last flank plan turned down (dev readout). */
-  readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0, sameSide: 0 };
+  readonly flankRejects: FlankRejects = { taken: 0, inFront: 0, notHidden: 0, peekBlocked: 0, nearGrenade: 0, noRoute: 0, routeSeen: 0, sameSide: 0, otherFloor: 0 };
   /** What it saw of Rook at the last exposure check, and when the next check is due. */
   private readonly seen: Glimpse = { visibleShare: 0, distanceM: 0, fromSide: false, inViewOfLastSpot: false };
   private glimpseTimerSec = 0;
@@ -203,14 +211,27 @@ export class StandInWorld implements StandInHooks {
   private get viewEyes(): Vector3 {
     if (!this.squad.searching) return this.quarry.eyes;
     const spot = this.squad.huntSpot;
-    // shortcut: the floor there is taken as height 0 (as `lastKnown` is); use the floor height once levels have storeys (phase 5).
-    return this.huntEyes.set(spot.x, playerConfig.eyeHeightM, spot.z);
+    return this.huntEyes.set(spot.x, spot.y + playerConfig.eyeHeightM, spot.z);
+  }
+
+  /** True if an enemy stands on Rook's floor (the storey push, decision 277). */
+  onRookFloor(enemy: StandInEnemy): boolean {
+    return this.floorMatches(enemy.feet.y);
+  }
+
+  private floorMatches(yM: number): boolean {
+    return Math.abs(yM - this.viewFeet.y) <= squadConfig.sameFloorM;
+  }
+
+  /** True if cover at `point` is on the floor he is on (or, while it hunts, was last known on): a flank or advance there is a real one. */
+  private onRooksFloor(point: CoverPoint): boolean {
+    return this.floorMatches(point.yM ?? 0);
   }
 
   /** His feet, as `viewEyes` judges: where he is, or while the squad searches, where it last knew he was. */
   private get viewFeet(): Vector3 {
     if (!this.squad.searching) return this.quarry.position;
-    return this.huntFeet.set(this.squad.huntSpot.x, 0, this.squad.huntSpot.z);
+    return this.huntFeet.set(this.squad.huntSpot.x, this.squad.huntSpot.y, this.squad.huntSpot.z);
   }
 
   /**
@@ -225,7 +246,7 @@ export class StandInWorld implements StandInHooks {
     for (const point of this.coverPoints.points) {
       const holder = this.coverPoints.claimedBy(point);
       if (holder && holder !== enemy) continue;
-      if (Math.hypot(point.xM - feet.x, point.zM - feet.z) > squadConfig.huntNearM) continue;
+      if (Math.hypot(point.xM - feet.x, point.zM - feet.z) > squadConfig.huntNearM || !this.onRooksFloor(point)) continue;
       if (!this.coverPoints.hides(point, eyes)) continue;
       if (!peekWays(point).some((way) => this.clearLine(peekEyesAt(point, way, this.peekEyes), eyes))) continue;
       const walk = this.walkM(enemy, point); // Infinity if unreachable or near a live grenade
@@ -317,7 +338,7 @@ export class StandInWorld implements StandInHooks {
         const holder = this.coverPoints.claimedBy(point);
         if (point === enemy.cover || (holder && holder !== enemy)) return -Infinity;
         const toM = Math.hypot(point.xM - position.x, point.zM - position.z);
-        if (toM > nowM - squadConfig.advanceMinGainM || toM < closestM) return -Infinity;
+        if (toM > nowM - squadConfig.advanceMinGainM || toM < closestM || !this.onRooksFloor(point)) return -Infinity;
         return -(this.minWalkM(onFloor, point) * coverConfig.walkPenaltyPerM);
       },
       (point, beats) => {
@@ -360,23 +381,23 @@ export class StandInWorld implements StandInHooks {
 
   /** True if a squadmate's body (one still standing) is in the line of the round it is about to fire (4.16, decision 266). */
   friendInLine(enemy: StandInEnemy, shot: StandInShot): boolean {
-    this.muzzle.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.muzzle.set(enemy.xM, enemy.feet.y + enemy.muzzleHeightNowM, enemy.zM);
     this.aimAt(enemy, shot, this.muzzle, this.aim);
     const reachM = standInConfig.capsuleRadiusM + standInConfig.friendLineMarginM;
     return this.squadmates.some(
-      (other) => other !== enemy && other.state !== 'down' && other.state !== 'falling' && bodyInLine(this.muzzle, this.aim, other.xM, other.zM, other.heightM, reachM),
+      (other) => other !== enemy && other.state !== 'down' && other.state !== 'falling' && bodyInLine(this.muzzle, this.aim, other.xM, other.zM, other.feet.y + other.heightM, reachM),
     );
   }
 
   reloadStarted(enemy: StandInEnemy): void {
-    this.target.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.muzzleHeightNowM, enemy.zM);
     this.events.emit('enemy:reload', { phase: 'start', position: this.target, gun: enemy.gun });
-    this.target.y = enemy.heightM;
+    this.target.y = enemy.feet.y + enemy.heightM;
     this.events.emit('enemy:callout', { kind: 'reloading', speaker: enemy, role: enemy.role, position: this.target }); // truthful: it really reloads
   }
 
   reloadDone(enemy: StandInEnemy): void {
-    this.target.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.muzzleHeightNowM, enemy.zM);
     this.events.emit('enemy:reload', { phase: 'end', position: this.target, gun: enemy.gun });
   }
 
@@ -410,7 +431,7 @@ export class StandInWorld implements StandInHooks {
   }
 
   pushHeld(enemy: StandInEnemy): void {
-    this.target.set(enemy.xM, enemy.heightM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.heightM, enemy.zM);
     this.events.emit('enemy:callout', { kind: 'need_cover', speaker: enemy, role: enemy.role, position: this.target }); // truthful: its cover really stopped
   }
 
@@ -420,7 +441,7 @@ export class StandInWorld implements StandInHooks {
    * into the cover counts too.
    */
   muzzleClear(enemy: StandInEnemy, shot: StandInShot): boolean {
-    this.muzzle.set(enemy.xM, enemy.muzzleHeightNowM, enemy.zM);
+    this.muzzle.set(enemy.xM, enemy.feet.y + enemy.muzzleHeightNowM, enemy.zM);
     this.aimAt(enemy, shot, this.muzzle, this.aim);
     const hitM = this.lineHitM(this.muzzle, this.aim);
     const nearGun = hitM <= standInConfig.muzzleForwardM + standInConfig.ownCoverM;
@@ -438,7 +459,7 @@ export class StandInWorld implements StandInHooks {
   private aimAt(enemy: StandInEnemy, shot: StandInShot, from: Vector3, out: Vector3): Vector3 {
     if (shot === 'suppress') return this.edgeAim(from, enemy.lastKnown, enemy.suppressSideSign, out);
     this.chest(out);
-    if (shot === 'cover' && enemy.knowsWhere) out.set(enemy.lastKnown.x, out.y - this.quarry.position.y, enemy.lastKnown.z);
+    if (shot === 'cover' && enemy.knowsWhere) out.set(enemy.lastKnown.x, out.y - this.quarry.position.y + enemy.lastKnown.y, enemy.lastKnown.z);
     return out;
   }
 
@@ -468,7 +489,7 @@ export class StandInWorld implements StandInHooks {
     this.bulletPath.set(muzzle, end);
     const pinM = squadConfig.pinnedByFireM;
     for (const heightM of [enemy.heightM - dummyConfig.headRadiusM, enemy.heightM * coverChestShare]) {
-      this.enemyPoint.set(enemy.xM, heightM, enemy.zM);
+      this.enemyPoint.set(enemy.xM, enemy.feet.y + heightM, enemy.zM);
       this.bulletPath.closestPointToPoint(this.enemyPoint, true, this.target);
       if (this.target.distanceTo(this.enemyPoint) <= pinM) return true;
     }
@@ -477,7 +498,7 @@ export class StandInWorld implements StandInHooks {
 
   downed(enemy: StandInEnemy): void {
     if (enemy.role === 'leader') this.squad.leaderDown();
-    this.target.set(enemy.xM, 0, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y, enemy.zM);
     this.events.emit('enemy:downed', { position: this.target, role: enemy.role, grenades: enemy.grenades }); // its drops (4.12)
   }
 
@@ -544,6 +565,10 @@ export class StandInWorld implements StandInHooks {
         rejects.taken++;
         continue;
       }
+      if (!this.onRooksFloor(point)) {
+        rejects.otherFloor++;
+        continue;
+      }
       const toX = point.xM - position.x;
       const toZ = point.zM - position.z;
       const toM = Math.hypot(toX, toZ);
@@ -563,7 +588,7 @@ export class StandInWorld implements StandInHooks {
         rejects.peekBlocked++;
         continue;
       }
-      this.spot.set(point.xM, 0, point.zM);
+      this.spot.set(point.xM, point.yM ?? 0, point.zM);
       if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) {
         rejects.nearGrenade++;
         continue;
@@ -616,7 +641,7 @@ export class StandInWorld implements StandInHooks {
 
   /** It sees Rook if either his head (lean included) or his chest is in clear view of its eyes. */
   canSeePlayer(enemy: StandInEnemy): boolean {
-    this.enemyEyes.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    this.enemyEyes.set(enemy.xM, enemy.feet.y + enemy.eyeHeightNowM, enemy.zM);
     return this.seesPlayerFrom(this.enemyEyes);
   }
 
@@ -632,9 +657,9 @@ export class StandInWorld implements StandInHooks {
 
   /** Rook sees it if its head or chest is on his screen with nothing in the way. */
   rookSees(enemy: StandInEnemy): boolean {
-    this.target.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.eyeHeightNowM, enemy.zM);
     if (this.quarry.inView(this.target) && this.clearLine(this.quarry.eyes, this.target)) return true;
-    this.target.y = enemy.muzzleHeightNowM; // about its chest
+    this.target.y = enemy.feet.y + enemy.muzzleHeightNowM; // about its chest
     return this.quarry.inView(this.target) && this.clearLine(this.quarry.eyes, this.target);
   }
 
@@ -654,7 +679,7 @@ export class StandInWorld implements StandInHooks {
     this.glimpseTimerSec -= dtSec;
     if (this.glimpseTimerSec > 0) return seen;
     this.glimpseTimerSec = 1 / exposureConfig.checksPerSec;
-    this.enemyEyes.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    this.enemyEyes.set(enemy.xM, enemy.feet.y + enemy.eyeHeightNowM, enemy.zM);
     seen.visibleShare = this.visibleShareFrom(this.enemyEyes);
     const { position, forward } = this.quarry;
     const toEnemyX = enemy.xM - position.x;
@@ -683,17 +708,18 @@ export class StandInWorld implements StandInHooks {
   }
 
   peekTell(enemy: StandInEnemy): void {
-    this.target.set(enemy.xM, enemy.heightM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.heightM, enemy.zM);
     this.events.emit('enemy:peek-tell', { position: this.target });
   }
 
   pickCover(enemy: StandInEnemy): CoverPoint | null {
     const onFloor = this.routeStartFor(enemy); // the most promising spots get checked first (4.13b)
+    const staysOnFloor = this.onRookFloor(enemy); // once on his floor it picks cover there, never one back on the floor it left
     return this.coverPoints.best(
       enemy,
       this.viewEyes,
       this.viewFeet,
-      (point) => this.walkM(enemy, point),
+      (point) => (staysOnFloor && !this.onRooksFloor(point) ? Infinity : this.walkM(enemy, point)),
       enemy.values,
       (point) => this.canFightFrom(point), // a spot it can shoot from is preferred (decision 237)
       (point) => this.minWalkM(onFloor, point),
@@ -727,7 +753,7 @@ export class StandInWorld implements StandInHooks {
   }
 
   spotGrenade(enemy: StandInEnemy, radiusM: number, out: Vector3): boolean {
-    this.enemyEyes.set(enemy.xM, enemy.eyeHeightNowM, enemy.zM);
+    this.enemyEyes.set(enemy.xM, enemy.feet.y + enemy.eyeHeightNowM, enemy.zM);
     let nearestM = Infinity;
     for (const grenade of this.liveGrenades()) {
       const distanceM = Math.hypot(grenade.x - enemy.xM, grenade.z - enemy.zM);
@@ -778,7 +804,7 @@ export class StandInWorld implements StandInHooks {
     }
     if (best) {
       this.coverPoints.claim(best, enemy);
-      out.set(best.xM, 0, best.zM);
+      out.set(best.xM, best.yM ?? 0, best.zM);
       return best;
     }
     this.coverPoints.release(enemy);
@@ -793,14 +819,13 @@ export class StandInWorld implements StandInHooks {
       awayZ /= fromGrenadeM;
     }
     const runM = Math.max(safeM - fromGrenadeM, 0) + standInConfig.coverArriveM;
-    this.spot.set(enemy.xM + awayX * runM, 0, enemy.zM + awayZ * runM);
+    this.spot.set(enemy.xM + awayX * runM, enemy.feet.y, enemy.zM + awayZ * runM);
     if (!this.navigation.closestPoint(this.spot, out)) out.copy(enemy.feet);
-    out.y = 0;
     return null;
   }
 
   grenadeSpotted(enemy: StandInEnemy): void {
-    this.target.set(enemy.xM, enemy.heightM, enemy.zM);
+    this.target.set(enemy.xM, enemy.feet.y + enemy.heightM, enemy.zM);
     this.events.emit('enemy:grenade-spotted', { position: this.target });
   }
 
@@ -818,7 +843,7 @@ export class StandInWorld implements StandInHooks {
    */
   private minWalkM(onFloor: boolean, point: CoverPoint): number {
     if (!onFloor) return 0;
-    return Math.max(this.routeStart.distanceTo(this.spotOnFloor.set(point.xM, 0, point.zM)) - standInConfig.coverArriveM, 0);
+    return Math.max(this.routeStart.distanceTo(this.spotOnFloor.set(point.xM, point.yM ?? 0, point.zM)) - standInConfig.coverArriveM, 0);
   }
 
   /**
@@ -826,7 +851,7 @@ export class StandInWorld implements StandInHooks {
    * spot is inside the blast of a live grenade (so it never picks cover next to one).
    */
   private walkM(enemy: StandInEnemy, point: CoverPoint): number {
-    this.spot.set(point.xM, 0, point.zM);
+    this.spot.set(point.xM, point.yM ?? 0, point.zM);
     if (this.grenadeNear(this.spot, grenadeConfig.blastRadiusM + standInConfig.grenadeMarginM)) return Infinity;
     if (!this.navigation.findPath(enemy.feet, this.spot, this.routeToCover)) return Infinity;
     const route = this.routeToCover;
@@ -840,8 +865,11 @@ export class StandInWorld implements StandInHooks {
     return this.navigation.findPath(from, to, out);
   }
 
+  /** Puts the feet on the real ground first (the route's height can sit a little inside a ramp), then pushes them out of walls. */
   pushOut(feet: Vector3): void {
-    this.collision.pushOut(feet, standInConfig.capsuleRadiusM, dummyConfig.heightM, playerConfig.collisionIterations);
+    this.groundProbe.set(feet.x, feet.y + navigationConfig.groundProbeUpM, feet.z);
+    if (this.collision.raycast(this.groundProbe, down, navigationConfig.groundProbeUpM + navigationConfig.groundProbeDownM, this.groundHit)) feet.y = this.groundHit.point.y;
+    this.collision.pushOut(feet, standInConfig.capsuleRadiusM, dummyConfig.heightM, playerConfig.collisionIterations, true); // true: a slope lifts it, not pushes it back
   }
 
   /**
@@ -854,7 +882,7 @@ export class StandInWorld implements StandInHooks {
     const facingZ = -Math.cos(enemy.yawRad);
     this.muzzle.set(
       enemy.xM + facingX * standInConfig.muzzleForwardM,
-      enemy.muzzleHeightNowM,
+      enemy.feet.y + enemy.muzzleHeightNowM,
       enemy.zM + facingZ * standInConfig.muzzleForwardM,
     );
     this.aimAt(enemy, shot, this.muzzle, this.aim);
