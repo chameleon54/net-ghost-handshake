@@ -15,6 +15,7 @@ import { StoreyPush } from '../src/squad/storeyPush';
 import { aggressionConfig } from '../src/config/aggression';
 import { aggressionSetting } from '../src/config/aggression';
 import { loopConfig } from '../src/config/loop';
+import { grenadeConfig } from '../src/config/grenade';
 import { standInConfig } from '../src/config/standInEnemy';
 import type { WeaponEvents } from '../src/weapons/events';
 
@@ -282,5 +283,43 @@ describe('a squad in the chamber (5.3)', () => {
     expect(enemies.every((e) => e.awake)).toBe(true);
     expect(enemies.filter((e) => e.cover !== null).length).toBeGreaterThanOrEqual(3);
     expect(shots.length).toBeGreaterThan(0);
+  });
+});
+
+describe('enemy grenades under a ceiling (5.3c; the chamber has none until 5.6)', () => {
+  it('with a test ceiling (9 m over the hall, 7.5 m over the ring) every planned lob stays under it, and most throws are still possible', async () => {
+    // Without a ceiling over a third of the lobs peak above 9 m (the highest about 13.8 m). The lob check follows the whole
+    // flight through the level's collision, so once a ceiling is there the steep throws fail and a flatter angle is used.
+    const hallM = 9;
+    const ringM = 7.5;
+    const ceilings = [
+      { id: 'ceiling-hall', label: 'test ceiling', kind: 'wall' as const, xM: 0, zM: 0, widthM: 30.6, depthM: 24.6, heightM: 0.3, yM: hallM },
+      { id: 'ceiling-ring-w', label: 'test ceiling', kind: 'wall' as const, xM: -16.55, zM: 1.1, widthM: 2.8, depthM: 27.8, heightM: 0.3, yM: ringM },
+      { id: 'ceiling-ring-e', label: 'test ceiling', kind: 'wall' as const, xM: 16.55, zM: 1.1, widthM: 2.8, depthM: 27.8, heightM: 0.3, yM: ringM },
+      { id: 'ceiling-ring-s', label: 'test ceiling', kind: 'wall' as const, xM: 0, zM: 13.55, widthM: 35.6, depthM: 2.8, heightM: 0.3, yM: ringM },
+    ];
+    const roofed = buildGreybox([...chamberLevel.boxes, ...ceilings], levelLayout(chamberLevel));
+    const points = new CoverPoints(cover, roofed.collision);
+    const rooks = [new Vector3(-6, 0, 10.5), new Vector3(0, 0, 5), new Vector3(8, 0, -2), new Vector3(-16.5, upM, 0), new Vector3(0, upM, 13.5), new Vector3(4, upM, -8.5)];
+    let pairs = 0;
+    let found = 0;
+    for (const position of rooks) {
+      const rook = { position, eyeHeightNowM: 1.6, eyes: position.clone().setY(position.y + 1.6), forward: new Vector3(0, 0, -1), inView: () => true, exposure: 0, movingFast: false };
+      const world = new StandInWorld(new EventBus<WeaponEvents>(), roofed.collision, navigation, points, rook, () => {}, () => [], () => 0);
+      for (const point of cover) {
+        const m = Math.hypot(point.xM - position.x, point.zM - position.z);
+        if (m < 4 || m > 18) continue;
+        pairs++;
+        const plan = world.planThrow(null as never, point); // the enemy itself is not used: the spot is given
+        if (!plan) continue;
+        found++;
+        const apexM = plan.from.y + plan.velocity.y ** 2 / (2 * grenadeConfig.gravityMps2);
+        expect(apexM).toBeLessThanOrEqual(hallM); // never through the hall's ceiling...
+        const underRing = (x: number, z: number) => Math.abs(x) > 15.3 || z > 12.3;
+        const apexSec = plan.velocity.y / grenadeConfig.gravityMps2; // where the arc peaks (it may cross the hall through the windows)
+        if (underRing(plan.from.x + plan.velocity.x * apexSec, plan.from.z + plan.velocity.z * apexSec)) expect(apexM).toBeLessThanOrEqual(ringM); // ...nor the ring's
+      }
+    }
+    expect(found / pairs).toBeGreaterThan(0.6); // measured 0.7 (0.74 without a ceiling)
   });
 });
