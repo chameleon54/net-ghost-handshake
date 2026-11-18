@@ -7,7 +7,8 @@ import type { CoverPoint } from './cover';
 // dev server's edit mode. `formatVersion` lets the format grow. Some lists are reserved: typed and checked now, used later
 // (glass in 5.4, acoustic zones in 7d, the announcer's speakers, wave arrival areas in 7.1). No drawing here.
 
-export const levelFormatVersion = 1;
+/** Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; a version 1 file still loads and gets them. */
+export const levelFormatVersion = 2;
 
 /** A box in the level: a wall or a piece of equipment. `id` is unique in the level; `label` says what it is ("prep bench A"). */
 export interface LevelBox extends RoomBox {
@@ -18,6 +19,8 @@ export interface LevelBox extends RoomBox {
 
 /** Where something stands and which way it faces, in degrees (0 = north, -z; 90 = west: positive turns left, as the player's yaw). */
 export interface LevelSpot {
+  /** Unique in the level, boxes included ("start", "dummy-1", "spawn-3"): the editor selects by it (5.2b). */
+  id: string;
   xM: number;
   zM: number;
   yawDeg: number;
@@ -150,9 +153,11 @@ class Reader {
     };
   }
 
+  /** A spot; a missing id comes back as '' and is filled in by the checker once every id is known. */
   spot(value: unknown, path: string): LevelSpot {
     const o = this.object(value, path);
-    return { xM: this.number(o.xM, `${path}.xM`), zM: this.number(o.zM, `${path}.zM`), yawDeg: this.number(o.yawDeg, `${path}.yawDeg`) };
+    const id = o.id === undefined ? '' : this.text(o.id, `${path}.id`);
+    return { id, xM: this.number(o.xM, `${path}.xM`), zM: this.number(o.zM, `${path}.zM`), yawDeg: this.number(o.yawDeg, `${path}.yawDeg`) };
   }
 }
 
@@ -208,7 +213,7 @@ export function checkLevel(raw: unknown): LevelData {
   const r = new Reader();
   const o = r.object(raw, 'level');
   const version = r.number(o.formatVersion, 'formatVersion');
-  if (version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be ${levelFormatVersion} (this game reads version ${levelFormatVersion})`);
+  if (version !== 1 && version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be 1 or ${levelFormatVersion} (this game reads both)`);
   const name = r.text(o.name, 'name');
   if (!levelNamePattern.test(name)) r.problems.push('name must be lowercase letters, digits and hyphens (it is also the file name)');
   const floorIn = r.object(o.floor, 'floor');
@@ -222,13 +227,8 @@ export function checkLevel(raw: unknown): LevelData {
     hazards: r.list(floorIn.hazards, 'floor.hazards').map((h, i) => r.rect(h, `floor.hazards[${i}]`)),
   };
   const boxes = r.list(o.boxes, 'boxes').map((b, i) => readBox(r, b, `boxes[${i}]`));
-  const seen = new Set<string>();
-  boxes.forEach((box, i) => {
-    if (seen.has(box.id)) r.problems.push(`boxes[${i}].id "${box.id}" is used twice (ids must be unique)`);
-    seen.add(box.id);
-  });
   const level: LevelData = {
-    formatVersion: version,
+    formatVersion: levelFormatVersion, // a version 1 file is upgraded as it is read: it gains the markers' ids
     name,
     floor,
     start: r.spot(o.start, 'start'),
@@ -250,8 +250,43 @@ export function checkLevel(raw: unknown): LevelData {
     }),
     arrivals: r.list(o.arrivals, 'arrivals').map((a, i) => r.rect(a, `arrivals[${i}]`)),
   };
+  checkIds(r, level);
   if (r.problems.length > 0) throw new LevelError(r.problems);
   return level;
+}
+
+/**
+ * Every id in the level (boxes and markers) must be unique. A marker read without one gets one here: `start`, `dummy-1`,
+ * `spawn-1`, ..., skipping any already taken.
+ */
+function checkIds(r: Reader, level: LevelData): void {
+  const named: [string, { id: string }][] = [
+    ...level.boxes.map((box, i): [string, { id: string }] => [`boxes[${i}]`, box]),
+    ['start', level.start],
+    ...level.dummies.map((spot, i): [string, { id: string }] => [`dummies[${i}]`, spot]),
+    ...level.spawns.map((spot, i): [string, { id: string }] => [`spawns[${i}]`, spot]),
+  ];
+  const seen = new Set<string>();
+  for (const [path, item] of named) {
+    if (item.id === '') continue;
+    if (seen.has(item.id)) r.problems.push(`${path}.id "${item.id}" is used twice (ids must be unique)`);
+    seen.add(item.id);
+  }
+  const fill = (item: { id: string }, base: string) => {
+    if (item.id !== '') return;
+    item.id = unusedId(seen, base);
+    seen.add(item.id);
+  };
+  fill(level.start, 'start');
+  level.dummies.forEach((spot) => fill(spot, 'dummy-1'));
+  level.spawns.forEach((spot) => fill(spot, 'spawn-1'));
+}
+
+/** `base` if it is free, else the same with the next free number (`spawn-1`, `spawn-2`; `bench`, `bench-2`). */
+export function unusedId(taken: ReadonlySet<string>, base: string): string {
+  if (!taken.has(base)) return base;
+  const stem = base.replace(/-\d+$/, '');
+  for (let n = 2; ; n++) if (!taken.has(`${stem}-${n}`)) return `${stem}-${n}`;
 }
 
 /** The floor as the grey-box builder and footsteps want it. */

@@ -34,10 +34,15 @@ export class Navigation {
     return new Navigation(null, null);
   }
 
-  /** Starts the library (once) and builds the mesh from `geometry`, which must include the floor. */
-  static async create(geometry: BufferGeometry): Promise<Navigation> {
+  /**
+   * Starts the library (once) and builds the mesh from `geometry`, which must include the floor. `body` changes who it is
+   * for (the level editor's check for Rook on foot, 5.2b, uses his crouched height); left out, an enemy.
+   */
+  static async create(geometry: BufferGeometry, body: { readonly agentRadiusM?: number; readonly agentHeightM?: number } = {}): Promise<Navigation> {
     await init(); // the library's WebAssembly must start first; later calls return at once
-    const { cellSizeM: cs, cellHeightM: ch, agentRadiusM, agentHeightM, agentStepM, maxSlopeDeg } = navigationConfig;
+    const { cellSizeM: cs, cellHeightM: ch, agentStepM, maxSlopeDeg } = navigationConfig;
+    const agentRadiusM = body.agentRadiusM ?? navigationConfig.agentRadiusM;
+    const agentHeightM = body.agentHeightM ?? navigationConfig.agentHeightM;
     const positions = geometry.getAttribute('position').array;
     const indices = geometry.getIndex()?.array;
     if (!indices) throw new Error('The navigation geometry needs an index');
@@ -90,6 +95,12 @@ export class Navigation {
     if (!point) return false;
     out.set(point.x, point.y - meshLiftM, point.z);
     return true;
+  }
+
+  /** Frees the mesh (the library's memory is not freed by itself). For the level editor's previews, rebuilt after each edit. */
+  dispose(): void {
+    this.query?.destroy();
+    this.navMesh?.destroy();
   }
 
   /** The mesh's triangles, for the dev overlay: flat positions (x, y, z, ...) and indices. */

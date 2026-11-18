@@ -1,5 +1,5 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "name": "test-arena",
   "floor": {
     "widthM": 30,
@@ -12,21 +12,21 @@
       {"xM":12.5,"zM":-10.5,"widthM":2,"depthM":2}
     ]
   },
-  "start": {"xM":0,"zM":10.5,"yawDeg":0},
+  "start": {"id":"start","xM":0,"zM":10.5,"yawDeg":0},
   "dummies": [
-    {"xM":3,"zM":9,"yawDeg":180},
-    {"xM":-8,"zM":3.5,"yawDeg":180},
-    {"xM":8,"zM":8.5,"yawDeg":180}
+    {"id":"dummy-1","xM":3,"zM":9,"yawDeg":180},
+    {"id":"dummy-2","xM":-8,"zM":3.5,"yawDeg":180},
+    {"id":"dummy-3","xM":8,"zM":8.5,"yawDeg":180}
   ],
   "spawns": [
-    {"xM":0,"zM":-10.8,"yawDeg":180,"role":"leader"},
-    {"xM":-9,"zM":-10.5,"yawDeg":180,"role":"trooper"},
-    {"xM":9,"zM":-10.5,"yawDeg":180,"role":"flanker"},
-    {"xM":13,"zM":-2.5,"yawDeg":135,"role":"heavy"},
-    {"xM":-4.5,"zM":-11,"yawDeg":180,"role":"trooper"},
-    {"xM":-13.5,"zM":-9.5,"yawDeg":180,"role":"trooper"},
-    {"xM":-6,"zM":-9,"yawDeg":180,"role":"flanker"},
-    {"xM":-13,"zM":-2.5,"yawDeg":225,"role":"heavy"}
+    {"id":"spawn-1","xM":0,"zM":-10.8,"yawDeg":180,"role":"leader"},
+    {"id":"spawn-2","xM":-9,"zM":-10.5,"yawDeg":180,"role":"trooper"},
+    {"id":"spawn-3","xM":9,"zM":-10.5,"yawDeg":180,"role":"flanker"},
+    {"id":"spawn-4","xM":13,"zM":-2.5,"yawDeg":135,"role":"heavy"},
+    {"id":"spawn-5","xM":-4.5,"zM":-11,"yawDeg":180,"role":"trooper"},
+    {"id":"spawn-6","xM":-13.5,"zM":-9.5,"yawDeg":180,"role":"trooper"},
+    {"id":"spawn-7","xM":-6,"zM":-9,"yawDeg":180,"role":"flanker"},
+    {"id":"spawn-8","xM":-13,"zM":-2.5,"yawDeg":225,"role":"heavy"}
   ],
   "boxes": [
     {"id":"north-wall","label":"north wall","kind":"wall","xM":0,"zM":-12.15,"widthM":30.6,"depthM":0.3,"heightM":3},

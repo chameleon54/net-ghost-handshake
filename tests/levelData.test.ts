@@ -3,17 +3,17 @@ import { checkLevel, coverRemoveRadiusM, LevelError, levelToJson, spotRad, type 
 import { levelCover } from '../src/level/cover';
 import { testArenaLevel } from '../src/data/testArena';
 import arenaText from '../src/data/levels/test-arena.json?raw';
-import { addBox, addMarker, duplicate, EditHistory, freeId, moveBy, pickAt, rayBoxM, remove, setField, turn } from '../src/level/levelEdit';
+import { addBox, addMarker, dragOnFloor, duplicate, EditHistory, freeId, moveBy, pickAt, picked, rayBoxM, remove, setField, snapTo, turn } from '../src/level/levelEdit';
 import { levelSaveRequest } from '../src/level/levelSave';
 
 /** A small valid level to break on purpose. */
 const small = (): LevelData => ({
-  formatVersion: 1,
+  formatVersion: 2,
   name: 'small',
   floor: { widthM: 10, depthM: 8, surfaces: [], hazards: [] },
-  start: { xM: 0, zM: 3, yawDeg: 0 },
-  dummies: [{ xM: 2, zM: 2, yawDeg: 180 }],
-  spawns: [{ xM: 0, zM: -3, yawDeg: 180, role: 'trooper' }],
+  start: { id: 'start', xM: 0, zM: 3, yawDeg: 0 },
+  dummies: [{ id: 'dummy-1', xM: 2, zM: 2, yawDeg: 180 }],
+  spawns: [{ id: 'spawn-1', xM: 0, zM: -3, yawDeg: 180, role: 'trooper' }],
   boxes: [
     { id: 'crate', label: 'crate', kind: 'prop', xM: 0, zM: 0, widthM: 1, depthM: 1, heightM: 1 },
     { id: 'wall', label: 'north wall', kind: 'wall', xM: 0, zM: -4.15, widthM: 10.6, depthM: 0.3, heightM: 3 },
@@ -65,7 +65,7 @@ describe('the level data format (5.2)', () => {
     const noSpeakers: Partial<LevelData> = small();
     delete noSpeakers.speakers;
     expect(problemsOf(noSpeakers)).toEqual(['speakers must be a list']);
-    expect(problemsOf({ ...small(), formatVersion: 2 })).toEqual(['formatVersion must be 1 (this game reads version 1)']);
+    expect(problemsOf({ ...small(), formatVersion: 3 })).toEqual(['formatVersion must be 1 or 2 (this game reads both)']);
   });
 
   it('keeps optional fields out unless the file has them, and rounds editing dust off distances', () => {
@@ -112,7 +112,7 @@ describe('the level data format (5.2)', () => {
   });
 
   it('a spot faces in degrees in the file and in radians in the game', () => {
-    expect(spotRad({ xM: 1, zM: 2, yawDeg: 180 })).toEqual({ xM: 1, zM: 2, yawRad: Math.PI });
+    expect(spotRad({ id: 'a', xM: 1, zM: 2, yawDeg: 180 })).toEqual({ id: 'a', xM: 1, zM: 2, yawRad: Math.PI });
   });
 });
 
@@ -123,23 +123,23 @@ describe('editing a level (5.2)', () => {
     expect(rayBoxM({ x: 0, y: 5, z: 0 }, down, { x: -1, y: 0, z: -1 }, { x: 1, y: 1, z: 1 })).toBeCloseTo(4);
     expect(rayBoxM({ x: 3, y: 5, z: 0 }, down, { x: -1, y: 0, z: -1 }, { x: 1, y: 1, z: 1 })).toBe(Infinity);
     const level = small();
-    expect(pickAt(level, { x: 0, y: 5, z: 0 }, down)).toEqual({ list: 'boxes', index: 0 });
-    expect(pickAt(level, { x: 2, y: 5, z: 2 }, down)).toEqual({ list: 'dummies', index: 0 });
-    expect(pickAt(level, { x: 0, y: 1, z: 6 }, { x: 0, y: 0, z: -1 })).toEqual({ list: 'start', index: 0 }); // the start is nearer than the crate
+    expect(pickAt(level, { x: 0, y: 5, z: 0 }, down)).toBe('crate');
+    expect(pickAt(level, { x: 2, y: 5, z: 2 }, down)).toBe('dummy-1');
+    expect(pickAt(level, { x: 0, y: 1, z: 6 }, { x: 0, y: 0, z: -1 })).toBe('start'); // the start is nearer than the crate
     expect(pickAt(level, { x: 4, y: 5, z: 3.5 }, down)).toBe(null);
   });
 
   it('moves, raises (never below the floor) and turns a box; markers stay on the floor and turn left', () => {
     let level = small();
-    const crate = { list: 'boxes', index: 0 } as const;
+    const crate = 'crate';
     level = moveBy(level, crate, 0.25, 0.5, -1);
     expect(level.boxes[0]).toMatchObject({ xM: 0.25, zM: -1, yM: 0.5 });
     level = moveBy(level, crate, 0, -2, 0);
     expect(level.boxes[0]).not.toHaveProperty('yM');
     level.boxes[0] = { ...level.boxes[0], widthM: 3, depthM: 0.8 };
     expect(turn(level, crate).boxes[0]).toMatchObject({ widthM: 0.8, depthM: 3 });
-    const start = { list: 'start', index: 0 } as const;
-    expect(moveBy(level, start, 1, 5, 0).start).toEqual({ xM: 1, zM: 3, yawDeg: 0 });
+    const start = 'start';
+    expect(moveBy(level, start, 1, 5, 0).start).toEqual({ id: 'start', xM: 1, zM: 3, yawDeg: 0 });
     expect(turn(level, start).start.yawDeg).toBe(90);
     expect(turn(turn(turn(turn(level, start), start), start), start).start.yawDeg).toBe(0);
   });
@@ -147,21 +147,22 @@ describe('editing a level (5.2)', () => {
   it('leaves the old level as it was (what undo keeps)', () => {
     const before = small();
     const text = JSON.stringify(before);
-    moveBy(before, { list: 'boxes', index: 0 }, 1, 1, 1);
-    turn(before, { list: 'spawns', index: 0 });
-    setField(before, { list: 'boxes', index: 0 }, 'label', 'x');
+    moveBy(before, 'crate', 1, 1, 1);
+    turn(before, 'spawn-1');
+    setField(before, 'crate', 'label', 'x');
     expect(JSON.stringify(before)).toBe(text);
   });
 
   it('duplicates with a new id 1 m east, removes, and refuses to copy or delete the start', () => {
     const level = small();
-    const copy = duplicate(level, { list: 'boxes', index: 0 })!;
+    const copy = duplicate(level, 'crate')!;
     expect(copy.level.boxes[2]).toMatchObject({ id: 'crate-2', label: 'crate', xM: 1 });
-    expect(copy.pick).toEqual({ list: 'boxes', index: 2 });
+    expect(copy.pick).toBe('crate-2');
     expect(checkLevel(copy.level).boxes).toHaveLength(3); // still a valid level
-    expect(remove(level, { list: 'dummies', index: 0 })!.dummies).toEqual([]);
-    expect(duplicate(level, { list: 'start', index: 0 })).toBe(null);
-    expect(remove(level, { list: 'start', index: 0 })).toBe(null);
+    expect(remove(level, 'dummy-1')!.dummies).toEqual([]);
+    expect(duplicate(level, 'start')).toBe(null);
+    expect(remove(level, 'start')).toBe(null);
+    expect(duplicate(level, 'dummy-1')!.level.dummies[1].id).toBe('dummy-2'); // markers get new ids too
     expect(freeId(copy.level, 'crate')).toBe('crate-3');
   });
 
@@ -173,20 +174,64 @@ describe('editing a level (5.2)', () => {
     const checked = checkLevel(JSON.parse(levelToJson(level)));
     expect(checked.boxes.map((b) => b.id)).toEqual(['crate', 'wall', 'low-cover', 'climbable', 'high-cover', 'wall-2', 'glass']);
     expect(checked.boxes[6].glass).toBe(true);
-    expect(checked.spawns[1]).toEqual({ xM: 2, zM: 2, yawDeg: 180, role: 'trooper' });
+    expect(checked.spawns[1]).toEqual({ id: 'spawn-2', xM: 2, zM: 2, yawDeg: 180, role: 'trooper' });
   });
 
   it('undo gives the levels back newest first, at most the limit', () => {
     const history = new EditHistory(2);
     const a = small();
-    const b = moveBy(a, { list: 'boxes', index: 0 }, 1, 0, 0);
-    const c = moveBy(b, { list: 'boxes', index: 0 }, 1, 0, 0);
+    const b = moveBy(a, 'crate', 1, 0, 0);
+    const c = moveBy(b, 'crate', 1, 0, 0);
     history.push(a);
     history.push(b);
     history.push(c);
     expect(history.undo()).toBe(c);
     expect(history.undo()).toBe(b);
     expect(history.undo()).toBe(null); // a fell off the end
+  });
+});
+
+describe('ids and dragging (5.2b, decision 281)', () => {
+  it('a version 1 file loads and its start, dummies and spawns get ids that clash with nothing', () => {
+    const old = JSON.parse(JSON.stringify(small())) as Record<string, unknown> & LevelData;
+    old.formatVersion = 1;
+    for (const spot of [old.start, ...old.dummies, ...old.spawns]) delete (spot as Partial<typeof spot>).id;
+    old.boxes[0].id = 'spawn-1'; // a box already holds the name a spawn would get
+    const checked = checkLevel(old);
+    expect(checked.formatVersion).toBe(2);
+    expect([checked.start.id, checked.dummies[0].id, checked.spawns[0].id]).toEqual(['start', 'dummy-1', 'spawn-2']);
+    expect(levelToJson(checked)).toContain('"formatVersion": 2');
+  });
+
+  it('two items with one id are a problem, boxes and markers alike', () => {
+    const level = small();
+    level.dummies[0].id = 'crate';
+    expect(problemsOf(level).join()).toContain('"crate" is used twice');
+  });
+
+  it('a selection follows its item by id after a delete or an undo', () => {
+    const level = small();
+    const fewer = remove(level, 'crate')!;
+    expect(picked(fewer, 'wall')).toMatchObject({ label: 'north wall' }); // it was second, now first: still the wall
+    expect(picked(fewer, 'crate')).toBeUndefined();
+    expect(moveBy(fewer, 'crate', 1, 0, 0)).toBe(fewer); // nothing to move: the level is unchanged
+  });
+
+  it('a right-button drag moves on the floor: sideways along the camera right, pushed away along its view', () => {
+    expect(dragOnFloor(0, 100, 0, 0.01)).toEqual({ dx: 1, dz: 0 }); // looking north, mouse right: east
+    const away = dragOnFloor(0, 0, -100, 0.01); // mouse pushed away: north, where it looks
+    expect(away.dx).toBeCloseTo(0);
+    expect(away.dz).toBeCloseTo(-1);
+    const west = dragOnFloor(Math.PI / 2, 100, 0, 0.01); // looking west, mouse right: north
+    expect(west.dx).toBeCloseTo(0);
+    expect(west.dz).toBeCloseTo(-1);
+  });
+
+  it('dragging rounds to 0.05 m, and to the 0.25 m grid with Shift', () => {
+    expect(snapTo(1.237, 0.05)).toBe(1.25);
+    expect(snapTo(1.212, 0.05)).toBe(1.2);
+    expect(snapTo(1.37, 0.25)).toBe(1.25);
+    expect(snapTo(-0.13, 0.25)).toBe(-0.25);
   });
 });
 

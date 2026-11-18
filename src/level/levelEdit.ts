@@ -1,11 +1,15 @@
-import type { LevelBox, LevelData, LevelSpot } from './levelData';
+import { unusedId, type LevelBox, type LevelData, type LevelSpot } from './levelData';
 
 // The level edit operations (milestone 5.2, decision 273): picking a piece with a ray, moving, turning, duplicating,
 // deleting and adding, and undo. Each takes a level and returns a new one (the old one is left as it was, which is what
 // undo keeps). Plain functions, no drawing, so they can be tested; src/debug/editMode.ts drives them in game.
+// Since 5.2b (decision 281) a selection is the item's id, so it never points at the wrong thing after a delete or undo.
 
-/** What is selected: a box, a dummy, an enemy spawn, or Rook's start. */
-export type Pick = { list: 'boxes' | 'dummies' | 'spawns'; index: number } | { list: 'start'; index: 0 };
+/** What is selected: the id of a box, a dummy, an enemy spawn, or Rook's start. */
+export type Pick = string;
+
+/** Which list an item is in. */
+export type ItemList = 'boxes' | 'dummies' | 'spawns' | 'start';
 
 /** A marker (start, dummy, spawn) is picked as an upright box this wide and tall around its spot. */
 export const markerWidthM = 0.6;
@@ -55,42 +59,57 @@ function markerBounds(spot: LevelSpot): [Vec3, Vec3] {
   ];
 }
 
-/** The nearest piece or marker the ray hits, or null. Markers are checked too, so one standing by a wall can be picked. */
+/** The nearest piece or marker the ray hits (its id), or null. Markers are checked too, so one standing by a wall can be picked. */
 export function pickAt(level: LevelData, origin: Vec3, dir: Vec3): Pick | null {
   let best: Pick | null = null;
   let bestM = Infinity;
-  const consider = (pick: Pick, [min, max]: [Vec3, Vec3]) => {
+  const consider = (id: string, [min, max]: [Vec3, Vec3]) => {
     const m = rayBoxM(origin, dir, min, max);
     if (m < bestM) {
-      best = pick;
+      best = id;
       bestM = m;
     }
   };
-  level.boxes.forEach((box, index) => consider({ list: 'boxes', index }, boxBounds(box)));
-  level.dummies.forEach((spot, index) => consider({ list: 'dummies', index }, markerBounds(spot)));
-  level.spawns.forEach((spot, index) => consider({ list: 'spawns', index }, markerBounds(spot)));
-  consider({ list: 'start', index: 0 }, markerBounds(level.start));
+  for (const box of level.boxes) consider(box.id, boxBounds(box));
+  for (const spot of level.dummies) consider(spot.id, markerBounds(spot));
+  for (const spot of level.spawns) consider(spot.id, markerBounds(spot));
+  consider(level.start.id, markerBounds(level.start));
   return best;
 }
 
-/** The selected item, or undefined if the pick no longer points at anything. */
-export function picked(level: LevelData, pick: Pick): LevelBox | LevelSpot | undefined {
-  return pick.list === 'start' ? level.start : level[pick.list][pick.index];
+/** Where the item with this id is, or undefined if no item has it (deleted, or undone away). */
+export function locate(level: LevelData, id: Pick): { list: ItemList; index: number } | undefined {
+  if (level.start.id === id) return { list: 'start', index: 0 };
+  for (const list of ['boxes', 'dummies', 'spawns'] as const) {
+    const index = (level[list] as readonly { id: string }[]).findIndex((item) => item.id === id);
+    if (index >= 0) return { list, index };
+  }
+  return undefined;
 }
 
-/** A copy of the level with the picked item replaced by `change(item)`. */
-function withItem(level: LevelData, pick: Pick, change: (item: LevelBox & LevelSpot) => object): LevelData {
-  if (pick.list === 'start') return { ...level, start: change(level.start as LevelBox & LevelSpot) as LevelSpot };
-  const list = level[pick.list].slice() as object[];
-  list[pick.index] = change(list[pick.index] as LevelBox & LevelSpot);
-  return { ...level, [pick.list]: list };
+/** The selected item, or undefined if no item has this id any more. */
+export function picked(level: LevelData, id: Pick): LevelBox | LevelSpot | undefined {
+  const at = locate(level, id);
+  if (!at) return undefined;
+  return at.list === 'start' ? level.start : level[at.list][at.index];
 }
 
-/** Moves the picked item by (dx, dy, dz) metres. Markers stay on the floor; a box never goes below it (0 leaves `yM` out). */
-export function moveBy(level: LevelData, pick: Pick, dx: number, dy: number, dz: number): LevelData {
-  return withItem(level, pick, (item) => {
+/** A copy of the level with the item replaced by `change(item)`; the level itself if no item has this id. */
+function withItem(level: LevelData, id: Pick, change: (item: LevelBox & LevelSpot) => object): LevelData {
+  const at = locate(level, id);
+  if (!at) return level;
+  if (at.list === 'start') return { ...level, start: change(level.start as LevelBox & LevelSpot) as LevelSpot };
+  const list = level[at.list].slice() as object[];
+  list[at.index] = change(list[at.index] as LevelBox & LevelSpot);
+  return { ...level, [at.list]: list };
+}
+
+/** Moves the item by (dx, dy, dz) metres. Markers stay on the floor; a box never goes below it (0 leaves `yM` out). */
+export function moveBy(level: LevelData, id: Pick, dx: number, dy: number, dz: number): LevelData {
+  const isBox = locate(level, id)?.list === 'boxes';
+  return withItem(level, id, (item) => {
     const moved: LevelBox & LevelSpot = { ...item, xM: item.xM + dx, zM: item.zM + dz };
-    if (pick.list !== 'boxes') return moved;
+    if (!isBox) return moved;
     const yM = Math.max((item.yM ?? 0) + dy, 0);
     if (yM > 0) moved.yM = yM;
     else delete moved.yM;
@@ -98,35 +117,38 @@ export function moveBy(level: LevelData, pick: Pick, dx: number, dy: number, dz:
   });
 }
 
-/** Turns the picked item 90 degrees: a box swaps its width and depth (boxes stay square to the walls); a marker turns left. */
-export function turn(level: LevelData, pick: Pick): LevelData {
-  return withItem(level, pick, (item) =>
-    pick.list === 'boxes' ? { ...item, widthM: item.depthM, depthM: item.widthM } : { ...item, yawDeg: (((item.yawDeg + 90) % 360) + 360) % 360 },
+/** Turns the item 90 degrees: a box swaps its width and depth (boxes stay square to the walls); a marker turns left. */
+export function turn(level: LevelData, id: Pick): LevelData {
+  const isBox = locate(level, id)?.list === 'boxes';
+  return withItem(level, id, (item) =>
+    isBox ? { ...item, widthM: item.depthM, depthM: item.widthM } : { ...item, yawDeg: (((item.yawDeg + 90) % 360) + 360) % 360 },
   );
 }
 
-/** An id not yet used by any box, made from `base`. */
+/** Every id in the level, boxes and markers. */
+function allIds(level: LevelData): Set<string> {
+  return new Set([...level.boxes.map((b) => b.id), level.start.id, ...level.dummies.map((d) => d.id), ...level.spawns.map((s) => s.id)]);
+}
+
+/** An id no item uses yet, made from `base`. */
 export function freeId(level: LevelData, base: string): string {
-  const ids = new Set(level.boxes.map((box) => box.id));
-  if (!ids.has(base)) return base;
-  for (let n = 2; ; n++) if (!ids.has(`${base}-${n}`)) return `${base}-${n}`;
+  return unusedId(allIds(level), base);
 }
 
-/** A copy of the picked box or marker, 1 m east of it; the copy is picked. Rook's start cannot be copied (there is one). */
-export function duplicate(level: LevelData, pick: Pick): { level: LevelData; pick: Pick } | null {
-  if (pick.list === 'start') return null;
-  const item = picked(level, pick);
-  if (!item) return null;
-  const copy = { ...item, xM: item.xM + 1 } as LevelBox & LevelSpot;
-  if (pick.list === 'boxes') copy.id = freeId(level, (item as LevelBox).id);
-  const list = [...level[pick.list], copy] as object[];
-  return { level: { ...level, [pick.list]: list }, pick: { list: pick.list, index: list.length - 1 } };
+/** A copy of the item, 1 m east of it, with a new id; the copy is picked. Rook's start cannot be copied (there is one). */
+export function duplicate(level: LevelData, id: Pick): { level: LevelData; pick: Pick } | null {
+  const at = locate(level, id);
+  if (!at || at.list === 'start') return null;
+  const item = level[at.list][at.index];
+  const copy = { ...item, xM: item.xM + 1, id: freeId(level, item.id) };
+  return { level: { ...level, [at.list]: [...level[at.list], copy] }, pick: copy.id };
 }
 
-/** The level without the picked item. Rook's start cannot be removed. */
-export function remove(level: LevelData, pick: Pick): LevelData | null {
-  if (pick.list === 'start') return null;
-  return { ...level, [pick.list]: (level[pick.list] as object[]).filter((_, i) => i !== pick.index) };
+/** The level without the item. Rook's start cannot be removed. */
+export function remove(level: LevelData, id: Pick): LevelData | null {
+  const at = locate(level, id);
+  if (!at || at.list === 'start') return null;
+  return { ...level, [at.list]: (level[at.list] as { id: string }[]).filter((item) => item.id !== id) };
 }
 
 /** What a new piece from the panel starts as (bands as in level.md); its centre goes where you look. */
@@ -142,29 +164,44 @@ export type BoxPreset = keyof typeof boxPresets;
 /** Adds a new box from a preset with its centre at (x, z); it is picked. */
 export function addBox(level: LevelData, preset: BoxPreset, xM: number, zM: number): { level: LevelData; pick: Pick } {
   const box: LevelBox = { id: freeId(level, preset.replace(/ /g, '-')), label: preset, xM, zM, ...boxPresets[preset] };
-  const boxes = [...level.boxes, box];
-  return { level: { ...level, boxes }, pick: { list: 'boxes', index: boxes.length - 1 } };
+  return { level: { ...level, boxes: [...level.boxes, box] }, pick: box.id };
 }
 
 /** Adds a dummy or an enemy spawn (a trooper) at (x, z), facing south like the arena's; it is picked. */
 export function addMarker(level: LevelData, list: 'dummies' | 'spawns', xM: number, zM: number): { level: LevelData; pick: Pick } {
-  const spot: LevelSpot = { xM, zM, yawDeg: 180 };
-  if (list === 'dummies') {
-    const dummies = [...level.dummies, spot];
-    return { level: { ...level, dummies }, pick: { list, index: dummies.length - 1 } };
-  }
-  const spawns = [...level.spawns, { ...spot, role: 'trooper' as const }];
-  return { level: { ...level, spawns }, pick: { list, index: spawns.length - 1 } };
+  const spot: LevelSpot = { id: freeId(level, list === 'dummies' ? 'dummy-1' : 'spawn-1'), xM, zM, yawDeg: 180 };
+  if (list === 'dummies') return { level: { ...level, dummies: [...level.dummies, spot] }, pick: spot.id };
+  return { level: { ...level, spawns: [...level.spawns, { ...spot, role: 'trooper' as const }] }, pick: spot.id };
 }
 
-/** Sets one field of the picked item (from the panel). `undefined` takes an optional field out. */
-export function setField(level: LevelData, pick: Pick, field: string, value: unknown): LevelData {
-  return withItem(level, pick, (item) => {
+/** Sets one field of the item (from the panel). `undefined` takes an optional field out. */
+export function setField(level: LevelData, id: Pick, field: string, value: unknown): LevelData {
+  return withItem(level, id, (item) => {
     const next: Record<string, unknown> = { ...item };
     if (value === undefined) delete next[field];
     else next[field] = value;
     return next;
   });
+}
+
+/**
+ * The floor movement for a right-button drag (5.2b): the mouse's sideways counts move along the camera's right, its
+ * up-and-down counts along where the camera looks (flat on the floor; pushing the mouse away moves the piece away).
+ * `yawRad` is the camera's yaw (0 looks north, -z; positive turns left, as the player's).
+ */
+export function dragOnFloor(yawRad: number, mouseX: number, mouseY: number, metresPerCount: number): { dx: number; dz: number } {
+  const forwardX = -Math.sin(yawRad);
+  const forwardZ = -Math.cos(yawRad);
+  const rightX = -forwardZ; // a quarter turn to the right of forward
+  const rightZ = forwardX;
+  const across = mouseX * metresPerCount;
+  const ahead = -mouseY * metresPerCount; // the mouse pushed away (up the screen) gives a negative count
+  return { dx: rightX * across + forwardX * ahead, dz: rightZ * across + forwardZ * ahead };
+}
+
+/** Rounds to a step (0.05 m while dragging, the 0.25 m grid with Shift); tidies the float's tail. */
+export function snapTo(m: number, stepM: number): number {
+  return Math.round(Math.round(m / stepM) * stepM * 1000) / 1000;
 }
 
 /** The levels before each change, newest last, for undo; at most `limit` kept. */

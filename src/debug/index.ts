@@ -193,8 +193,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.add(perfState, 'on').name('Show performance (4.13b)');
   gui.add({ mark: () => log.mark() }, 'mark').name(`Debug log: add a mark (${markKey})`);
   gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
-  // The level editor (5.2): F2, with the free camera; Save writes the level file and the page reloads with it.
-  const editMode = new EditMode({ scene, camera, gui, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on) });
+  // The level editor (5.2; its own panel bottom left since 5.2b): F2, with the free camera; Save writes the level file and
+  // the page reloads with it.
+  const editMode = new EditMode({ scene, camera, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on) });
+  gui.add({ toggle: () => editMode.toggle(!editMode.active) }, 'toggle').name(`Level editor on or off (${editModeKey})`);
 
   const actions = {
     resetAll: () => {
@@ -597,7 +599,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
         if (editMode.active) editMode.toggle(false); // leaving the free camera leaves the editor too
         else setFreeCamera(camera, !freeCamera.active);
       }
-      editMode.update(input);
+      editMode.update(input, dtSec);
       updateReadouts(dtSec);
       navOverlay.update();
       coverOverlay.update(dtSec);
