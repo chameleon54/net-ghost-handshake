@@ -77,6 +77,26 @@ describe('the level data format (5.2)', () => {
     expect(checkLevel(JSON.parse(text)).boxes[0]).not.toHaveProperty('yM');
   });
 
+  it('reads ramps and drawn-only or solid-only boxes, and refuses a box that is neither', () => {
+    const level = small();
+    level.boxes[0] = { ...level.boxes[0], ramp: 'north', drawn: false };
+    level.boxes[1] = { ...level.boxes[1], solid: false };
+    const checked = checkLevel(JSON.parse(levelToJson(level)));
+    expect(checked.boxes[0]).toMatchObject({ ramp: 'north', drawn: false });
+    expect(checked.boxes[1].solid).toBe(false);
+    expect(problemsOf({ ...small(), boxes: [{ ...small().boxes[0], ramp: 'up' }] })).toEqual(['boxes[0].ramp must be one of north, south, east, west']);
+    expect(problemsOf({ ...small(), boxes: [{ ...small().boxes[0], drawn: false, solid: false }] })).toEqual(['boxes[0] is neither drawn nor solid, so it does nothing']);
+  });
+
+  it('a ramp or a box that is only drawn is never cover', () => {
+    const level = small();
+    level.boxes[0] = { ...level.boxes[0], solid: false };
+    expect(levelCover(level)).toEqual([]);
+    level.boxes[0] = { ...level.boxes[0], solid: undefined, ramp: 'east' };
+    delete level.boxes[0].solid;
+    expect(levelCover(level)).toEqual([]);
+  });
+
   it('cover: generated from the props (never glass), less hand removals, plus hand additions', () => {
     const level = small();
     const generated = levelCover(level);

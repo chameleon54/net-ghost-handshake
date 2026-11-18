@@ -118,6 +118,7 @@ export const playerFolders: Folder<PlayerKey>[] = [
       { key: 'gravityMps2', label: 'Gravity (m/s²)', min: 5, max: 50, step: 0.5 },
       // Above about 36 m/s a fall could skip through a thin surface (see src/level/collision.ts).
       { key: 'maxFallSpeedMps', label: 'Fastest fall (m/s)', min: 5, max: 36, step: 0.5 },
+      { key: 'groundSnapM', label: 'Stay on a slope going down: snap within (m)', min: 0, max: 0.5, step: 0.01 },
       { key: 'clearanceToleranceM', label: 'Overlap tolerance (m)', min: 0, max: 0.1, step: 0.005 },
     ],
   },

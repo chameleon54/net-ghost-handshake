@@ -6,7 +6,7 @@ import { LevelCollision } from './collision';
 export interface GreyboxLevel {
   /** Everything to draw. */
   group: THREE.Group;
-  /** The boxes' meshes, one per box in the same order (the edit mode hides them while it draws its own, 5.2). */
+  /** The meshes the boxes are drawn with, one per look (the edit mode hides them while it draws its own, 5.2). */
   boxMeshes: THREE.Mesh[];
   /** The same boxes as collision, so what you see is what you bump into. */
   collision: LevelCollision;
@@ -16,26 +16,53 @@ export interface GreyboxLevel {
 
 const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33, glass: 0x7fc8e8 } as const;
 
-function boxGeometry(box: RoomBox): THREE.BufferGeometry {
+/**
+ * A box's triangles, in place. A ramp is the box with the top edge at its low end brought down to the bottom, so its top
+ * slopes up toward the side it names (north is -z).
+ */
+export function boxGeometry(box: RoomBox): THREE.BufferGeometry {
   const geometry = new THREE.BoxGeometry(box.widthM, box.heightM, box.depthM);
+  if (box.ramp) {
+    const position = geometry.getAttribute('position');
+    const lowEnd = { north: (_x: number, z: number) => z > 0, south: (_x: number, z: number) => z < 0, east: (x: number) => x < 0, west: (x: number) => x > 0 }[box.ramp];
+    for (let i = 0; i < position.count; i++) {
+      if (position.getY(i) > 0 && lowEnd(position.getX(i), position.getZ(i))) position.setY(i, -box.heightM / 2);
+    }
+    geometry.computeVertexNormals(); // each face has its own corners, so the normals stay flat per face
+  }
   geometry.translate(box.xM, (box.yM ?? 0) + box.heightM / 2, box.zM);
   return geometry;
 }
+
+/** Whether a box is drawn, and whether it collides (and is on the navigation mesh): both unless the level says not. */
+const isDrawn = (box: RoomBox) => box.drawn !== false;
+const isSolid = (box: RoomBox) => box.solid !== false;
 
 export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: RoomLayout = greyboxLayout): GreyboxLevel {
   const { size, floors, hazards } = layout;
   const group = new THREE.Group();
   const geometries = boxes.map(boxGeometry);
 
+  // One mesh per look (walls, props, markers, glass) with its boxes merged, so the room costs a few draw calls instead of
+  // one per box (the chamber has about 190 boxes, 5.3). The edit mode hides these while it draws its own copy (5.2).
   const boxMeshes: THREE.Mesh[] = [];
+  const looks = new Map<string, THREE.BufferGeometry[]>();
   boxes.forEach((box, index) => {
-    const material = box.glass
-      ? new THREE.MeshStandardMaterial({ color: shades.glass, transparent: true, opacity: 0.35, depthWrite: false }) // see-through (5.4 breaks it)
-      : new THREE.MeshStandardMaterial({ color: shades[box.kind] });
-    const mesh = new THREE.Mesh(geometries[index], material);
+    if (!isDrawn(box)) return; // a stair's ramp: walked on, not seen
+    const look = box.glass ? 'glass' : box.kind;
+    looks.set(look, [...(looks.get(look) ?? []), geometries[index]]);
+  });
+  for (const [look, parts] of looks) {
+    const geometry = mergeGeometries(parts, false);
+    if (!geometry) throw new Error(`Could not merge the room's ${look} boxes for drawing`);
+    const material =
+      look === 'glass'
+        ? new THREE.MeshStandardMaterial({ color: shades.glass, transparent: true, opacity: 0.35, depthWrite: false }) // see-through (5.4 breaks it)
+        : new THREE.MeshStandardMaterial({ color: shades[look as RoomBox['kind']] });
+    const mesh = new THREE.Mesh(geometry, material);
     boxMeshes.push(mesh);
     group.add(mesh);
-  });
+  }
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2),
@@ -70,14 +97,16 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   grid.position.y = 0.01;
   group.add(grid);
 
-  // Collision gets everything; a second copy of just the climbable boxes tells the ledge check what Space may climb.
-  const merged = mergeGeometries(geometries, false);
+  // Collision gets every solid box (not a stair's drawn steps); a second copy of just the climbable boxes tells the ledge
+  // check what Space may climb.
+  const solidBoxes = boxes.filter(isSolid);
+  const merged = mergeGeometries(geometries.filter((_, index) => isSolid(boxes[index])), false);
   if (!merged) throw new Error('Could not merge the room geometry for collision');
-  const climbableBoxes = boxes.filter(isClimbable);
+  const climbableBoxes = solidBoxes.filter(isClimbable);
   const climbable = climbableBoxes.length > 0 ? mergeGeometries(climbableBoxes.map(boxGeometry), false) : null;
   // The navigation mesh needs the floor too (collision treats height 0 as the floor instead).
   const floorGeometry = new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2);
-  const navigationGeometry = mergeGeometries([...boxes.map(boxGeometry), floorGeometry], false);
+  const navigationGeometry = mergeGeometries([...solidBoxes.map(boxGeometry), floorGeometry], false);
   if (!navigationGeometry) throw new Error('Could not merge the room geometry for navigation');
   return { group, boxMeshes, collision: new LevelCollision(merged, climbable), navigationGeometry };
 }

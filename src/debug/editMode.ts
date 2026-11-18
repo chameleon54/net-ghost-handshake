@@ -3,7 +3,8 @@ import type GUI from 'lil-gui';
 import type { Controller } from 'lil-gui';
 import type { Input } from '../core/input';
 import { roles } from '../config/roles';
-import { isClimbable } from '../data/greyboxRoom';
+import { isClimbable, rampRises } from '../data/greyboxRoom';
+import { boxGeometry } from '../level/greybox';
 import { LevelError, levelToJson, type LevelBox, type LevelData, type LevelSpot } from '../level/levelData';
 import { addBox, addMarker, boxPresets, duplicate, EditHistory, markerHeightM, markerWidthM, moveBy, pickAt, picked, remove, setField, turn, type BoxPreset, type Pick } from '../level/levelEdit';
 import { levelNameHeader, levelSaveUrl } from '../level/levelSave';
@@ -18,7 +19,7 @@ const stepM = 0.25;
 const bigStepM = 1;
 /** New pieces go this far in front of the camera, on the floor. */
 const placeAheadM = 4;
-const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d } as const;
+const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79cff, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d } as const;
 const roleColours = { trooper: 0x6b7f3a, flanker: 0x9fb4c8, heavy: 0x222222, leader: 0x8a2a2a } as const;
 const keyHelp = 'click pick · arrows move (Shift 1 m) · PgUp/PgDn height · R turn · N copy · Del delete · U undo · Esc panel · F2 off';
 
@@ -26,7 +27,7 @@ interface Parts {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   gui: GUI;
-  /** The level as loaded, and the meshes the game drew for its boxes (hidden once the copy here differs). */
+  /** The level as loaded, and the meshes the game draws its boxes with (hidden while the copy here is shown). */
   level: LevelData;
   boxMeshes: readonly THREE.Mesh[];
   /** Turns the free camera on or off. */
@@ -253,6 +254,12 @@ export class EditMode {
       this.fieldControllers.push(folder.add(values, 'climbable').onChange((v: boolean) => set('climbable', v)));
       this.fieldControllers.push(folder.add(values, 'surface', ['default', 'concrete', 'metal', 'tile']).onChange((v: string) => set('surface', v === 'default' ? undefined : v)));
       this.fieldControllers.push(folder.add(values, 'glass').name('glass (5.4)').onChange((v: boolean) => set('glass', v ? true : undefined)));
+      values.ramp = box.ramp ?? 'none';
+      values.drawn = box.drawn !== false;
+      values.solid = box.solid !== false;
+      this.fieldControllers.push(folder.add(values, 'ramp', ['none', ...rampRises]).name('ramp (rises toward)').onChange((v: string) => set('ramp', v === 'none' ? undefined : v)));
+      this.fieldControllers.push(folder.add(values, 'drawn').name('drawn (off: a stair ramp)').onChange((v: boolean) => set('drawn', v ? undefined : false)));
+      this.fieldControllers.push(folder.add(values, 'solid').name('solid (off: stair steps)').onChange((v: boolean) => set('solid', v ? undefined : false)));
     } else {
       number('xM');
       number('zM');
@@ -280,13 +287,15 @@ function describe(pick: Pick, item: LevelBox | LevelSpot): string {
   return `enemy spawn ${pick.index + 1} (${(item as LevelSpot & { role: string }).role}) ${at}, ${facing}`;
 }
 
+/** A box as the editor draws it; one the game does not draw (a stair's ramp) is a see-through violet, so it can be found. */
 function boxMesh(box: LevelBox, selected: boolean): THREE.Mesh {
-  const geometry = new THREE.BoxGeometry(box.widthM, box.heightM, box.depthM);
-  geometry.translate(box.xM, (box.yM ?? 0) + box.heightM / 2, box.zM);
+  const geometry = boxGeometry(box);
+  const hidden = box.drawn === false;
   const material = new THREE.MeshStandardMaterial({
-    color: box.glass ? colours.glass : colours[box.kind],
-    transparent: box.glass === true,
-    opacity: box.glass ? 0.35 : 1,
+    color: hidden ? colours.hidden : box.glass ? colours.glass : colours[box.kind],
+    transparent: hidden || box.glass === true,
+    opacity: hidden ? 0.25 : box.glass ? 0.35 : 1,
+    depthWrite: !hidden,
     emissive: selected ? colours.selected : 0x000000,
     emissiveIntensity: selected ? 0.6 : 0,
   });

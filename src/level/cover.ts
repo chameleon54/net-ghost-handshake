@@ -42,17 +42,20 @@ const clearOfOtherM = 0.35;
  * side one spot near each end, open toward that end, and a long low side one more in the middle to rise from. Spots inside
  * or against another box are dropped. The caller drops spots that are off the navigation mesh.
  */
-/** The cover spots of a level (5.2): generated from its boxes (glass is never cover), less the hand removals, plus the hand additions. */
+/**
+ * The cover spots of a level (5.2): generated from its solid boxes (glass is never cover; a stair's drawn-only steps are
+ * not there at all), less the hand removals, plus the hand additions.
+ */
 export function levelCover(level: LevelData): CoverPoint[] {
-  const generated = coverPointsFromBoxes(level.boxes.filter((box) => !box.glass));
+  const generated = coverPointsFromBoxes(level.boxes.filter((box) => !box.glass && box.solid !== false));
   const kept = generated.filter((p) => !level.coverRemove.some((c) => Math.hypot(c.xM - p.xM, c.zM - p.zM) <= coverRemoveRadiusM));
   return [...kept, ...level.coverAdd];
 }
 
-export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number }[]): CoverPoint[] {
+export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number; ramp?: string }[]): CoverPoint[] {
   const points: CoverPoint[] = [];
   for (const box of boxes) {
-    if (box.kind !== 'prop' || (box.yM ?? 0) > 0 || box.heightM < lowCoverM) continue;
+    if (box.kind !== 'prop' || box.ramp || (box.yM ?? 0) > 0 || box.heightM < lowCoverM) continue; // a ramp still blocks spots, but is never cover
     const height: CoverPoint['height'] = box.heightM >= highCoverM ? 'high' : 'low';
     // The four sides: where the spot line runs, which way it faces (toward the box), and the side's length.
     const sides = [

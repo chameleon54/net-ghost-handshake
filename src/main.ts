@@ -25,7 +25,9 @@ import { MovementSounds } from './audio/movementSounds';
 import { MovementReporter } from './player/movementReporter';
 import { surfaceAt } from './level/surfaces';
 import { EventBus } from './core/events';
-import { testArena, testArenaDummies, testArenaLayout, testArenaLevel, testArenaStandIns, testArenaStart } from './data/testArena';
+import { testArenaLevel } from './data/testArena';
+import { chamberLevel } from './data/chamber';
+import { levelLayout, spotRad } from './level/levelData';
 import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
 import { StandInEnemy } from './enemies/standInEnemy';
@@ -93,8 +95,11 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.5);
 sun.position.set(4, 8, 3);
 scene.add(sun);
 
-// The test arena (decision 236): larger than the old test room, built to the chamber rules, replaced in phase 5.
-const level = buildGreybox(testArena, testArenaLayout);
+// The level (5.3): the central chamber. On the dev server, `?level=test-arena` in the address loads the test arena
+// (decision 236) instead, for comparing the AI between the two.
+const levelData = import.meta.env.DEV && new URLSearchParams(location.search).get('level') === 'test-arena' ? testArenaLevel : chamberLevel;
+const levelFloor = levelLayout(levelData);
+const level = buildGreybox(levelData.boxes, levelFloor);
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
 // If the library cannot start, the game still runs: enemies find no routes and stand still, and the start screen says so.
@@ -110,12 +115,12 @@ try {
 // Cover spots generated from the level's props, with the level file's hand fixes (decision 236; 5.2), keeping only those
 // an enemy can stand on.
 const spotOnMesh = new THREE.Vector3();
-const arenaCover = levelCover(testArenaLevel).filter((point) => {
+const levelCoverPoints = levelCover(levelData).filter((point) => {
   const feet = new THREE.Vector3(point.xM, 0, point.zM);
   return navigation.closestPoint(feet, spotOnMesh) && Math.hypot(spotOnMesh.x - feet.x, spotOnMesh.z - feet.z) < 0.05;
 });
-const coverPoints = new CoverPoints(arenaCover, level.collision);
-const player = new Player(level.collision, testArenaStart);
+const coverPoints = new CoverPoints(levelCoverPoints, level.collision);
+const player = new Player(level.collision, spotRad(levelData.start));
 
 // Weapons. A gun decides when a shot happens; the shooter finds where it lands; the effects listen.
 const weaponEvents = new EventBus<WeaponEvents>();
@@ -125,7 +130,7 @@ const viewmodel = new Viewmodel(weaponEvents); // the weapon in hand, drawn in i
 viewmodel.setAspect(window.innerWidth / window.innerHeight);
 const aim = new Aim();
 const gunConfigs = { rifle: rifleConfig, pistol: pistolConfig };
-const dummies = testArenaDummies.map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
+const dummies = levelData.dummies.map(spotRad).map(({ xM, zM, yawRad }) => new Dummy(xM, zM, yawRad));
 const dummyViews = dummies.map((dummy) => new DummyView(dummy));
 for (const view of dummyViews) scene.add(view.group);
 // The stand-in enemy (4.1): temporary, it walks the navigation mesh (4.2) to cover that hides it from Rook (4.3) and
@@ -156,7 +161,7 @@ const quarry = {
 // Since 4.6 there are four, a squad: the coordinator hands out firing slots and keeps one hit budget for all of them.
 // Each has its own world (it remembers where it last saw Rook from). The dev panel's count says how many are in the room.
 const squad = new SquadCoordinator();
-const standIns = testArenaStandIns.map((spawn) => {
+const standIns = levelData.spawns.map(spotRad).map((spawn) => {
   const world = new StandInWorld(
     weaponEvents,
     level.collision,
@@ -337,11 +342,11 @@ const sounds = new SoundTap(audio, () => audio.running); // every sound passes t
 const weaponSounds = new WeaponSounds(weaponEvents, sounds);
 new NoiseReporter(weaponEvents, () => camera.position);
 // Movement sounds (3.4): the reporter says what the player did, the sounds and the noise service listen.
-const movement = new MovementReporter(weaponEvents, player, (x, y, z) => surfaceAt(x, y, z, testArena, testArenaLayout.floors));
+const movement = new MovementReporter(weaponEvents, player, (x, y, z) => surfaceAt(x, y, z, levelData.boxes, levelFloor.floors));
 new MovementSounds(weaponEvents, sounds);
 // Enemy sounds (4.14): footsteps counted by distance moved, and each gun's shot.
 new EnemySounds(weaponEvents, sounds);
-const enemySteps = new EnemySteps(weaponEvents, (x, y, z) => surfaceAt(x, y, z, testArena, testArenaLayout.floors));
+const enemySteps = new EnemySteps(weaponEvents, (x, y, z) => surfaceAt(x, y, z, levelData.boxes, levelFloor.floors));
 weaponEvents.on('enemy:downed', ({ position }) => {
   const caller = downCaller(activeEnemies, position); // the one that fell is no longer awake
   if (caller) callout('squadmate_down', caller);
@@ -487,7 +492,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: testArenaLevel, levelBoxMeshes: level.boxMeshes });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: levelData, levelBoxMeshes: level.boxMeshes });
   });
 }
 
@@ -509,7 +514,7 @@ const loop = new Loop(
       if (input.consumePress('Enter')) restart();
       return;
     }
-    if (standsOnHazard(player.position.x, player.position.y, player.position.z, testArenaLayout.hazards)) {
+    if (standsOnHazard(player.position.x, player.position.y, player.position.z, levelFloor.hazards)) {
       playerHealth.damage(healthConfig.hazardDamagePerSec * stepSec, 'hazard');
     }
     playerHealth.update(stepSec);
@@ -745,8 +750,11 @@ const loop = new Loop(
     const renderStartMs = performance.now();
     renderer.clear();
     renderer.render(scene, camera);
-    renderer.clearDepth(); // the weapon is drawn over the world, so it never sinks into walls
-    renderer.render(viewmodel.scene, viewmodel.camera);
+    if (!debug?.freeCameraActive) {
+      // The weapon is drawn over the world, so it never sinks into walls. Not while the free camera (and the level editor) flies.
+      renderer.clearDepth();
+      renderer.render(viewmodel.scene, viewmodel.camera);
+    }
     debug?.perf.addRender(performance.now() - renderStartMs);
   },
   () => game.isPlaying,

@@ -1,5 +1,5 @@
 import { roles, type Role } from '../config/roles';
-import type { FloorZone, HazardPad, RoomBox, RoomLayout, Surface } from '../data/greyboxRoom';
+import { rampRises, type FloorZone, type HazardPad, type RoomBox, type RoomLayout, type Surface } from '../data/greyboxRoom';
 import type { CoverPoint } from './cover';
 
 // The level data format (milestone 5.2, decision 273; level.md "Level data"). A level is a JSON file in src/data/levels/,
@@ -173,10 +173,17 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   const climbable = r.flag(o.climbable, `${path}.climbable`);
   const surface = r.optional(o.surface, () => r.oneOf(o.surface, `${path}.surface`, surfaces));
   const glass = r.flag(o.glass, `${path}.glass`);
+  const ramp = r.optional(o.ramp, () => r.oneOf(o.ramp, `${path}.ramp`, rampRises));
+  const drawn = r.flag(o.drawn, `${path}.drawn`);
+  const solid = r.flag(o.solid, `${path}.solid`);
   if (yM !== undefined) box.yM = yM;
   if (climbable !== undefined) box.climbable = climbable;
   if (surface !== undefined) box.surface = surface;
   if (glass !== undefined) box.glass = glass;
+  if (ramp !== undefined) box.ramp = ramp;
+  if (drawn !== undefined) box.drawn = drawn;
+  if (solid !== undefined) box.solid = solid;
+  if (drawn === false && solid === false) r.problems.push(`${path} is neither drawn nor solid, so it does nothing`);
   return box;
 }
 

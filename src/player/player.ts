@@ -3,7 +3,7 @@ import { inputConfig } from '../config/input';
 import { healthConfig } from '../config/health';
 import { playerConfig } from '../config/player';
 import type { Input } from '../core/input';
-import type { LevelCollision } from '../level/collision';
+import type { Contact, LevelCollision } from '../level/collision';
 import { fallSlowSec } from './fall';
 import { HeadPlacer } from './head';
 import { easeToward, limitLean, rollForLean, wantedLean } from './lean';
@@ -44,6 +44,8 @@ export class Player {
   private slowLeftSec = 0;
 
   private readonly previousPosition = this.position.clone();
+  /** Where he was before a ground-snap try, to go back to if there is no ground near below. */
+  private readonly snapFrom = new THREE.Vector3();
   private readonly velocity: Vec2 = { x: 0, z: 0 };
   private velocityYMps = 0;
   private readonly wish: Vec2 = { x: 0, z: 0 };
@@ -145,6 +147,25 @@ export class Player {
     this.updateLean(dtSec, input);
   }
 
+  /**
+   * He was on the ground and has just left it without jumping (Rook cannot jump): if ground is within `groundSnapM` below,
+   * he is put down on it (walking down a ramp); if not, he is where he was and falls (a ledge). Returns the contact to use.
+   */
+  private snapToGround(contact: Contact): Contact {
+    const down = contact.down;
+    this.snapFrom.copy(this.position);
+    this.position.y = Math.max(this.position.y - playerConfig.groundSnapM, 0);
+    const probe = this.collision.pushOut(this.position, playerConfig.capsuleRadiusM, capsuleHeightFor(this.stance.stance), playerConfig.collisionIterations, true);
+    if (probe.up || this.position.y <= 0) {
+      this.velocityYMps = 0;
+      return probe;
+    }
+    this.position.copy(this.snapFrom); // nothing near below: a real drop
+    probe.up = false;
+    probe.down = down;
+    return probe;
+  }
+
   private updateWalking(dtSec: number, input: Input, crouchPressed: boolean): void {
     const forward = (input.isKeyDown('KeyW') ? 1 : 0) - (input.isKeyDown('KeyS') ? 1 : 0);
     const right = (input.isKeyDown('KeyD') ? 1 : 0) - (input.isKeyDown('KeyA') ? 1 : 0);
@@ -194,7 +215,7 @@ export class Player {
     // Gravity. The floor is height 0; props push the capsule up (standing on them) or down (a ceiling).
     this.velocityYMps = Math.max(this.velocityYMps - playerConfig.gravityMps2 * dtSec, -playerConfig.maxFallSpeedMps);
     this.position.y += this.velocityYMps * dtSec;
-    const contact = this.collision.pushOut(
+    let contact = this.collision.pushOut(
       this.position,
       playerConfig.capsuleRadiusM,
       capsuleHeightFor(this.stance.stance),
@@ -202,6 +223,7 @@ export class Player {
       true,
     );
     const wasGrounded = this.grounded;
+    if (!contact.up && wasGrounded && this.position.y > 0 && this.velocityYMps <= 0) contact = this.snapToGround(contact);
     const impactMps = -this.velocityYMps;
     if (this.position.y < 0) {
       this.position.y = 0;
