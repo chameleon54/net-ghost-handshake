@@ -26,6 +26,8 @@ import { enemySoundConfig, enemySoundConfigDefaults } from '../config/enemySound
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
 import { EnemySpeech } from './speech';
+import { EditMode } from './editMode';
+import type { LevelData } from '../level/levelData';
 import { ReadoutBox } from './readoutBox';
 import { formatPerf, PerfMeter } from './perf';
 import { debugLogStartHeader, debugLogUrl, EventLog } from './eventLog';
@@ -99,6 +101,9 @@ interface Parts {
   collision: LevelCollision;
   /** The game's event bus, for the debug log (decision 260). */
   events: EventBus<WeaponEvents>;
+  /** The level as loaded from its data file, and the meshes drawn for its boxes, for the level editor (5.2). */
+  level: LevelData;
+  levelBoxMeshes: readonly THREE.Mesh[];
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -111,8 +116,9 @@ const eyeDotColour = 0xff4444;
 const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
+const editModeKey = 'F2';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events, level, levelBoxMeshes }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
   const perf = new PerfMeter();
@@ -187,6 +193,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.add(perfState, 'on').name('Show performance (4.13b)');
   gui.add({ mark: () => log.mark() }, 'mark').name(`Debug log: add a mark (${markKey})`);
   gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
+  // The level editor (5.2): F2, with the free camera; Save writes the level file and the page reloads with it.
+  const editMode = new EditMode({ scene, camera, gui, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on) });
 
   const actions = {
     resetAll: () => {
@@ -537,6 +545,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : squad.flankers.length > 0 ? 'waits while a flank is on'
       : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
+    if (editMode.active) {
+      readoutBox.show(editMode.lines(), true); // the editor's lines in place of the usual ones, shown even when the tick hides them
+      return;
+    }
     readoutBox.show([
       ...(perfState.on ? formatPerf(perf.report) : []),
       `health    ${readouts.health}`,
@@ -580,7 +592,12 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       const dtSec = Math.min((now - lastFrameMs) / 1000, maxFrameSec);
       lastFrameMs = now;
 
-      if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
+      if (input.consumePress(editModeKey)) editMode.toggle(!editMode.active);
+      if (input.consumePress(freeCameraKey)) {
+        if (editMode.active) editMode.toggle(false); // leaving the free camera leaves the editor too
+        else setFreeCamera(camera, !freeCamera.active);
+      }
+      editMode.update(input);
       updateReadouts(dtSec);
       navOverlay.update();
       coverOverlay.update(dtSec);

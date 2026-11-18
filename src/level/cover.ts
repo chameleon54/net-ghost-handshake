@@ -4,6 +4,7 @@ import { roleConfig } from '../config/roles';
 import { dummyConfig } from '../config/dummy';
 import { standInConfig } from '../config/standInEnemy';
 import type { LevelCollision } from './collision';
+import { coverRemoveRadiusM, type LevelData } from './levelData';
 
 /** A spot behind cover, placed by hand in the level data (level.md, "Cover points"). */
 export interface CoverPoint {
@@ -41,6 +42,13 @@ const clearOfOtherM = 0.35;
  * side one spot near each end, open toward that end, and a long low side one more in the middle to rise from. Spots inside
  * or against another box are dropped. The caller drops spots that are off the navigation mesh.
  */
+/** The cover spots of a level (5.2): generated from its boxes (glass is never cover), less the hand removals, plus the hand additions. */
+export function levelCover(level: LevelData): CoverPoint[] {
+  const generated = coverPointsFromBoxes(level.boxes.filter((box) => !box.glass));
+  const kept = generated.filter((p) => !level.coverRemove.some((c) => Math.hypot(c.xM - p.xM, c.zM - p.zM) <= coverRemoveRadiusM));
+  return [...kept, ...level.coverAdd];
+}
+
 export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number }[]): CoverPoint[] {
   const points: CoverPoint[] = [];
   for (const box of boxes) {

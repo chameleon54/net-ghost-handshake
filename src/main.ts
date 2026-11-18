@@ -6,7 +6,7 @@ import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
 import { Navigation } from './level/navigation';
-import { CoverPoints, coverPointsFromBoxes } from './level/cover';
+import { CoverPoints, levelCover } from './level/cover';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
 import { createPointerLock } from './platform/pointerLock';
@@ -25,7 +25,7 @@ import { MovementSounds } from './audio/movementSounds';
 import { MovementReporter } from './player/movementReporter';
 import { surfaceAt } from './level/surfaces';
 import { EventBus } from './core/events';
-import { testArena, testArenaDummies, testArenaLayout, testArenaStandIns, testArenaStart } from './data/testArena';
+import { testArena, testArenaDummies, testArenaLayout, testArenaLevel, testArenaStandIns, testArenaStart } from './data/testArena';
 import { Dummy } from './enemies/dummy';
 import { DummyView } from './enemies/dummyView';
 import { StandInEnemy } from './enemies/standInEnemy';
@@ -107,9 +107,10 @@ try {
   navigation = Navigation.unavailable();
   navigationFailed = true;
 }
-// Cover spots generated from the arena's props (decision 236), keeping only those an enemy can stand on.
+// Cover spots generated from the level's props, with the level file's hand fixes (decision 236; 5.2), keeping only those
+// an enemy can stand on.
 const spotOnMesh = new THREE.Vector3();
-const arenaCover = coverPointsFromBoxes(testArena).filter((point) => {
+const arenaCover = levelCover(testArenaLevel).filter((point) => {
   const feet = new THREE.Vector3(point.xM, 0, point.zM);
   return navigation.closestPoint(feet, spotOnMesh) && Math.hypot(spotOnMesh.x - feet.x, spotOnMesh.z - feet.z) < 0.05;
 });
@@ -486,7 +487,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: testArenaLevel, levelBoxMeshes: level.boxMeshes });
   });
 }
 

@@ -25,6 +25,8 @@ export interface RoomBox {
   climbable?: boolean;
   /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
   yM?: number;
+  /** Glass (reserved for 5.4, level.md "Breakable glass"): drawn see-through and never cover; it still blocks sight and bullets until 5.4. */
+  glass?: boolean;
   widthM: number; // size along x
   depthM: number; // size along z
   heightM: number;

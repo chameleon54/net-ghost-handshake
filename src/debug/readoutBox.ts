@@ -13,9 +13,9 @@ export class ReadoutBox {
     document.body.appendChild(this.element);
   }
 
-  /** Shows these lines (only touches the page when something changed). */
-  show(lines: readonly string[]): void {
-    this.element.style.display = this.shown ? 'block' : 'none';
+  /** Shows these lines (only touches the page when something changed). `always`: shown even when the tick hides the box. */
+  show(lines: readonly string[], always = false): void {
+    this.element.style.display = this.shown || always ? 'block' : 'none';
     const text = lines.join('\n');
     if (text === this.text) return;
     this.text = text;

@@ -1,0 +1,66 @@
+{
+  "formatVersion": 1,
+  "name": "test-arena",
+  "floor": {
+    "widthM": 30,
+    "depthM": 24,
+    "surfaces": [
+      {"xM":-9,"zM":9,"widthM":4,"depthM":3,"surface":"tile"},
+      {"xM":9,"zM":-9.5,"widthM":4,"depthM":3,"surface":"metal"}
+    ],
+    "hazards": [
+      {"xM":12.5,"zM":-10.5,"widthM":2,"depthM":2}
+    ]
+  },
+  "start": {"xM":0,"zM":10.5,"yawDeg":0},
+  "dummies": [
+    {"xM":3,"zM":9,"yawDeg":180},
+    {"xM":-8,"zM":3.5,"yawDeg":180},
+    {"xM":8,"zM":8.5,"yawDeg":180}
+  ],
+  "spawns": [
+    {"xM":0,"zM":-10.8,"yawDeg":180,"role":"leader"},
+    {"xM":-9,"zM":-10.5,"yawDeg":180,"role":"trooper"},
+    {"xM":9,"zM":-10.5,"yawDeg":180,"role":"flanker"},
+    {"xM":13,"zM":-2.5,"yawDeg":135,"role":"heavy"},
+    {"xM":-4.5,"zM":-11,"yawDeg":180,"role":"trooper"},
+    {"xM":-13.5,"zM":-9.5,"yawDeg":180,"role":"trooper"},
+    {"xM":-6,"zM":-9,"yawDeg":180,"role":"flanker"},
+    {"xM":-13,"zM":-2.5,"yawDeg":225,"role":"heavy"}
+  ],
+  "boxes": [
+    {"id":"north-wall","label":"north wall","kind":"wall","xM":0,"zM":-12.15,"widthM":30.6,"depthM":0.3,"heightM":3},
+    {"id":"south-wall","label":"south wall","kind":"wall","xM":0,"zM":12.15,"widthM":30.6,"depthM":0.3,"heightM":3},
+    {"id":"west-wall","label":"west wall","kind":"wall","xM":-15.15,"zM":0,"widthM":0.3,"depthM":24,"heightM":3},
+    {"id":"east-wall","label":"east wall","kind":"wall","xM":15.15,"zM":0,"widthM":0.3,"depthM":24,"heightM":3},
+    {"id":"bench-sw","label":"bench SW","kind":"prop","xM":-6,"zM":6,"widthM":3,"depthM":0.8,"heightM":1},
+    {"id":"bench-se","label":"bench SE","kind":"prop","xM":6,"zM":6,"widthM":3,"depthM":0.8,"heightM":5,"climbable":true},
+    {"id":"crate-s","label":"crate S","kind":"prop","xM":0,"zM":7.5,"widthM":1.2,"depthM":1.2,"heightM":1},
+    {"id":"rack-sw","label":"rack SW","kind":"prop","xM":-11,"zM":5,"widthM":0.8,"depthM":3,"heightM":2.4},
+    {"id":"rack-se","label":"rack SE","kind":"prop","xM":11,"zM":5,"widthM":0.8,"depthM":3,"heightM":2.4},
+    {"id":"climbable-crate-s","label":"climbable crate S","kind":"prop","xM":-2.5,"zM":9.5,"widthM":1.5,"depthM":1.5,"heightM":1.5},
+    {"id":"raised-corner-se","label":"raised corner SE","kind":"prop","xM":12,"zM":9.5,"widthM":3,"depthM":2.5,"heightM":1.9},
+    {"id":"pillar-w","label":"pillar W","kind":"prop","xM":-3.5,"zM":0,"widthM":0.8,"depthM":0.8,"heightM":3},
+    {"id":"pillar-e","label":"pillar E","kind":"prop","xM":3.5,"zM":0,"widthM":0.8,"depthM":0.8,"heightM":3},
+    {"id":"tank-w","label":"tank W","kind":"prop","xM":-9,"zM":-1,"widthM":1.6,"depthM":1.6,"heightM":2.2},
+    {"id":"tank-e","label":"tank E","kind":"prop","xM":9,"zM":-1,"widthM":1.6,"depthM":1.6,"heightM":2.2},
+    {"id":"bench-middle-s","label":"bench middle S","kind":"prop","xM":0,"zM":3,"widthM":4,"depthM":0.8,"heightM":1},
+    {"id":"climbable-crate-w","label":"climbable crate W","kind":"prop","xM":-6,"zM":2,"widthM":1.5,"depthM":1.5,"heightM":1.5},
+    {"id":"climbable-crate-e","label":"climbable crate E","kind":"prop","xM":6,"zM":-2.5,"widthM":1.5,"depthM":1.5,"heightM":1.5},
+    {"id":"bench-middle-n","label":"bench middle N","kind":"prop","xM":0,"zM":-3,"widthM":4,"depthM":0.8,"heightM":1},
+    {"id":"bench-nw","label":"bench NW","kind":"prop","xM":-6,"zM":-6.5,"widthM":3,"depthM":0.8,"heightM":1},
+    {"id":"bench-ne","label":"bench NE","kind":"prop","xM":6,"zM":-6.5,"widthM":3,"depthM":0.8,"heightM":1},
+    {"id":"rack-nw","label":"rack NW","kind":"prop","xM":-11,"zM":-6,"widthM":0.8,"depthM":3,"heightM":2.4},
+    {"id":"rack-ne","label":"rack NE","kind":"prop","xM":11,"zM":-6,"widthM":0.8,"depthM":3,"heightM":2.4},
+    {"id":"crate-n","label":"crate N","kind":"prop","xM":0,"zM":-8,"widthM":1.2,"depthM":1.2,"heightM":1},
+    {"id":"partition-w","label":"partition W","kind":"prop","xM":-3.5,"zM":-10,"widthM":3,"depthM":0.3,"heightM":2.4},
+    {"id":"partition-e","label":"partition E","kind":"prop","xM":3.5,"zM":-10,"widthM":3,"depthM":0.3,"heightM":2.4}
+  ],
+  "coverAdd": [],
+  "coverRemove": [],
+  "acousticZones": [
+    {"xM":0,"zM":0,"widthM":30,"depthM":24,"zone":"big-hall"}
+  ],
+  "speakers": [],
+  "arrivals": []
+}

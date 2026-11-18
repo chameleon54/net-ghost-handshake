@@ -6,13 +6,15 @@ import { LevelCollision } from './collision';
 export interface GreyboxLevel {
   /** Everything to draw. */
   group: THREE.Group;
+  /** The boxes' meshes, one per box in the same order (the edit mode hides them while it draws its own, 5.2). */
+  boxMeshes: THREE.Mesh[];
   /** The same boxes as collision, so what you see is what you bump into. */
   collision: LevelCollision;
   /** Every box plus the floor, as one set of triangles: what the navigation mesh is built from (4.2). */
   navigationGeometry: THREE.BufferGeometry;
 }
 
-const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33 } as const;
+const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33, glass: 0x7fc8e8 } as const;
 
 function boxGeometry(box: RoomBox): THREE.BufferGeometry {
   const geometry = new THREE.BoxGeometry(box.widthM, box.heightM, box.depthM);
@@ -25,8 +27,14 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   const group = new THREE.Group();
   const geometries = boxes.map(boxGeometry);
 
+  const boxMeshes: THREE.Mesh[] = [];
   boxes.forEach((box, index) => {
-    group.add(new THREE.Mesh(geometries[index], new THREE.MeshStandardMaterial({ color: shades[box.kind] })));
+    const material = box.glass
+      ? new THREE.MeshStandardMaterial({ color: shades.glass, transparent: true, opacity: 0.35, depthWrite: false }) // see-through (5.4 breaks it)
+      : new THREE.MeshStandardMaterial({ color: shades[box.kind] });
+    const mesh = new THREE.Mesh(geometries[index], material);
+    boxMeshes.push(mesh);
+    group.add(mesh);
   });
 
   const floor = new THREE.Mesh(
@@ -71,5 +79,5 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   const floorGeometry = new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2);
   const navigationGeometry = mergeGeometries([...boxes.map(boxGeometry), floorGeometry], false);
   if (!navigationGeometry) throw new Error('Could not merge the room geometry for navigation');
-  return { group, collision: new LevelCollision(merged, climbable), navigationGeometry };
+  return { group, boxMeshes, collision: new LevelCollision(merged, climbable), navigationGeometry };
 }
