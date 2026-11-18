@@ -186,6 +186,11 @@ describe('SquadCoordinator suppress and advance (4.9)', () => {
     expect(alone.assignAdvance([a], () => ({ cost: 1 }), [a], isHeavy)).toBeNull();
     expect(alone.playFailure).toBe('nobody to give covering fire');
     expect(alone.playDue).toBe(false); // tries again later
+    const uncovered = due();
+    let planned = 0;
+    expect(uncovered.assignAdvance([a, b], () => { planned++; return { cost: 1 }; }, [], isHeavy)).toBeNull();
+    expect(uncovered.playFailure).toBe('nobody to give covering fire');
+    expect(planned).toBe(0); // nobody can cover: no move is planned at all (5.3c)
     const nowhere = due();
     expect(nowhere.assignAdvance([a], () => null, [b, heavy], isHeavy)).toBeNull();
     expect(nowhere.playFailure).toBe('no closer cover to move up to');

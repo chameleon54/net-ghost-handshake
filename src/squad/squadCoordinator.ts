@@ -341,6 +341,12 @@ export class SquadCoordinator {
       this.playWaitLeftSec = squadConfig.playRetrySec;
       return null;
     }
+    if (coverers.length === 0 && !movers.some(selfCovers)) {
+      // Nobody could cover any mover: say so without planning every move first (5.3c: that cost a frame every 2 s).
+      this.playFailure = 'nobody to give covering fire';
+      this.playWaitLeftSec = squadConfig.playRetrySec;
+      return null;
+    }
     const best = cheapestOf(movers, plan);
     const mover = best?.member;
     const others = coverers.filter((member) => member !== mover);
