@@ -5,6 +5,10 @@
 /** What a floor or the top of a prop is made of. It decides which footstep sound plays (audio.md). */
 export type Surface = 'concrete' | 'metal' | 'tile';
 
+/** Which way a ramp rises. */
+export type RampRise = 'north' | 'south' | 'east' | 'west';
+export const rampRises: readonly RampRise[] = ['north', 'south', 'east', 'west'];
+
 /** A patch of floor with its own surface. Anywhere not covered is concrete. */
 export interface FloorZone {
   xM: number;
@@ -25,6 +29,17 @@ export interface RoomBox {
   climbable?: boolean;
   /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
   yM?: number;
+  /** Glass (reserved for 5.4, level.md "Breakable glass"): drawn see-through and never cover; it still blocks sight and bullets until 5.4. */
+  glass?: boolean;
+  /**
+   * A ramp (5.3 follow-up): the box's top slopes from its bottom at one end up to its full height at the end it names
+   * ('north' is -z). Used for stairs: a smooth slope to walk on, with the steps drawn over it.
+   */
+  ramp?: RampRise;
+  /** False: collides but is not drawn (a stair's ramp). Left out: drawn. */
+  drawn?: boolean;
+  /** False: drawn but does not collide, and is not on the navigation mesh (a stair's steps over its ramp). Left out: solid. */
+  solid?: boolean;
   widthM: number; // size along x
   depthM: number; // size along z
   heightM: number;

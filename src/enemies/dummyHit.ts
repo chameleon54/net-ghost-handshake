@@ -27,9 +27,10 @@ export function rayHitDummy(ray: Ray, dummy: Target, maxDistanceM: number, out: 
   if (!dummy.hittable) return false;
   const { bodyWidthM, bodyDepthM, headRadiusM } = dummyConfig;
   const bodyHeightM = dummy.heightM - 2 * headRadiusM; // a crouched target is shorter, its head lower
-  bodyBox.min.set(dummy.xM - bodyWidthM / 2, 0, dummy.zM - bodyDepthM / 2);
-  bodyBox.max.set(dummy.xM + bodyWidthM / 2, bodyHeightM, dummy.zM + bodyDepthM / 2);
-  headSphere.center.set(dummy.xM, bodyHeightM + headRadiusM, dummy.zM);
+  const feetM = dummy.yM ?? 0;
+  bodyBox.min.set(dummy.xM - bodyWidthM / 2, feetM, dummy.zM - bodyDepthM / 2);
+  bodyBox.max.set(dummy.xM + bodyWidthM / 2, feetM + bodyHeightM, dummy.zM + bodyDepthM / 2);
+  headSphere.center.set(dummy.xM, feetM + bodyHeightM + headRadiusM, dummy.zM);
   headSphere.radius = headRadiusM;
 
   const headM = ray.intersectSphere(headSphere, headPoint) ? ray.origin.distanceTo(headPoint) : Infinity;

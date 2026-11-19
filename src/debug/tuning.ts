@@ -118,6 +118,7 @@ export const playerFolders: Folder<PlayerKey>[] = [
       { key: 'gravityMps2', label: 'Gravity (m/s²)', min: 5, max: 50, step: 0.5 },
       // Above about 36 m/s a fall could skip through a thin surface (see src/level/collision.ts).
       { key: 'maxFallSpeedMps', label: 'Fastest fall (m/s)', min: 5, max: 36, step: 0.5 },
+      { key: 'groundSnapM', label: 'Stay on a slope going down: snap within (m)', min: 0, max: 0.5, step: 0.01 },
       { key: 'clearanceToleranceM', label: 'Overlap tolerance (m)', min: 0, max: 0.1, step: 0.005 },
     ],
   },
@@ -492,6 +493,10 @@ export const standInFolder: Folder<StandInKey> = {
     { key: 'lookaheadSec', label: 'Moving: steers this far ahead in time (s)', min: 0, max: 1, step: 0.05 },
     { key: 'creepSpeedMps', label: 'Moving: creeps into its spot at least (m/s)', min: 0.05, max: 2, step: 0.05 },
     { key: 'turnAccelMps2', label: 'Moving: turns this hard on the move (m/s^2 sideways)', min: 1, max: 60, step: 1 },
+    { key: 'friendLineMarginM', label: 'Squadmate in the line of fire within (m beyond its body)', min: 0, max: 1, step: 0.05 },
+    { key: 'friendBlockedMoveSec', label: 'Squadmate in the line this long: moves on (s)', min: 0.2, max: 10, step: 0.1 },
+    { key: 'topUpBelowShare', label: 'Tops up its magazine below this share', min: 0, max: 1, step: 0.05 },
+    { key: 'topUpCalmSec', label: '...after no sight or sound of you for (s)', min: 0, max: 30, step: 0.5 },
     { key: 'stopRangeM', label: 'Stops to fire within (m)', min: 1, max: 30, step: 0.5 },
     { key: 'closestM', label: 'Never closer than (m)', min: 0.5, max: 5, step: 0.1 },
     { key: 'repathIntervalSec', label: 'Plans a fresh route every (s)', min: 0.1, max: 3, step: 0.1 },
@@ -589,7 +594,11 @@ export const roleSliders: Slider<RoleKey>[] = [
 ];
 
 /** The sliders for one enemy gun's values (4.12); the dev panel shows one folder of these per gun. */
-export const enemyGunSliders: Slider<EnemyGunKey>[] = [{ key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 }];
+export const enemyGunSliders: Slider<EnemyGunKey>[] = [
+  { key: 'damagePerHit', label: 'Damage per hit', min: 0, max: 100, step: 1 },
+  { key: 'magazineRounds', label: 'Magazine (rounds)', min: 1, max: 200, step: 1 },
+  { key: 'reloadSec', label: 'Reload takes (s)', min: 0, max: 10, step: 0.1 },
+];
 
 export const enemyGrenadeFolder: Folder<EnemyGrenadeKey> = {
   title: 'Enemy grenades (4.12)',
@@ -631,6 +640,7 @@ export const enemySoundFolder: Folder<EnemySoundKey> = {
     { key: 'pistolVolume', label: 'Pistol shot volume (flankers)', min: 0, max: 2, step: 0.05 },
     { key: 'rifleVolume', label: 'Rifle shot volume (troopers, leader)', min: 0, max: 2, step: 0.05 },
     { key: 'lmgVolume', label: 'Machine gun shot volume (heavy)', min: 0, max: 2, step: 0.05 },
+    { key: 'reloadVolume', label: 'Reload volume', min: 0, max: 2, step: 0.05 },
   ],
 };
 
@@ -638,6 +648,7 @@ export const pickupFolder: Folder<PickupKey> = {
   title: 'Drops and pick-ups (4.12)',
   sliders: [
     { key: 'pickupRadiusM', label: 'Picked up within (m of your feet)', min: 0.2, max: 4, step: 0.1 },
+    { key: 'pickupReachUpM', label: 'Picked up within (m up or down)', min: 0.5, max: 5, step: 0.1 },
     { key: 'dropSpreadM', label: 'Drops lie apart (m)', min: 0, max: 1.5, step: 0.05 },
     { key: 'glowPulseSec', label: 'Glow pulses every (s)', min: 0.2, max: 5, step: 0.1 },
   ],
@@ -662,14 +673,18 @@ export const tierSliders: Slider<TierKey>[] = [
   { key: 'throwsGrenades', label: 'Grenades: throws at all (0 or 1)', min: 0, max: 1, step: 1 },
   { key: 'holdBeforeGrenadeSec', label: 'Grenades: after you hold a spot for (s)', min: 1, max: 60, step: 0.5 },
   { key: 'grenadeCooldownSec', label: 'Grenades: wait before the next (s)', min: 0, max: 120, step: 1 },
+  { key: 'storeyPush', label: 'Storeys: climbs to you at all (0 or 1)', min: 0, max: 1, step: 1 },
+  { key: 'storeyPushAfterSec', label: 'Storeys: after you fight from another floor for (s)', min: 1, max: 60, step: 0.5 },
+  { key: 'storeyPushMax', label: 'Storeys: climbing at once (at most)', min: 1, max: 8, step: 1 },
 ];
 
 export const squadFolder: Folder<SquadKey> = {
   title: 'Squad',
   sliders: [
     { key: 'standInCount', label: 'Stand-ins in the room (from next Respawn)', min: 1, max: 8, step: 1 },
+    { key: 'respawnTogether', label: 'Respawn the squad together, after the last is down (1) or each alone (0)', min: 0, max: 1, step: 1 },
     { key: 'firingSlots', label: 'Firing slots (fire at once)', min: 1, max: 4, step: 1 },
-    { key: 'hitGapSec', label: 'Hit budget: one hit per (s), whole squad', min: 0, max: 3, step: 0.05 },
+    { key: 'hitGapSec', label: 'Hit budget: no other enemy hits within (s); 0 off', min: 0, max: 3, step: 0.05 },
     { key: 'slotRetrySec', label: 'Refused peek asks again after (s)', min: 0.05, max: 3, step: 0.05 },
     { key: 'holdRadiusM', label: 'Flank: you hold a spot within (m)', min: 0.5, max: 8, step: 0.25 },
     { key: 'flankRetrySec', label: 'Flank: none possible, try again after (s)', min: 0.2, max: 10, step: 0.1 },
@@ -690,6 +705,10 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'suppressAfterMoveSec', label: 'Suppress: stops after the move by (s)', min: 0, max: 5, step: 0.1 },
     { key: 'pinnedByFireM', label: 'Your near miss pins an enemy within (m)', min: 0, max: 3, step: 0.1 },
     { key: 'pinnedHoldScale', label: 'Pinned enemy holds longer (x)', min: 1, max: 5, step: 0.1 },
+    { key: 'coverLostSec', label: 'Held push: covering fire lost after (s)', min: 0, max: 3, step: 0.1 },
+    { key: 'holdSpotMaxM', label: 'Held push: holds at cover within (m)', min: 0, max: 10, step: 0.5 },
+    { key: 'askCoverEverySec', label: 'Held push: asks for cover every (s)', min: 0.2, max: 5, step: 0.1 },
+    { key: 'pushGiveUpSec', label: 'Held push: gives up after (s)', min: 0, max: 30, step: 0.5 },
     { key: 'pushReactionSec', label: 'Hearing: push after (s)', min: 0, max: 5, step: 0.1 },
     { key: 'pushMaxWindowSec', label: 'Hearing: dry or jam window at most (s)', min: 0.5, max: 30, step: 0.5 },
     { key: 'repositionPeeksMin', label: 'Reposition: after at least (peeks)', min: 1, max: 10, step: 1 },
@@ -699,6 +718,9 @@ export const squadFolder: Folder<SquadKey> = {
     { key: 'repositionMaxExposedM', label: 'Reposition: uncovered, route in your view at most (m)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressMaxSec', label: 'Flank attack: stays out at most (s)', min: 0, max: 20, step: 0.5 },
     { key: 'flankPressLostSightSec', label: 'Flank attack: back in when unseen for (s)', min: 0.1, max: 5, step: 0.1 },
+    { key: 'storeyPushGapSec', label: 'Storeys: wait between climbers (s)', min: 0, max: 30, step: 0.5 },
+    { key: 'climbGiveUpSec', label: 'Storeys: a climb is given up after (s)', min: 5, max: 90, step: 1 },
+    { key: 'sameFloorM', label: 'Flank, advance, hunt: cover within (m up or down) of his floor', min: 0.5, max: 6, step: 0.5 },
     { key: 'huntNearM', label: 'Hunt: leader goes to cover within (m) of your last spot', min: 1, max: 20, step: 0.5 },
     { key: 'huntLookSec', label: 'Hunt: leader looks from there for (s)', min: 0, max: 30, step: 0.5 },
     { key: 'huntRetrySec', label: 'Hunt: nobody can lead, try again after (s)', min: 0.2, max: 10, step: 0.1 },

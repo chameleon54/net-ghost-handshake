@@ -25,6 +25,9 @@ import { pickupConfig, pickupConfigDefaults } from '../config/pickups';
 import { enemySoundConfig, enemySoundConfigDefaults } from '../config/enemySounds';
 import type { SquadCoordinator } from '../squad/squadCoordinator';
 import { EnemyLabels } from './enemyLabels';
+import { EnemySpeech } from './speech';
+import { EditMode } from './editMode';
+import type { LevelData } from '../level/levelData';
 import { ReadoutBox } from './readoutBox';
 import { formatPerf, PerfMeter } from './perf';
 import { debugLogStartHeader, debugLogUrl, EventLog } from './eventLog';
@@ -98,6 +101,9 @@ interface Parts {
   collision: LevelCollision;
   /** The game's event bus, for the debug log (decision 260). */
   events: EventBus<WeaponEvents>;
+  /** The level as loaded from its data file, and the meshes drawn for its boxes, for the level editor (5.2). */
+  level: LevelData;
+  levelBoxMeshes: readonly THREE.Mesh[];
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -110,8 +116,9 @@ const eyeDotColour = 0xff4444;
 const eyeDotRadiusM = 0.05;
 const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
+const editModeKey = 'F2';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events, level, levelBoxMeshes }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
   const perf = new PerfMeter();
@@ -186,6 +193,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.add(perfState, 'on').name('Show performance (4.13b)');
   gui.add({ mark: () => log.mark() }, 'mark').name(`Debug log: add a mark (${markKey})`);
   gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
+  // The level editor (5.2; its own panel bottom left since 5.2b): F2, with the free camera; Save writes the level file and
+  // the page reloads with it.
+  const editMode = new EditMode({ scene, camera, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on) });
+  gui.add({ toggle: () => editMode.toggle(!editMode.active) }, 'toggle').name(`Level editor on or off (${editModeKey})`);
 
   const actions = {
     resetAll: () => {
@@ -327,6 +338,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   standInPanel.add(coverOverlay, 'shown').name('Show cover points');
   const labels = new EnemyLabels(scene, activeStandIns, (standIn) => squad.holdsSlot(standIn));
   standInPanel.add(labels, 'shown').name('Show labels (orange: firing, blue: moving, purple: pinning, green: hunting)');
+  // Callouts above heads (4.17): placeholder words for each callout hook, over the enemy who says it.
+  const speech = new EnemySpeech(scene, activeStandIns);
+  events.on('enemy:callout', ({ kind, speaker, side }) => speech.say(speaker, kind, side));
+  standInPanel.add(speech, 'shown').name('Show callouts above heads');
   const squadPanel = standInPanel.addFolder(squadFolder.title);
   // The aggression tier (4.11): the game starts on Assertive; switch between the four here, even mid-fight.
   squadPanel
@@ -464,7 +479,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
     const letter = (i: number) => 'ABCDEFGH'[i] ?? '?';
     enemyLines = activeStandIns.map(
       (s, i) =>
-        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}` +
+        `${letter(i)} ${s.role.padEnd(8)}${s.gun.padEnd(7)}${s.grenades > 0 ? 'G ' : '  '}${s.state}${s.isThrowing ? ', THROWING' : ''}${s.flinching ? ', FLINCHING' : ''}${s.crouched ? ', crouched' : ''}${s.wounded ? ', wounded' : ''}${s.frozen ? ', frozen' : ''}${s.reloading ? ', RELOADING' : ''}${s.holdingPush ? ', HOLDING PUSH (no cover)' : ''}, mag ${s.rounds}/${s.magazineRounds}` +
         `, health ${s.health.current.toFixed(0)}${squad.holdsSlot(s) ? ', FIRING SLOT' : ''}`,
     );
     const firing = activeStandIns.flatMap((s, i) => (squad.holdsSlot(s) ? [letter(i)] : []));
@@ -532,6 +547,10 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       : squad.flankers.length > 0 ? 'waits while a flank is on'
       : 'due (one at a time: waits while one is live)';
     readouts.weapon = gun ? `${gun.magazines.loadedRounds}/${gun.magazines.capacityRounds} rounds, ${gun.magazines.spareCount} spare, heat ${gun.heat.toFixed(0)}, jam chance ${(gun.jamChanceNow * 100).toFixed(1)}% per shot${gun.jammed ? ', JAMMED' : ''}` : weapons.current;
+    if (editMode.active) {
+      readoutBox.show(editMode.lines(), true); // the editor's lines in place of the usual ones, shown even when the tick hides them
+      return;
+    }
     readoutBox.show([
       ...(perfState.on ? formatPerf(perf.report) : []),
       `health    ${readouts.health}`,
@@ -575,11 +594,17 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       const dtSec = Math.min((now - lastFrameMs) / 1000, maxFrameSec);
       lastFrameMs = now;
 
-      if (input.consumePress(freeCameraKey)) setFreeCamera(camera, !freeCamera.active);
+      if (input.consumePress(editModeKey)) editMode.toggle(!editMode.active);
+      if (input.consumePress(freeCameraKey)) {
+        if (editMode.active) editMode.toggle(false); // leaving the free camera leaves the editor too
+        else setFreeCamera(camera, !freeCamera.active);
+      }
+      editMode.update(input, dtSec);
       updateReadouts(dtSec);
       navOverlay.update();
       coverOverlay.update(dtSec);
       labels.update();
+      speech.update(dtSec);
       if (captionState.on) {
         captionList.update(dtSec);
         captionView.show(captionList);

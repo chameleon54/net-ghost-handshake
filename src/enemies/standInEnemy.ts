@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { dummyConfig } from '../config/dummy';
 import { enemyGrenadeConfig } from '../config/enemyGrenades';
-import { gunOfRole, type EnemyGun } from '../config/enemyGuns';
+import { enemyGunConfig, gunOfRole, type EnemyGun } from '../config/enemyGuns';
 import { grenadeConfig } from '../config/grenade';
 import { roleConfig, type Role, type RoleValues } from '../config/roles';
 import { squadConfig } from '../config/squad';
@@ -28,6 +28,9 @@ export type StandInState = 'idle' | 'approach' | 'cover' | 'fight' | 'retreat' |
  */
 export type StandInShot = 'hit' | 'miss' | 'cover' | 'suppress';
 
+/** Who covers a move between cover (4.17): the squad's suppressor, its own fire (the heavy), or nobody (a hidden route). */
+export type MoveCover = 'squad' | 'self' | null;
+
 /** Where a peek from cover is: holding, the tell, coming out, firing, going back in (4.4). */
 type PeekPhase = 'hold' | 'tell' | 'out' | 'fire' | 'back';
 
@@ -47,6 +50,8 @@ export interface StandInHooks {
   peekTell(enemy: StandInEnemy): void;
   /** The best free cover spot that hides it from Rook, claimed for it (its old one let go), or null if none hides it. */
   pickCover(enemy: StandInEnemy): CoverPoint | null;
+  /** True if it stands on Rook's floor (the storey push, decision 277); left out, true. */
+  onRookFloor?(enemy: StandInEnemy): boolean;
   /** True if this spot still hides a body from Rook where he is now. */
   coverHides(point: CoverPoint): boolean;
   /** Lets go of the spot it holds. */
@@ -75,10 +80,10 @@ export interface StandInHooks {
   requestSlot(enemy: StandInEnemy): boolean;
   /** Gives its firing slot back. */
   releaseSlot(enemy: StandInEnemy): void;
-  /** True if the squad's hit budget lets a round hit Rook now. */
-  mayHit(): boolean;
+  /** True if the squad's hit budget lets its round hit Rook now (only other enemies' hits hold it back, decision 270). */
+  mayHit(enemy: StandInEnemy): boolean;
   /** A round hit Rook: the squad's hit budget is spent for a while. */
-  hitLanded(): void;
+  hitLanded(enemy: StandInEnemy): void;
   /** Claims a cover spot for it (its old one let go): the flank spot the squad gave it. */
   claimCover(enemy: StandInEnemy, point: CoverPoint): void;
   /** Its flank is over (arrived, called off, or anything else): tells the squad. */
@@ -104,6 +109,18 @@ export interface StandInHooks {
   coverShotClear(enemy: StandInEnemy, point: CoverPoint, way: number, side: number): boolean;
   /** False if the round it is about to fire (aimed as `shot` aims) would strike its own cover near its muzzle. */
   muzzleClear(enemy: StandInEnemy, shot: StandInShot): boolean;
+  /** True if a squadmate's body is in the line of the round it is about to fire (aimed as `shot` aims), 4.16. */
+  friendInLine(enemy: StandInEnemy, shot: StandInShot): boolean;
+  /** It began a reload (4.16): its sound and the `reloading` callout hook. */
+  reloadStarted(enemy: StandInEnemy): void;
+  /** It finished a reload. */
+  reloadDone(enemy: StandInEnemy): void;
+  /** True while the squad's covering fire for its move is live: a suppressor has the job and is not reloading (4.17). */
+  coverLive(enemy: StandInEnemy): boolean;
+  /** Where a push whose covering fire stopped holds (4.17): the nearest free cover near it that hides it, nearer than `goal`; or null. */
+  pickHoldSpot(enemy: StandInEnemy, goal: CoverPoint | null): CoverPoint | null;
+  /** It holds its push and calls for cover (4.17): the `need_cover` callout hook. */
+  pushHeld(enemy: StandInEnemy): void;
   /** True while the squad hunts for Rook (decision 235); when it stops (he was found), a hunt move takes cover instead. */
   hunting(): boolean;
   /** Its hunt move is over (arrived, or anything else): tells the squad. */
@@ -147,19 +164,21 @@ export function peekEyesAt(point: CoverPoint, way: number, out: Vector3): Vector
   const eyeM = low && way !== 0 ? standInConfig.crouchEyeHeightM : standInConfig.eyeHeightM;
   const rightX = Math.cos(point.facingYawRad); // the right-hand side when facing the cover
   const rightZ = -Math.sin(point.facingYawRad);
-  return out.set(point.xM + way * rightX * stepM, eyeM, point.zM + way * rightZ * stepM);
+  return out.set(point.xM + way * rightX * stepM, (point.yM ?? 0) + eyeM, point.zM + way * rightZ * stepM);
 }
 
 /** Where its gun is (over its feet, at gun height) when fully out of a peek from `point` going `way`. */
 export function peekGunAt(point: CoverPoint, way: number, out: Vector3): Vector3 {
   peekEyesAt(point, way, out);
-  out.y = point.height === 'low' && way !== 0 ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM;
+  out.y = (point.yM ?? 0) + (point.height === 'low' && way !== 0 ? standInConfig.crouchMuzzleHeightM : standInConfig.muzzleHeightM);
   return out;
 }
 
 const degToRad = Math.PI / 180;
 /** Getting this much closer to a walk's goal counts as progress (smaller changes are jitter). */
 const progressStepM = 0.05;
+/** A reload of 0 s still takes one moment (so a 0 on the dev panel cannot fire forever without reloading). */
+const dtFloorSec = 0.01;
 /** How many steps the carrot may take along the route in one update (a bound for very short route pieces). */
 const carrotMaxMoves = 20;
 /**
@@ -243,6 +262,9 @@ export class StandInEnemy implements Target {
    * until Rook hurts it, it has not seen him for a moment, or the time is up. How long it has been out, and unseeing.
    */
   private pressing = false;
+  /** On its way up (or down) to Rook's floor with no cover, sent by the squad's storey push (decision 277). */
+  private climbing = false;
+  private climbSec = 0;
   private pressSec = 0;
   private pressUnseenSec = 0;
   /** Suppressing (4.9): pinning the edge of Rook's cover for a squadmate, and which side of it (1 or -1). */
@@ -287,6 +309,28 @@ export class StandInEnemy implements Target {
    * corners become arcs; how fast it is going now (it speeds up and slows down); which way it is moving (a unit vector).
    */
   private readonly carrot = new Vector3();
+  /**
+   * Reloading (4.16, decision 266): rounds left in its magazine, how long its reload has left (0: not reloading), and
+   * whether its magazine is empty and wants a reload as soon as it can.
+   */
+  private roundsLeft = 0;
+  private reloadLeftSec = 0;
+  private needsReload = false;
+  /** Since when a squadmate has stood in its line of fire, or null (4.16). */
+  private friendBlockedSinceSec: number | null = null;
+  /**
+   * Holding a push (4.17, decision 269): who covers its move; how long that cover has been gone; whether it already looked
+   * for a spot to hold at this move. Holding: the spot it was pushing to, the spot it holds at, who covered it, how long
+   * it has held, and the time to its next ask for cover.
+   */
+  private moveCover: MoveCover = null;
+  private coverGoneSec = 0;
+  private holdLooked = false;
+  private heldGoal: CoverPoint | null = null;
+  private heldAt: CoverPoint | null = null;
+  private heldCover: MoveCover = null;
+  private heldSec = 0;
+  private askLeftSec = 0;
   private speedNowMps = 0;
   private moveX = 0;
   private moveZ = 0;
@@ -346,12 +390,28 @@ export class StandInEnemy implements Target {
     return this.throwPlan !== null;
   }
 
+  get isClimbing(): boolean {
+    return this.climbing;
+  }
+
+  /** True if the squad could send it up now: not the heavy, not wounded, and in cover or walking (no throw, no covering fire). */
+  get canClimb(): boolean {
+    return (
+      this.awake && !this.frozen && !this.wounded && !this.grenadeSeen && !this.inBurst && !this.suppressing && !this.pressing && !this.climbing &&
+      this.role !== 'heavy' && (this.state === 'cover' || this.state === 'approach' || this.state === 'shoot')
+    );
+  }
+
   get xM(): number {
     return this.feet.x;
   }
 
   get zM(): number {
     return this.feet.z;
+  }
+
+  get yM(): number {
+    return this.feet.y;
   }
 
   get heightM(): number {
@@ -430,12 +490,12 @@ export class StandInEnemy implements Target {
 
   /**
    * A noise Rook caused: if it carries to its ears, it wakes up if it was idle. A noise made where he is (a shot, a step)
-   * also tells it where he was; one made where his bullet or grenade landed does not (decision 219).
+   * also tells it where he was (`rookFeetYM`: the floor he is on); one made where his bullet or grenade landed does not (decision 219).
    */
-  hear(noise: Noise): void {
+  hear(noise: Noise, rookFeetYM = 0): void {
     if (!this.canHear(noise)) return;
     if (!awayFromRook.has(noise.kind)) {
-      this.lastKnown.set(noise.position.x, 0, noise.position.z);
+      this.lastKnown.set(noise.position.x, rookFeetYM, noise.position.z); // the noise is at his eyes, so his floor comes from the caller
       this.knowsWhere = true;
       this.lastKnownAgeSec = 0;
     }
@@ -445,7 +505,7 @@ export class StandInEnemy implements Target {
   /** True if this noise carries to its ears: within its range, or half of it through a wall or prop (4.10). */
   canHear(noise: Noise): boolean {
     if (this.state === 'falling' || this.state === 'down') return false;
-    this.ears.set(this.feet.x, this.eyeHeightNowM, this.feet.z);
+    this.ears.set(this.feet.x, this.feet.y + this.eyeHeightNowM, this.feet.z);
     return hearsNoise(noise, this.ears, () => this.hooks.noiseBlocked(noise.position, this.ears));
   }
 
@@ -497,6 +557,7 @@ export class StandInEnemy implements Target {
     this.flinchFreeAtSec = this.clockSec + flinchSec + flinchImmuneSec;
     this.roundsInBurst = 0; // the burst is cut off...
     this.cooldownSec = Math.max(this.cooldownSec, flinchSec); // ...and nothing fires during the flinch
+    this.cancelReload(); // a reload starts over later (4.16)
     const peeking = this.state === 'cover' && (this.peekPhase === 'tell' || this.peekPhase === 'out' || this.peekPhase === 'fire');
     if (peeking) {
       this.pinnedByRook = true; // its next hold is longer
@@ -535,6 +596,14 @@ export class StandInEnemy implements Target {
     this.clockSec += dtSec;
     this.flinchLeftSec = Math.max(this.flinchLeftSec - dtSec, 0);
     this.walkedThisUpdate = false;
+    if (this.reloadLeftSec > 0) {
+      this.reloadLeftSec = Math.max(this.reloadLeftSec - dtSec, 0);
+      if (this.reloadLeftSec === 0) {
+        this.roundsLeft = this.magazineRounds;
+        this.hooks.reloadDone(this);
+      }
+    }
+    if (this.heldGoal) this.tickHeldPush(dtSec);
     this.think(dtSec, player);
     if (!this.walkedThisUpdate) {
       this.speedNowMps = 0; // standing (its walks brake to a stop before they end), and the next walk sets off afresh
@@ -573,7 +642,7 @@ export class StandInEnemy implements Target {
       return;
     }
     if (this.state === 'down') {
-      if (this.stateSec >= standInConfig.respawnDelaySec) {
+      if (!squadConfig.respawnTogether && this.stateSec >= standInConfig.respawnDelaySec) {
         this.placeAtSpawn();
         this.wake(); // decision 201: it gets up awake
       }
@@ -599,7 +668,7 @@ export class StandInEnemy implements Target {
     // Seeing him tells it where he is. Woken by a hit, or just up again, it starts from where he is too.
     this.lastKnownAgeSec += dtSec;
     if (this.seesPlayer || !this.knowsWhere) {
-      this.lastKnown.set(player.x, 0, player.z);
+      this.lastKnown.set(player.x, player.y, player.z);
       this.knowsWhere = true;
       this.lastKnownAgeSec = 0;
     }
@@ -660,7 +729,7 @@ export class StandInEnemy implements Target {
     }
 
     // No cover hides it: the 4.1 behaviour. Head for Rook, and stop to fire once it sees him within range.
-    if (this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
+    if (!this.climbing && this.seesPlayer && distanceM <= standInConfig.stopRangeM) {
       this.setState('shoot');
       this.engage(dtSec, dx, dz);
       return;
@@ -675,6 +744,17 @@ export class StandInEnemy implements Target {
    */
   private checkCover(dtSec: number): void {
     if (this.state === 'fight' || this.state === 'retreat' || this.state === 'flee') return; // those pick their own next spot
+    if (this.climbing) {
+      // On its way to Rook's floor: no cover on the way (it would pick the floor it is leaving). Done once there, or given up.
+      this.climbSec += dtSec;
+      if (this.hooks.onRookFloor?.(this) !== false || this.climbSec > squadConfig.climbGiveUpSec) {
+        this.climbing = false;
+        this.coverTimerSec = 0;
+      } else {
+        if (this.coverPoint) this.leaveCover();
+        return;
+      }
+    }
     this.coverTimerSec -= dtSec;
     if (this.coverTimerSec > 0) return;
     this.coverTimerSec = standInConfig.coverCheckIntervalSec;
@@ -701,7 +781,7 @@ export class StandInEnemy implements Target {
     }
     this.coverPoint = next;
     this.spotHides = next !== null; // a picked spot hides it (that is how it was picked)
-    if (next) this.coverSpot.set(next.xM, 0, next.zM);
+    if (next) this.coverSpot.set(next.xM, next.yM ?? 0, next.zM);
     this.repathTimerSec = 0; // a fresh route to the new spot
   }
 
@@ -800,9 +880,29 @@ export class StandInEnemy implements Target {
     this.beginMove(point, 'flank');
   }
 
-  /** The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). */
-  beginAdvance(point: CoverPoint): void {
+  /**
+   * The squad's storey push (decision 277): Rook fights from another floor, so it leaves its cover and walks to him (no cover
+   * on the way, no stopping to shoot from the wrong floor) until it is on his floor; then it picks cover there, or fights.
+   */
+  beginClimb(): void {
+    this.climbing = true;
+    this.climbSec = 0;
+    this.leaveCover();
+    this.resetPeek();
+    this.dropHeldPush();
+    this.crouched = false;
+    this.engaged = false;
+    this.setState('approach');
+    this.repathTimerSec = 0;
+  }
+
+  /**
+   * The squad sends it to closer cover at `point` under a squadmate's covering fire (4.9). `cover` says who covers it: if
+   * that fire stops on the way, it holds at near cover and asks again (4.17); null for a move nobody covers.
+   */
+  beginAdvance(point: CoverPoint, cover: MoveCover = null): void {
     this.beginMove(point, 'advance');
+    this.moveCover = cover;
   }
 
   /**
@@ -820,12 +920,16 @@ export class StandInEnemy implements Target {
    */
   shareLastKnown(spot: Vector3, ageSec: number): void {
     if (this.knowsWhere && this.lastKnownAgeSec <= ageSec) return;
-    this.lastKnown.set(spot.x, 0, spot.z);
+    this.lastKnown.set(spot.x, spot.y, spot.z);
     this.knowsWhere = true;
     this.lastKnownAgeSec = ageSec;
   }
 
   private beginMove(point: CoverPoint, state: 'flank' | 'advance' | 'hunt'): void {
+    this.moveCover = null;
+    this.coverGoneSec = 0;
+    this.holdLooked = false;
+    this.dropHeldPush(); // a new move ends any held push
     this.hooks.claimCover(this, point);
     this.setCover(point);
     this.crouched = false;
@@ -904,6 +1008,7 @@ export class StandInEnemy implements Target {
         }
       }
     }
+    if (this.state === 'advance' && this.moveCover !== null && this.holdForCover(dtSec)) return;
     // Every move between cover is at least a run (decision 246); flanks and the hunt's leader go at their flank speed if faster.
     const fast = flanking || (this.state === 'hunt' && this.huntLeads);
     const speedMps = fast ? Math.max(this.values.flankSpeedMps, this.values.runSpeedMps) : this.values.runSpeedMps;
@@ -937,8 +1042,10 @@ export class StandInEnemy implements Target {
     if (this.faceLastKnown(dtSec) > standInConfig.aimToleranceDeg * degToRad) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    if (!this.hooks.muzzleClear(this, 'suppress')) {
-      this.cooldownSec = standInConfig.roundIntervalSec; // something close is in the way: try again a step on (decision 239)
+    if (this.needsReload) this.startReload(); // empty: it reloads where it is (4.16)
+    if (this.reloading) return;
+    if (!this.lineClear('suppress')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // something close (or a squadmate) is in the way: try again a step on (decision 239)
       return;
     }
     if (!this.takeSlot()) {
@@ -946,6 +1053,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, 'suppress');
+    this.roundFired();
     this.roundsInBurst++;
     if (this.roundsInBurst < squadConfig.suppressBurstRounds) {
       this.cooldownSec += standInConfig.roundIntervalSec;
@@ -957,14 +1065,16 @@ export class StandInEnemy implements Target {
 
   /** Runs from the grenade it saw: picks where to, says so, and goes. */
   private startFlee(): void {
+    this.climbing = false;
     this.grenadeSeen = false;
     this.hooks.grenadeSpotted(this);
     const point = this.hooks.planFlee(this, this.grenadeAt, this.grenadeDangerM, this.fleeSpot);
     this.coverPoint = point;
     this.spotHides = false; // a flee spot may not hide it; it checks once it is there
-    if (point) this.coverSpot.set(point.xM, 0, point.zM);
+    if (point) this.coverSpot.set(point.xM, point.yM ?? 0, point.zM);
     this.crouched = false;
     this.engaged = false;
+    this.cancelReload(); // running for its life: the reload starts over later (4.16)
     this.setState('flee');
     this.repathTimerSec = 0;
   }
@@ -1034,11 +1144,18 @@ export class StandInEnemy implements Target {
    * burst, back in (4.4). Its body moves with the peek, so its hit zones go out and come back with it.
    */
   private holdAndPeek(dtSec: number, point: CoverPoint, dx: number, dz: number): void {
+    if (this.peekPhase === 'hold' && (this.reloading || this.needsReload || this.wantsTopUp)) {
+      // Reloading behind its cover (4.16): no peeks meanwhile; it keeps watching where Rook was.
+      if (!this.reloading) this.startReload();
+      this.engaged = false;
+      this.faceLastKnown(dtSec);
+      return;
+    }
     if (this.peekPhase === 'hold') {
       // It fires from where it holds if it sees Rook and its own cover is not in the way; else it peeks (decision 239).
       // With a throw to make it peeks to throw instead (4.12).
       const throwing = this.throwPlan !== null;
-      if (!throwing && this.seesPlayer && this.hooks.muzzleClear(this, 'hit')) {
+      if (!throwing && this.seesPlayer && this.lineClear('hit')) {
         this.engage(dtSec, dx, dz);
         return;
       }
@@ -1163,8 +1280,12 @@ export class StandInEnemy implements Target {
     if (this.cooldownSec > 0) return;
     const suppressFire = this.peekMode === 'suppress';
     const aimedAs: StandInShot = this.peekMode === 'cover' ? 'cover' : suppressFire ? 'suppress' : 'hit';
-    if (!this.hooks.muzzleClear(this, aimedAs)) {
-      this.startPeekBack(); // its own cover is in the way: no clear shot from this peek (decision 239)
+    if (this.needsReload) {
+      this.startPeekBack(); // empty: back into cover to reload there (4.16)
+      return;
+    }
+    if (!this.lineClear(aimedAs)) {
+      this.startPeekBack(); // its own cover (or a squadmate) is in the way: no clear shot from this peek (decisions 239, 266)
       return;
     }
     if (this.peekRounds === 0 && !this.takeSlot()) {
@@ -1172,6 +1293,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, aimedAs === 'hit' ? this.aimedShot(1) : aimedAs);
+    this.roundFired();
     this.peekRounds++;
     this.cooldownSec += standInConfig.roundIntervalSec;
     if (this.peekRounds < (suppressFire ? squadConfig.suppressBurstRounds : this.values.burstRounds)) return;
@@ -1251,8 +1373,8 @@ export class StandInEnemy implements Target {
   }
 
   /** The squad sends it to another spot (decision 237): like an advance (covered, not turned back), not necessarily closer. */
-  beginReposition(point: CoverPoint): void {
-    this.beginMove(point, 'advance');
+  beginReposition(point: CoverPoint, cover: MoveCover = null): void {
+    this.beginAdvance(point, cover);
   }
 
   /** True if it fires while it moves (the heavy, decision 237): it is its own covering fire. */
@@ -1311,6 +1433,143 @@ export class StandInEnemy implements Target {
     if (this.state === 'approach') return;
     this.setState('approach');
     this.repathTimerSec = 0; // a fresh route from here
+  }
+
+  /**
+   * A covered advance checks its cover as it goes (4.17): gone for longer than `coverLostSec`, it holds at the nearest
+   * free cover that hides it, if that is nearer than its goal (else it keeps going: stopping in the open is worse). True
+   * if it turned off to hold.
+   */
+  private holdForCover(dtSec: number): boolean {
+    const live = this.moveCover === 'self' ? !this.reloading && !this.needsReload : this.hooks.coverLive(this);
+    this.coverGoneSec = live ? 0 : this.coverGoneSec + dtSec;
+    if (this.coverGoneSec <= squadConfig.coverLostSec || this.holdLooked) return false;
+    this.holdLooked = true; // looked once this move: no spot now means it runs on
+    const goal = this.coverPoint;
+    const hold = this.hooks.pickHoldSpot(this, goal);
+    if (!hold || !goal) return false;
+    const cover = this.moveCover;
+    this.startWalking(); // the advance is over for the squad (its play ends); it takes cover at the hold spot as usual
+    this.hooks.claimCover(this, hold);
+    this.setCover(hold);
+    this.heldGoal = goal;
+    this.heldAt = hold;
+    this.heldCover = cover;
+    this.heldSec = 0;
+    this.askLeftSec = 0; // it asks as soon as it is in cover
+    this.hooks.pushHeld(this);
+    return true;
+  }
+
+  /** Holding a push (4.17): the clocks; it gives the push up after a while, or once it has left the spot it held at. */
+  private tickHeldPush(dtSec: number): void {
+    this.heldSec += dtSec;
+    this.askLeftSec = Math.max(this.askLeftSec - dtSec, 0);
+    if (this.heldSec >= squadConfig.pushGiveUpSec || this.coverPoint !== this.heldAt) this.dropHeldPush();
+  }
+
+  /** True while it holds a push at near cover, waiting for covering fire (4.17). */
+  get holdingPush(): boolean {
+    return this.heldGoal !== null;
+  }
+
+  /** The spot it was pushing to while it holds, or null. */
+  get heldPushGoal(): CoverPoint | null {
+    return this.heldGoal;
+  }
+
+  /** True if the held push was its own cover (the heavy): it goes on once its reload is done, needing nobody. */
+  get heldBySelf(): boolean {
+    return this.heldCover === 'self';
+  }
+
+  /** Holding at its spot and due to ask for covering fire again (every `askCoverEverySec`): the squad answers (main.ts). */
+  get asksForCover(): boolean {
+    return this.heldGoal !== null && this.state === 'cover' && this.askLeftSec <= 0;
+  }
+
+  /** It asked; the next ask is a while later. */
+  askedForCover(): void {
+    this.askLeftSec = squadConfig.askCoverEverySec;
+  }
+
+  /** Covered again: it goes on to the spot it was pushing to, covered by `cover`. */
+  resumePush(cover: 'squad' | 'self'): void {
+    const goal = this.heldGoal;
+    if (!goal) return;
+    this.beginAdvance(goal, cover);
+  }
+
+  /** The push is given up (too long without cover, the goal gone, or it moved off): it fights from where it is. */
+  dropHeldPush(): void {
+    this.heldGoal = null;
+    this.heldAt = null;
+    this.heldCover = null;
+  }
+
+  /** Its gun's magazine size (4.16). */
+  get magazineRounds(): number {
+    return Math.max(Math.round(enemyGunConfig[this.gun].magazineRounds), 1);
+  }
+
+  /** Rounds left in its magazine (4.16). */
+  get rounds(): number {
+    return this.roundsLeft;
+  }
+
+  /** True while it reloads (4.16): it neither peeks nor fires. */
+  get reloading(): boolean {
+    return this.reloadLeftSec > 0;
+  }
+
+  /** In cover, low on rounds and with no sight or sound of Rook for a while: it tops up its magazine (4.16). */
+  private get wantsTopUp(): boolean {
+    return (
+      this.state === 'cover' &&
+      this.throwPlan === null &&
+      !this.suppressing &&
+      this.roundsLeft < this.magazineRounds * standInConfig.topUpBelowShare &&
+      this.lastKnownAgeSec >= standInConfig.topUpCalmSec
+    );
+  }
+
+  private startReload(): void {
+    this.needsReload = false;
+    this.reloadLeftSec = Math.max(enemyGunConfig[this.gun].reloadSec, dtFloorSec);
+    this.roundsInBurst = 0; // its burst is over: the firing slot goes back
+    this.hooks.reloadStarted(this);
+  }
+
+  /** A reload cut short (a flinch, a grenade, going down): it keeps its rounds and reloads again later. */
+  private cancelReload(): void {
+    if (this.reloadLeftSec <= 0) return;
+    this.reloadLeftSec = 0;
+    this.needsReload = this.roundsLeft === 0;
+  }
+
+  private roundFired(): void {
+    this.roundsLeft = Math.max(this.roundsLeft - 1, 0);
+    if (this.roundsLeft === 0) this.needsReload = true;
+  }
+
+  /**
+   * True if the round it is about to fire (aimed as `shot` aims) has a clear line: its own cover is not in the way
+   * (decision 239) and no squadmate stands in it (4.16). A squadmate in the way for a while makes it want to move on.
+   */
+  private lineClear(shot: StandInShot): boolean {
+    if (!this.hooks.muzzleClear(this, shot)) return false;
+    if (!this.hooks.friendInLine(this, shot)) {
+      this.friendBlockedSinceSec = null;
+      return true;
+    }
+    this.friendBlockedSinceSec ??= this.clockSec;
+    if (this.clockSec - this.friendBlockedSinceSec >= standInConfig.friendBlockedMoveSec) this.wantsMove = true; // decision 237's moving on
+    return false;
+  }
+
+  /** The whole squad came back together (4.16): it gets up awake at its spawn, as one getting up alone does (decision 201). */
+  getUpWithSquad(): void {
+    this.wake();
   }
 
   /** How fast it is going now (m/s): it speeds up and slows down like a person (4.15). 0 while standing. */
@@ -1393,8 +1652,8 @@ export class StandInEnemy implements Target {
       if (faceRoute) this.turnToward(this.moveX, this.moveZ, dtSec);
     }
     this.hooks.pushOut(this.feet); // a safety net: the route already keeps clear of walls
-    this.feet.y = 0;
-    const toGoalM = Math.hypot(destination.x - this.feet.x, destination.z - this.feet.z);
+    this.feet.y = this.routeHeightAt(this.feet);
+    const toGoalM = this.routeLeftM(destination);
     if (toGoalM < this.walkClosestM - progressStepM) {
       this.walkClosestM = toGoalM;
       this.walkStuckForSec = 0;
@@ -1402,6 +1661,40 @@ export class StandInEnemy implements Target {
       this.walkStuckForSec += dtSec;
     }
     return this.routeFound && this.walkStuckForSec < standInConfig.walkStuckSec;
+  }
+
+  /** How far is left to walk: along the route (a stair leads away from the goal first), or in a straight line if there is no route. */
+  private routeLeftM(destination: Vector3): number {
+    if (this.path.length === 0) return Math.hypot(destination.x - this.feet.x, destination.z - this.feet.z);
+    let leftM = 0;
+    let fromX = this.feet.x;
+    let fromZ = this.feet.z;
+    for (let i = Math.min(this.pathIndex, this.path.length - 1); i < this.path.length; i++) {
+      leftM += Math.hypot(this.path[i].x - fromX, this.path[i].z - fromZ);
+      fromX = this.path[i].x;
+      fromZ = this.path[i].z;
+    }
+    return leftM;
+  }
+
+  /** The route's height under `at` (a stair or ramp goes up): from the nearest of the few segments around the carrot; its own height if no route. */
+  private routeHeightAt(at: Vector3): number {
+    let bestM = Infinity;
+    let y = at.y;
+    for (let i = Math.max(1, this.pathIndex - 2); i <= Math.min(this.pathIndex, this.path.length - 1); i++) {
+      const a = this.path[i - 1];
+      const b = this.path[i];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const lenSq = dx * dx + dz * dz;
+      const t = lenSq > 1e-9 ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.z - a.z) * dz) / lenSq)) : 0;
+      const m = Math.hypot(a.x + dx * t - at.x, a.z + dz * t - at.z);
+      if (m < bestM) {
+        bestM = m;
+        y = a.y + (b.y - a.y) * t;
+      }
+    }
+    return y;
   }
 
   /** Moves the carrot on along the route until it is `lookaheadM` from its feet, or at the route's end. It never goes back. */
@@ -1469,16 +1762,18 @@ export class StandInEnemy implements Target {
    */
   private aimedShot(hitShare: number): StandInShot {
     if (!this.contacted) return 'miss';
-    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.hooks.mayHit(); // the squad's hit budget
-    if (hits) this.hooks.hitLanded();
+    const hits = this.random() < this.hooks.hitChance(this) * hitShare && this.hooks.mayHit(this); // the squad's hit budget
+    if (hits) this.hooks.hitLanded(this);
     return hits ? 'hit' : 'miss';
   }
 
   private shoot(dtSec: number, hitShare: number): void {
+    if (this.needsReload) this.startReload(); // empty: it reloads where it is, or on the move (the heavy), 4.16
+    if (this.reloading) return;
     this.cooldownSec -= dtSec;
     if (this.cooldownSec > 0) return;
-    if (!this.hooks.muzzleClear(this, 'hit')) {
-      this.cooldownSec = standInConfig.roundIntervalSec; // its own cover is in the way: keep aiming, try again (decision 239)
+    if (!this.lineClear('hit')) {
+      this.cooldownSec = standInConfig.roundIntervalSec; // its own cover (or a squadmate) is in the way: keep aiming, try again (decisions 239, 266)
       return;
     }
     if (!this.takeSlot()) {
@@ -1486,6 +1781,7 @@ export class StandInEnemy implements Target {
       return;
     }
     this.hooks.fire(this, this.aimedShot(hitShare));
+    this.roundFired();
     this.roundsInBurst++;
     if (this.roundsInBurst >= this.values.burstRounds) {
       this.contacted = true; // a whole burst fired: the warning has been given
@@ -1514,6 +1810,7 @@ export class StandInEnemy implements Target {
   }
 
   private wake(): void {
+    this.climbing = false;
     this.setState('approach');
     this.sightTimerSec = 0; // look straight away
     this.coverTimerSec = 0; // and pick cover straight away
@@ -1522,6 +1819,8 @@ export class StandInEnemy implements Target {
   }
 
   private die(): void {
+    this.climbing = false;
+    this.cancelReload();
     this.setState('falling');
     this.leaveCover();
     this.hooks.downed(this);
@@ -1547,6 +1846,12 @@ export class StandInEnemy implements Target {
     this.endSuppress();
     this.endThrow(false);
     this.grenadesLeft = Math.max(Math.round(this.values.grenades), 0);
+    this.roundsLeft = this.magazineRounds;
+    this.reloadLeftSec = 0;
+    this.needsReload = false;
+    this.friendBlockedSinceSec = null;
+    this.moveCover = null;
+    this.dropHeldPush();
     this.pinnedByRook = false;
     this.contacted = false;
     this.recentHits.length = 0;

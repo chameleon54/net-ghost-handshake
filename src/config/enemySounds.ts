@@ -26,6 +26,8 @@ export const enemySoundConfigDefaults = {
   pistolVolume: 0.75,
   rifleVolume: 1,
   lmgVolume: 1,
+  /** An enemy's reload (4.16): Rook's magazine sounds from where it is, at this volume. */
+  reloadVolume: 0.6,
 };
 
 export type EnemySoundConfig = { -readonly [K in keyof typeof enemySoundConfigDefaults]: number };

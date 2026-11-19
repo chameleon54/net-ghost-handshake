@@ -80,6 +80,14 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     /** Which peeks' guns can reach Rook's cover (way, side); all by default. And whether its own cover blocks its gun. */
     coverShotFrom: null as ((way: number, side: number) => boolean) | null,
     muzzleClear: true,
+    /** Whether a squadmate stands in its line of fire (4.16), and how many reloads it started and finished. */
+    friendInLine: false,
+    reloadStarts: 0,
+    reloadDones: 0,
+    /** Holding a push (4.17): whether the squad's covering fire is live, the spot a held push would stop at, and the holds called. */
+    coverLive: true,
+    holdSpot: null as CoverPoint | null,
+    pushHelds: 0,
     /** Where the nearest hiding cover is after a flinch on the move (none by default). */
     nearestCover: null as CoverPoint | null,
     /** Grenade throws (4.12): whether a throw is still on at the release, the throws made, and each throw's end (thrown or not). */
@@ -121,8 +129,8 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     rookSees: () => world.rookSees,
     requestSlot: (e) => squad.requestSlot(e),
     releaseSlot: (e) => squad.releaseSlot(e),
-    mayHit: () => squad.mayHit(),
-    hitLanded: () => squad.hitLanded(),
+    mayHit: (e) => squad.mayHit(e),
+    hitLanded: (e) => squad.hitLanded(e),
     claimCover: (_e, point) => world.claimed.push(point),
     flankOver: (e) => {
       world.flankOvers++;
@@ -139,6 +147,12 @@ function setup(roll = 0.99, squad = new SquadCoordinator(), role: Role = 'troope
     noiseBlocked: () => world.wallBetween,
     coverShotClear: (_e, _point, way, side) => (world.coverShotFrom ? world.coverShotFrom(way, side) : true),
     muzzleClear: () => world.muzzleClear,
+    friendInLine: () => world.friendInLine,
+    reloadStarted: () => world.reloadStarts++,
+    reloadDone: () => world.reloadDones++,
+    coverLive: () => world.coverLive,
+    pickHoldSpot: () => world.holdSpot,
+    pushHeld: () => world.pushHelds++,
     hunting: () => squad.hunting,
     huntMoveOver: (e) => squad.huntMoveOver(e),
     huntHoldScale: (e) => squad.huntHoldScale(e),
@@ -319,7 +333,7 @@ describe('StandInEnemy in a squad (4.6)', () => {
     expect(squad.holdsSlot(enemy)).toBe(true);
   });
 
-  it('four stand-ins in the open: never more than two hold slots, every one gets to fire, and no two hits on Rook within 0.5 s', () => {
+  it('four stand-ins in the open: never more than two hold slots, every one gets to fire, and no two enemies hit Rook within 0.5 s', () => {
     const squad = new SquadCoordinator();
     const members = Array.from({ length: 4 }, () => setup(0, squad)); // every roll would hit
     for (const member of members) member.enemy.hit('body', 1);
@@ -334,9 +348,11 @@ describe('StandInEnemy in a squad (4.6)', () => {
     }
     expect(mostHeld).toBe(squadConfig.firingSlots);
     for (const member of members) expect(member.shots.length).toBeGreaterThan(0);
-    const hits = members.flatMap((m) => m.shots.filter((s) => s.hits).map((s) => s.atSec)).sort((a, b) => a - b);
+    const hits = members.flatMap((m, who) => m.shots.filter((s) => s.hits).map((s) => ({ atSec: s.atSec, who }))).sort((a, b) => a.atSec - b.atSec);
     expect(hits.length).toBeGreaterThan(3);
-    for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
+    for (let i = 1; i < hits.length; i++) {
+      if (hits[i].who !== hits[i - 1].who) expect(hits[i].atSec - hits[i - 1].atSec).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9); // decision 270
+    }
   });
 });
 
@@ -971,14 +987,22 @@ describe('StandInEnemy walking and shooting', () => {
     expect(Math.cos(enemy.yawRad)).toBeLessThan(0);
   });
 
-  it('keeps the hit budget: even when every roll would hit, only one round in any 0.5 s lands', () => {
+  it('its own hits never hold back its next rounds: every round of a burst can land (decision 270)', () => {
     const { enemy, shots, run } = setup(0);
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -5), 4);
-    const hits = shots.filter((s) => s.hits).map((s) => s.atSec);
-    expect(hits.length).toBeGreaterThan(1);
-    for (let i = 1; i < hits.length; i++) expect(hits[i] - hits[i - 1]).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
-    expect(shots.slice(0, roleConfig.trooper.burstRounds).map((s) => s.hits)).toEqual([true, false, false]);
+    expect(shots.slice(0, roleConfig.trooper.burstRounds).map((s) => s.hits)).toEqual([true, true, true]);
+  });
+
+  it("keeps the hit budget between enemies: another enemy's hit holds its rounds back for the window", () => {
+    const squad = new SquadCoordinator();
+    const { enemy, shots, run } = setup(0, squad);
+    squad.hitLanded({}); // a squadmate just hit Rook
+    enemy.hit('body', 1);
+    run(new Vector3(0, 0, -5), 4);
+    const first = shots.find((s) => s.hits);
+    expect(first).toBeDefined();
+    expect(first!.atSec).toBeGreaterThanOrEqual(squadConfig.hitGapSec - 1e-9);
   });
 
   it('misses every round when the roll is above the hit chance', () => {
@@ -1001,19 +1025,39 @@ describe('StandInEnemy walking and shooting', () => {
 });
 
 describe('StandInEnemy death and reset', () => {
-  it('falls, lies down, then gets up at its spawn spot awake and at full health', () => {
+  it('getting up alone (decision 201, the respawn rule before 4.16): falls, lies down, then gets up at its spawn spot awake and at full health', () => {
+    const together = squadConfig.respawnTogether;
+    squadConfig.respawnTogether = 0;
+    try {
+      const { enemy, world, run } = setup();
+      world.sees = false;
+      enemy.hit('body', 1);
+      run(new Vector3(0, 0, -20), 1);
+      enemy.kill();
+      run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + 0.05);
+      expect(enemy.state).toBe('down');
+      expect(enemy.fallProgress).toBe(1);
+      run(new Vector3(0, 0, -20), standInConfig.respawnDelaySec);
+      expect(enemy.awake).toBe(true);
+      expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
+      expect(Math.abs(enemy.feet.z)).toBeLessThan(0.1); // back at the spot (it may have taken one step)
+    } finally {
+      squadConfig.respawnTogether = together;
+    }
+  });
+
+  it('respawning together (4.16): a downed one stays down until the squad comes back, then gets up awake', () => {
     const { enemy, world, run } = setup();
     world.sees = false;
     enemy.hit('body', 1);
     run(new Vector3(0, 0, -20), 1);
     enemy.kill();
-    run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + 0.05);
-    expect(enemy.state).toBe('down');
-    expect(enemy.fallProgress).toBe(1);
-    run(new Vector3(0, 0, -20), standInConfig.respawnDelaySec);
+    run(new Vector3(0, 0, -20), standInConfig.fallTimeSec + standInConfig.respawnDelaySec * 2);
+    expect(enemy.state).toBe('down'); // it waits for the rest of the squad
+    enemy.reset(); // what the game does when the last one is down: the whole squad back at its spawns...
+    enemy.getUpWithSquad(); // ...awake
     expect(enemy.awake).toBe(true);
     expect(enemy.health.current).toBe(roleConfig.trooper.healthPoints);
-    expect(Math.abs(enemy.feet.z)).toBeLessThan(0.1); // back at the spot (it may have taken one step)
   });
 
   it('a reset puts it back at its spot, idle and at full health', () => {
@@ -2257,5 +2301,276 @@ describe('StandInEnemy throwing a grenade (4.12)', () => {
     enemy.kill();
     expect(world.throwOvers).toEqual([false]);
     expect(enemy.isThrowing).toBe(false);
+  });
+});
+
+describe('StandInEnemy squad basics (4.16)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const far = new Vector3(0, 0, 10);
+  /** A trooper holding `spot`, its rifle's magazine `rounds` big for the test (put back afterwards by `withMagazine`). */
+  const holding = () => {
+    const s = setup();
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.enemy.hit('body', 1);
+    s.run(far, 2.5);
+    expect(s.enemy.state).toBe('cover');
+    s.shots.length = 0;
+    return s;
+  };
+  const withMagazine = (rounds: number, test: () => void) => {
+    const was = enemyGunConfig.rifle.magazineRounds;
+    enemyGunConfig.rifle.magazineRounds = rounds;
+    try {
+      test();
+    } finally {
+      enemyGunConfig.rifle.magazineRounds = was;
+    }
+  };
+  /** Runs in single updates until `done` (at most `maxSec`). */
+  const runUntil = (run: (target: Vector3, sec: number) => void, done: () => boolean, maxSec = 20) => {
+    for (let t = 0; t < maxSec && !done(); t += dtSec) run(far, dtSec);
+    expect(done()).toBe(true);
+  };
+
+  it('fires its magazine dry, reloads in cover for its gun\'s reload time without firing, then fires again', () =>
+    withMagazine(6, () => {
+      const { enemy, world, shots, run } = holding();
+      world.sees = true; // it fires from where it holds
+      runUntil(run, () => world.reloadStarts === 1);
+      expect(shots).toHaveLength(6);
+      expect(enemy.reloading).toBe(true);
+      expect(enemy.rounds).toBe(0);
+      run(far, enemyGunConfig.rifle.reloadSec - 0.1);
+      expect(shots).toHaveLength(6); // nothing while reloading
+      expect(world.tells).toHaveLength(0); // and no peeks
+      run(far, 0.2);
+      expect(world.reloadDones).toBe(1);
+      expect(enemy.reloading).toBe(false);
+      expect(enemy.rounds).toBe(6);
+      run(far, 2);
+      expect(shots.length).toBeGreaterThan(6); // and fires again
+    }));
+
+  it('a flinch cuts a reload short; it reloads again later', () =>
+    withMagazine(3, () => {
+      const { enemy, world, run } = holding();
+      world.sees = true;
+      runUntil(run, () => enemy.reloading);
+      enemy.hit('body', 15);
+      enemy.hit('body', 15); // two quick rifle hits: a flinch
+      expect(enemy.flinching).toBe(true);
+      expect(enemy.reloading).toBe(false);
+      expect(world.reloadDones).toBe(0);
+      runUntil(run, () => world.reloadDones === 1);
+      expect(world.reloadStarts).toBe(2);
+      expect(enemy.rounds).toBe(3);
+    }));
+
+  it('tops up in cover when low and calm, not while it still knows fresh where Rook is', () =>
+    withMagazine(12, () => {
+      const { enemy, world, shots, run } = holding();
+      world.sees = true;
+      runUntil(run, () => shots.length >= 9);
+      world.sees = false; // 3 left: below a third of 12
+      expect(enemy.rounds).toBeLessThan(12 / 3);
+      expect(enemy.rounds).toBeGreaterThan(0);
+      run(far, standInConfig.topUpCalmSec - 0.5);
+      expect(world.reloadStarts).toBe(0); // it saw Rook too recently
+      runUntil(run, () => world.reloadStarts === 1, 2);
+    }));
+
+  it('holds fire while a squadmate is in its line of fire; after a while it wants to move on; fires again once clear', () => {
+    const { enemy, world, shots, run } = holding();
+    world.sees = true;
+    world.friendInLine = true;
+    run(far, standInConfig.friendBlockedMoveSec - 0.5);
+    expect(shots).toHaveLength(0);
+    expect(enemy.wantsToReposition).toBe(false);
+    run(far, 1);
+    expect(shots).toHaveLength(0);
+    expect(enemy.wantsToReposition).toBe(true); // moving on, as when pinned (decision 237)
+    world.friendInLine = false;
+    run(far, 1);
+    expect(shots.length).toBeGreaterThan(0);
+  });
+});
+
+describe('StandInEnemy holding a push without covering fire (4.17)', () => {
+  const spot: CoverPoint = { xM: 0, zM: -3, height: 'low', facingYawRad: Math.PI, lean: 'both' };
+  const goal: CoverPoint = { xM: 6, zM: -3, height: 'low', facingYawRad: Math.PI };
+  const hold: CoverPoint = { xM: 2.5, zM: -2, height: 'low', facingYawRad: Math.PI };
+  const far = new Vector3(0, 0, 10);
+  /** A stand-in of `role` holding `spot`, with `hold` on offer as the spot a held push stops at. */
+  const holding = (role: Role = 'trooper') => {
+    const s = setup(0.99, new SquadCoordinator(), role);
+    s.world.sees = false;
+    s.world.cover = spot;
+    s.world.holdSpot = hold;
+    s.enemy.hit('body', 1);
+    s.run(far, 3); // the heavy walks slower
+    expect(s.enemy.state).toBe('cover');
+    return s;
+  };
+  /** A held push: covered by the squad, its cover gone 0.3 s into the move. */
+  const held = () => {
+    const s = holding();
+    s.enemy.beginAdvance(goal, 'squad');
+    s.run(far, 0.3);
+    s.world.coverLive = false;
+    s.run(far, squadConfig.coverLostSec + 0.1);
+    return s;
+  };
+
+  it('with its covering fire on, it goes all the way', () => {
+    const { enemy, world, run } = holding();
+    enemy.beginAdvance(goal, 'squad');
+    run(far, 4);
+    expect(enemy.cover).toBe(goal);
+    expect(world.pushHelds).toBe(0);
+  });
+
+  it('its covering fire gone for a moment, it turns off to near cover, calls for cover, and asks again every so often', () => {
+    const { enemy, world, run } = held();
+    expect(enemy.holdingPush).toBe(true);
+    expect(enemy.cover).toBe(hold);
+    expect(world.pushHelds).toBe(1);
+    expect(world.advanceOvers).toBe(1); // the squad's play is over
+    run(far, 2);
+    expect(enemy.state).toBe('cover');
+    expect(enemy.asksForCover).toBe(true);
+    enemy.askedForCover();
+    expect(enemy.asksForCover).toBe(false);
+    run(far, squadConfig.askCoverEverySec + 0.05);
+    expect(enemy.asksForCover).toBe(true);
+  });
+
+  it('a short gap in the fire (less than coverLostSec) does not stop it', () => {
+    const { enemy, world, run } = holding();
+    enemy.beginAdvance(goal, 'squad');
+    run(far, 0.3);
+    world.coverLive = false;
+    run(far, squadConfig.coverLostSec - 0.1);
+    world.coverLive = true;
+    run(far, 4);
+    expect(world.pushHelds).toBe(0);
+    expect(enemy.cover).toBe(goal);
+  });
+
+  it('covered again, it goes on to the spot it was pushing to', () => {
+    const { enemy, world, run } = held();
+    run(far, 2);
+    world.coverLive = true;
+    enemy.resumePush('squad');
+    expect(enemy.state).toBe('advance');
+    expect(enemy.holdingPush).toBe(false);
+    run(far, 3);
+    expect(enemy.cover).toBe(goal);
+    expect(enemy.state).toBe('cover');
+  });
+
+  it('with no cover for pushGiveUpSec, it gives the push up and stays where it holds', () => {
+    const { enemy, run } = held();
+    run(far, squadConfig.pushGiveUpSec);
+    expect(enemy.holdingPush).toBe(false);
+    expect(enemy.cover).toBe(hold);
+    expect(enemy.state).toBe('cover');
+  });
+
+  it('with no near cover to stop at (or its goal nearer), it keeps going', () => {
+    const { enemy, world, run } = holding();
+    world.holdSpot = null;
+    enemy.beginAdvance(goal, 'squad');
+    world.coverLive = false;
+    run(far, 4);
+    expect(world.pushHelds).toBe(0);
+    expect(enemy.cover).toBe(goal);
+  });
+
+  it('a move nobody covers (a hidden route), a flank or a hunt never holds', () => {
+    const uncovered = holding();
+    uncovered.world.coverLive = false;
+    uncovered.enemy.beginAdvance(goal);
+    uncovered.run(far, 4);
+    expect(uncovered.world.pushHelds).toBe(0);
+    expect(uncovered.enemy.cover).toBe(goal);
+
+    const flank = holding();
+    flank.world.coverLive = false;
+    flank.world.rookSees = false;
+    flank.enemy.beginFlank(goal);
+    flank.run(far, 1);
+    expect(flank.world.pushHelds).toBe(0);
+    expect(flank.enemy.state).toBe('flank');
+  });
+
+  it('the heavy, its own cover, holds when its gun runs dry on the move, and says the push is its own', () => {
+    const was = enemyGunConfig.lmg.magazineRounds;
+    enemyGunConfig.lmg.magazineRounds = 2;
+    try {
+      const { enemy, world, run } = holding('heavy');
+      world.sees = true; // it fires on the move
+      enemy.beginAdvance(goal, 'self');
+      for (let t = 0; t < 4 && !enemy.holdingPush; t += dtSec) run(far, dtSec);
+      expect(enemy.holdingPush).toBe(true);
+      expect(enemy.reloading).toBe(true);
+      expect(enemy.heldBySelf).toBe(true);
+      expect(world.pushHelds).toBe(1);
+    } finally {
+      enemyGunConfig.lmg.magazineRounds = was;
+    }
+  });
+
+  it('reset (a restart), a held push is gone', () => {
+    const { enemy } = held();
+    enemy.reset();
+    expect(enemy.holdingPush).toBe(false);
+  });
+});
+
+describe('StandInWorld: where a held push stops, and whether it may go on (4.17)', () => {
+  // Rook at (0, 6); the mover at (0, -4). A crate 2 m ahead hides a spot from him; another crate is 6 m off.
+  const nearCrate: RoomBox = { kind: 'prop', xM: 0, zM: -1, widthM: 1, depthM: 1, heightM: 1 };
+  const nearSpot: CoverPoint = { xM: 0, zM: -1.95, height: 'low', facingYawRad: Math.PI };
+  const farCrate: RoomBox = { kind: 'prop', xM: 6, zM: -3, widthM: 1, depthM: 1, heightM: 1 };
+  const farSpot: CoverPoint = { xM: 6, zM: -3.95, height: 'low', facingYawRad: Math.PI };
+  const make = async () => {
+    const level = buildGreybox([nearCrate, farCrate]);
+    const navigation = await Navigation.create(level.navigationGeometry);
+    const cover = new CoverPoints([farSpot, nearSpot], level.collision);
+    const squad = new SquadCoordinator();
+    const world = new StandInWorld(new EventBus<WeaponEvents>(), level.collision, navigation, cover, rookAt(0, 6), () => {}, () => [], Math.random, squad);
+    const enemy = new StandInEnemy({ xM: 0, zM: -4, yawRad: 0 }, world);
+    return { world, enemy, cover, squad };
+  };
+
+  it('the nearest free hiding spot within reach, only if nearer than its goal; it claims nothing', async () => {
+    const { world, enemy, cover } = await make();
+    expect(world.pickHoldSpot(enemy, farSpot)).toBe(nearSpot);
+    expect(cover.claimedBy(nearSpot)).toBe(null);
+    const closeGoal: CoverPoint = { xM: 0.5, zM: -3.5, height: 'low', facingYawRad: Math.PI };
+    expect(world.pickHoldSpot(enemy, closeGoal)).toBe(null); // its goal is nearer: it keeps going
+    cover.claim(nearSpot, {});
+    expect(world.pickHoldSpot(enemy, farSpot)).toBe(null); // taken; the far one is out of reach
+  });
+
+  it('it may go on only to a goal nobody else took that still hides it', async () => {
+    const { world, enemy, cover } = await make();
+    expect(world.canResumeTo(enemy, farSpot)).toBe(true);
+    cover.claim(farSpot, {});
+    expect(world.canResumeTo(enemy, farSpot)).toBe(false);
+    const open: CoverPoint = { xM: 3, zM: 0, height: 'low', facingYawRad: Math.PI }; // nothing between it and Rook
+    expect(world.canResumeTo(enemy, open)).toBe(false);
+  });
+
+  it('covering fire is live while a suppressor has the job and is not reloading', async () => {
+    const { world, enemy, squad } = await make();
+    const other = new StandInEnemy({ xM: 3, zM: -4, yawRad: 0 }, world);
+    expect(world.coverLive(enemy)).toBe(false); // nobody covers
+    squad.assignCover([other], () => true);
+    other.beginSuppress();
+    expect(world.coverLive(enemy)).toBe(true);
+    squad.suppressOver(other);
+    expect(world.coverLive(enemy)).toBe(false);
   });
 });

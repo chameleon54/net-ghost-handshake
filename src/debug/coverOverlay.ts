@@ -57,7 +57,7 @@ export class CoverOverlay {
         bar.position.set((sign * sideTickM.length) / 2, postHeightM, 0);
         post.add(bar);
       }
-      post.position.set(point.xM, 0, point.zM);
+      post.position.set(point.xM, point.yM ?? 0, point.zM); // upstairs cover sits on the upper level
       post.rotation.y = point.facingYawRad;
       this.posts.push(post);
       this.group.add(post);
@@ -86,7 +86,7 @@ export class CoverOverlay {
     this.rings.forEach((ring, i) => {
       const chosen = this.standIns[i]?.cover ?? null;
       ring.visible = chosen !== null;
-      if (chosen) ring.position.set(chosen.xM, liftM, chosen.zM);
+      if (chosen) ring.position.set(chosen.xM, (chosen.yM ?? 0) + liftM, chosen.zM);
     });
     this.timerSec -= dtSec;
     if (this.timerSec > 0) return;

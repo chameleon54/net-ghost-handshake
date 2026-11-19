@@ -91,6 +91,15 @@ describe('rayHitDummy', () => {
     expect(out.zone).toBe('head');
   });
 
+  it('a target on the upper level is hit up there, and not at the same spot on the floor (5.3b)', () => {
+    const upstairs = { xM: 0, zM: -5, yM: 4.5, hittable: true, heightM: d.heightM } as Parameters<typeof rayHitDummy>[1];
+    const at = (y: number) => rayHitDummy(new Ray(new Vector3(0, y, 0), new Vector3(0, 0, -1)), upstairs, 50, out);
+    expect(at(5.5)).toBe(true);
+    expect(at(1.0)).toBe(false); // the floor below, level with where the ground-floor body would be
+    expect(at(4.5 + headHeightM)).toBe(true);
+    expect(out.zone).toBe('head');
+  });
+
   it('misses over the head, to the side, and behind the shooter', () => {
     expect(shootAt(d.heightM + 0.1)).toBe(false);
     expect(shootAt(1.0, 1)).toBe(false);

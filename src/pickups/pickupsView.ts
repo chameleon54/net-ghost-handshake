@@ -43,7 +43,7 @@ export class PickupsView {
       const item = items[i];
       look.group.visible = item !== undefined;
       if (!item) return;
-      look.group.position.set(item.xM, 0, item.zM);
+      look.group.position.set(item.xM, item.yM, item.zM);
       for (const [kind, mesh] of Object.entries(look.items)) mesh.visible = kind === item.kind;
     });
   }

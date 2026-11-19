@@ -149,9 +149,15 @@ export class LevelCollision {
           if (!vertical) push.y = 0;
           if (push.lengthSq() < 1e-12) return false; // nothing to push in the allowed directions
           push.normalize();
-          if (push.y > 0.5) contact.up = true;
-          else if (push.y < -0.5) contact.down = true;
-          push.multiplyScalar(radiusM - distanceM);
+          if (push.y > 0.5) {
+            // Walkable ground (a floor, a prop's top, a ramp): lift straight up, as far as it takes to clear it along the
+            // surface, so walking up a slope keeps its speed instead of being pushed back down it (5.3 follow-up).
+            contact.up = true;
+            push.set(0, (radiusM - distanceM) / push.y, 0);
+          } else {
+            if (push.y < -0.5) contact.down = true;
+            push.multiplyScalar(radiusM - distanceM);
+          }
 
           segment.start.add(push);
           segment.end.add(push);

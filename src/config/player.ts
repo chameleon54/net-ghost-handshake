@@ -60,6 +60,12 @@ export const playerConfigDefaults = {
   gravityMps2: 20,
   /** Fastest the player can fall. */
   maxFallSpeedMps: 30,
+  /**
+   * Walking down a slope (a stair's ramp) he stays on it instead of skipping down in little hops: when he was on the
+   * ground and the ground has dropped away by at most this much, he is moved down onto it. A bigger drop (a ledge, a
+   * crate's edge) is a fall as usual. Sprinting down the stairs' 27-degree ramp drops about 0.06 m per update.
+   */
+  groundSnapM: 0.2,
   /** How much a capsule may overlap a surface and still count as clear (for standing up under things). */
   clearanceToleranceM: 0.02,
 

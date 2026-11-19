@@ -36,6 +36,15 @@ describe('cover points generated from props (decision 236)', () => {
     }
   });
 
+  it('a prop standing on an upper floor gives spots at that floor height, and its own slab does not block them (5.3b)', () => {
+    const slab: RoomBox = { kind: 'prop', xM: 0, yM: 4.3, zM: 0, widthM: 10, depthM: 10, heightM: 0.2 };
+    const crate: RoomBox = { kind: 'prop', xM: 0, yM: 4.5, zM: 0, widthM: 1, depthM: 1, heightM: 1 };
+    const points = coverPointsFromBoxes([slab, crate]);
+    expect(points).toHaveLength(4);
+    for (const point of points) expect(point.yM).toBe(4.5);
+    expect(coverPointsFromBoxes([{ ...crate, yM: 0 }])[0].yM).toBeUndefined(); // the ground floor leaves it out
+  });
+
   it('a long low bench: two ends and a middle on its long sides; high cover is high; walls and raised boxes give none', () => {
     const bench: RoomBox = { kind: 'prop', xM: 0, zM: 0, widthM: 3, depthM: 0.8, heightM: 1 };
     expect(coverPointsFromBoxes([bench])).toHaveLength(3 + 3 + 1 + 1);

@@ -19,7 +19,7 @@ function setup(canTake: (kind: PickupKind) => boolean = () => true) {
   });
   const down = (role: 'trooper' | 'flanker' | 'heavy' | 'leader', grenades: number, x = 0, z = 0) =>
     events.emit('enemy:downed', { position: new Vector3(x, 0, z), role, grenades });
-  return { pickups, taken, announced, down };
+  return { pickups, taken, announced, down, events };
 }
 
 describe('what dead contractors drop (4.12)', () => {
@@ -57,6 +57,16 @@ describe('picking things up (4.12)', () => {
     expect(taken).toEqual(['pistol']);
     expect(announced).toEqual(['pistol']);
     expect(pickups.items).toHaveLength(0);
+  });
+
+  it('an item on another floor is out of reach, however close above or below (5.3b)', () => {
+    const { pickups, taken, events } = setup();
+    events.emit('enemy:downed', { position: new Vector3(0, 4.5, 0), role: 'flanker', grenades: 0 });
+    expect(pickups.items[0].yM).toBe(4.5);
+    pickups.update({ x: 0, y: 0, z: 0 }); // on the floor below
+    expect(taken).toHaveLength(0);
+    pickups.update({ x: 0, y: 4.5, z: 0 });
+    expect(taken).toEqual(['pistol']);
   });
 
   it('a grenade he cannot carry (at his limit) stays on the floor; the magazine beside it is taken', () => {

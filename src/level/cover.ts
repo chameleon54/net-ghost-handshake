@@ -4,12 +4,15 @@ import { roleConfig } from '../config/roles';
 import { dummyConfig } from '../config/dummy';
 import { standInConfig } from '../config/standInEnemy';
 import type { LevelCollision } from './collision';
+import { coverRemoveRadiusM, type LevelData } from './levelData';
 
 /** A spot behind cover, placed by hand in the level data (level.md, "Cover points"). */
 export interface CoverPoint {
   /** Where an enemy's feet go. */
   readonly xM: number;
   readonly zM: number;
+  /** The floor's height under the spot (the upper level's cover); 0 or left out on the ground floor. */
+  readonly yM?: number;
   /** Low cover hides a crouched body; high cover hides a standing one. */
   readonly height: 'low' | 'high';
   /** Points from the spot toward the cover: the direction it protects from. 0 = north (-z), like the player's yaw. */
@@ -33,6 +36,8 @@ const lowNarrowM = 1.2;
 const lowMiddleFromM = 3;
 /** A spot this close to another box's footprint is dropped (it would be inside or against it). */
 const clearOfOtherM = 0.35;
+/** A box whose base is within this far below a prop's base stands on the same floor (a slab's own base is lower than the prop on it). */
+const standsOnM = 0.05;
 
 /**
  * Cover spots generated from a room's props (decision 236), so a new room needs no hand placing: on each side of each prop
@@ -41,10 +46,21 @@ const clearOfOtherM = 0.35;
  * side one spot near each end, open toward that end, and a long low side one more in the middle to rise from. Spots inside
  * or against another box are dropped. The caller drops spots that are off the navigation mesh.
  */
-export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number }[]): CoverPoint[] {
+/**
+ * The cover spots of a level (5.2): generated from its solid boxes (glass is never cover; a stair's drawn-only steps are
+ * not there at all), less the hand removals, plus the hand additions.
+ */
+export function levelCover(level: LevelData): CoverPoint[] {
+  const generated = coverPointsFromBoxes(level.boxes.filter((box) => !box.glass && box.solid !== false));
+  const kept = generated.filter((p) => !level.coverRemove.some((c) => Math.hypot(c.xM - p.xM, c.zM - p.zM) <= coverRemoveRadiusM));
+  return [...kept, ...level.coverAdd];
+}
+
+export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number; ramp?: string }[]): CoverPoint[] {
   const points: CoverPoint[] = [];
   for (const box of boxes) {
-    if (box.kind !== 'prop' || (box.yM ?? 0) > 0 || box.heightM < lowCoverM) continue;
+    if (box.kind !== 'prop' || box.ramp || box.heightM < lowCoverM) continue; // a ramp still blocks spots, but is never cover
+    const baseM = box.yM ?? 0; // a prop standing on the upper level makes cover up there
     const height: CoverPoint['height'] = box.heightM >= highCoverM ? 'high' : 'low';
     // The four sides: where the spot line runs, which way it faces (toward the box), and the side's length.
     const sides = [
@@ -79,12 +95,14 @@ export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number;
         const blocked = boxes.some(
           (other) =>
             other !== box &&
-            (other.yM ?? 0) < highCoverM &&
+            (other.yM ?? 0) >= baseM - standsOnM &&
+            (other.yM ?? 0) < baseM + highCoverM &&
             Math.abs(xM - other.xM) < other.widthM / 2 + clearOfOtherM &&
             Math.abs(zM - other.zM) < other.depthM / 2 + clearOfOtherM,
         );
         if (blocked) continue;
-        points.push(lean ? { xM, zM, height, facingYawRad: side.facingYawRad, lean } : { xM, zM, height, facingYawRad: side.facingYawRad });
+        const spot = { xM, zM, ...(baseM > 0 ? { yM: baseM } : {}), height, facingYawRad: side.facingYawRad };
+        points.push(lean ? { ...spot, lean } : spot);
       }
     }
   }
@@ -144,9 +162,10 @@ export class CoverPoints {
   /** True if the lines from the head and the chest of a body at this spot toward `eyes` are both blocked by the spot's own prop. */
   hides(point: CoverPoint, eyes: Vector3): boolean {
     const bodyHeightM = point.height === 'low' ? standInConfig.crouchHeightM : dummyConfig.heightM;
-    this.target.set(point.xM, bodyHeightM - dummyConfig.headRadiusM, point.zM);
+    const baseM = point.yM ?? 0;
+    this.target.set(point.xM, baseM + bodyHeightM - dummyConfig.headRadiusM, point.zM);
     if (!this.blockedNearby(this.target, eyes)) return false;
-    this.target.y = bodyHeightM * coverConfig.chestShareOfHeight;
+    this.target.y = baseM + bodyHeightM * coverConfig.chestShareOfHeight;
     return this.blockedNearby(this.target, eyes);
   }
 

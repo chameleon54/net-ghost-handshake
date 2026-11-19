@@ -12,6 +12,10 @@ export const navigationConfig = {
   /** The highest step it walks up. Low enough that every prop is an obstacle: enemies do not climb or vault (gameplay.md). */
   agentStepM: 0.3,
   maxSlopeDeg: 45,
+  /** An enemy's feet are put on the real ground (a ramp's slope, a slab) by a ray from this far above them... */
+  groundProbeUpM: 0.6,
+  /** ...to this far below them. The mesh runs a little under a slope, which sank the feet into it and the push-out then held them back. */
+  groundProbeDownM: 0.6,
   /** How far around a point (sideways, and up or down) to look for the mesh when a point is off it, such as Rook on a crate. */
   searchSidewaysM: 2,
   searchUpDownM: 0.5,

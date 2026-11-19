@@ -3,12 +3,17 @@
 export const squadConfigDefaults = {
   /** At most this many enemies fire at the same time (3 comes with the endless scaling, 7.1). */
   firingSlots: 2,
-  /** The hit budget: at most one damaging hit on Rook within this window, from the whole squad. It never loosens. */
+  /**
+   * The hit budget: after an enemy lands a hit on Rook, no other enemy may for this long (its own next rounds may: decision
+   * 270, so a whole burst can land). 0 switches the budget off. It never loosens.
+   */
   hitGapSec: 0.5,
   /** A peek refused a slot stays in cover and asks again after this long. */
   slotRetrySec: 0.3,
   /** Dev testing aid: how many stand-ins are in the test room (1 to 4), from the next restart or Respawn. */
   standInCount: 4,
+  /** Playtests (4.16): 1 = the downed stay down and the whole squad comes back together, the respawn delay after the last one falls; 0 = each gets up alone (decision 201). */
+  respawnTogether: 1,
   // Flanking (4.7, decision 225)
   /** Rook "holds a spot" while he stays within this distance of where he settled; how long until a flank is per tier (aggression.ts). */
   holdRadiusM: 2.5,
@@ -49,6 +54,15 @@ export const squadConfigDefaults = {
   pinnedByFireM: 1,
   /** ...sends it back into cover, holding this many times longer. */
   pinnedHoldScale: 1.5,
+  // Holding a push (4.17, decision 269): a covered move whose covering fire stops holds at near cover and asks again.
+  /** Its covering fire gone (the suppressor stopped, or the heavy's own gun is reloading) this long counts as lost... */
+  coverLostSec: 0.5,
+  /** ...and it holds at the nearest free cover that hides it within this distance (if nearer than its goal)... */
+  holdSpotMaxM: 4,
+  /** ...asks the squad for covering fire again this often... */
+  askCoverEverySec: 1,
+  /** ...and gives the push up after holding this long without it. */
+  pushGiveUpSec: 6,
   // Hearing Rook's weapon (4.10, decision 233). Whether it reacts, and how many push, is per tier (aggression.ts).
   /** After the squad hears him run dry, reload or jam, it pushes this long later (if he is still vulnerable). */
   pushReactionSec: 1,
@@ -72,6 +86,12 @@ export const squadConfigDefaults = {
   // The hunt (4.11, decision 235). When it starts and how many follow is per tier (aggression.ts).
   /** The hunt's leader goes to cover within this distance of where the squad last knew Rook was... */
   huntNearM: 6,
+  /** A flank, an advance or a hunt goes only to cover on Rook's floor: its height within this of his feet (the upper level is 4.5 m up), so the squad climbs the stairs to him instead of flanking on the wrong storey (5.3b). */
+  sameFloorM: 2,
+  /** The storey push (decision 277): a second climber is sent no sooner than this after the first... */
+  storeyPushGapSec: 6,
+  /** ...and a climb that has not reached Rook's floor after this long is given up (it picks cover again). */
+  climbGiveUpSec: 25,
   /** ...and looks from there this long; then, with no follower still walking, the hunt is over. */
   huntLookSec: 4,
   /** When nobody can lead a hunt (no reachable cover near that spot), it tries again after this long. */

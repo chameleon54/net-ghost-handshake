@@ -5,7 +5,8 @@
 // (decision 235): whether the squad comes looking once its knowledge of Rook is old, how long after, how many follow the
 // hunt's leader per step, and how often a step comes. Enemy grenades (4.12, decision 249): whether the squad throws at
 // all, after how long Rook holds one spot (longer than the flank's hold, so a flank comes first), and how long the squad
-// waits between throws.
+// waits between throws. The storey push (decision 277): whether the squad sends someone up the stairs when Rook fights from
+// another floor, after how long, and how many may climb at once.
 export type Tier = 'cautious' | 'assertive' | 'aggressive' | 'relentless';
 
 export const aggressionConfigDefaults = {
@@ -28,6 +29,9 @@ export const aggressionConfigDefaults = {
     throwsGrenades: 0,
     holdBeforeGrenadeSec: 14,
     grenadeCooldownSec: 20,
+    storeyPush: 0,
+    storeyPushAfterSec: 12,
+    storeyPushMax: 1,
   },
   /** Suppress and advance: one pins Rook's cover while another moves up. Reacts to his gun half the time. */
   assertive: {
@@ -48,6 +52,9 @@ export const aggressionConfigDefaults = {
     throwsGrenades: 1,
     holdBeforeGrenadeSec: 14,
     grenadeCooldownSec: 20,
+    storeyPush: 1,
+    storeyPushAfterSec: 8,
+    storeyPushMax: 1,
   },
   /** Pincer: two flank at once, one round each side of him. Reacts to his gun every time. */
   aggressive: {
@@ -68,6 +75,9 @@ export const aggressionConfigDefaults = {
     throwsGrenades: 1,
     holdBeforeGrenadeSec: 10,
     grenadeCooldownSec: 15,
+    storeyPush: 1,
+    storeyPushAfterSec: 5,
+    storeyPushMax: 1,
   },
   /** Coordinated push: everyone who can moves up cover by cover but one suppressor; piles in when his gun goes quiet. Hunts at once. */
   relentless: {
@@ -88,6 +98,9 @@ export const aggressionConfigDefaults = {
     throwsGrenades: 1,
     holdBeforeGrenadeSec: 8,
     grenadeCooldownSec: 12,
+    storeyPush: 1,
+    storeyPushAfterSec: 3,
+    storeyPushMax: 2,
   },
 } as const;
 
