@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import GUI, { type Controller } from 'lil-gui';
 import type { Input } from '../core/input';
+import { mouseButtons } from '../config/input';
 import { roles } from '../config/roles';
 import { playerConfig } from '../config/player';
 import { isClimbable, rampRises } from '../data/greyboxRoom';
 import { boxGeometry, buildGreybox } from '../level/greybox';
-import { LevelError, levelLayout, levelToJson, type LevelBox, type LevelData, type LevelSpot } from '../level/levelData';
+import { LevelError, levelLayout, levelToJson, tidy, tidyDecimals, type LevelBox, type LevelData, type LevelSpot } from '../level/levelData';
 import {
   addBox,
   addMarker,
   boxPresets,
-  dragOnFloor,
   duplicateMany,
   EditHistory,
   listGroups,
@@ -38,12 +38,12 @@ import { describeReach, newSince, reachProblems, type ReachProblem } from '../le
 import { GizmoView } from './gizmoView';
 
 // The in-game level editor (milestone 5.2, decision 273; 5.2b, decision 281; 5.2c, decision 285), dev server only. F2 turns
-// it on, with the free camera. Aim at a piece or marker and click to select it (Shift-click adds or takes away); or pick
-// from the list at the top of the panel (search it by name, id or group; click a folder's "select all"). Arrows and the
-// rotate ring (5.5a; M switches them to size handles) are dragged by aiming at one and holding the left button. The right button drags the selection on
-// the floor (the wheel raises it; Shift snaps to the 0.25 m grid); the keys move it too (arrows, Shift: 1 m; Page Up and
-// Page Down raise and lower it), R turns each piece 90 degrees, N copies, Delete removes, U undoes. Its panel sits bottom
-// left (Esc frees the mouse to use it). A moment after each change it rebuilds the walkable floor from its copy and reports
+// it on, with the free camera and a free cursor (5.2d): the game keeps running without the mouse captured, holding the
+// right button looks around (W A S D fly), and the panel is used like any page. Point at a piece or marker and click to
+// select it (Shift-click adds or takes away); or pick from the list at the top of the panel (search it by name, id or
+// group; click a folder's "select all"). Arrows and the rotate ring (5.5a; M switches them to size handles) are dragged
+// with the left button under the cursor. The keys move the selection too (arrows, Shift: 1 m; Page Up and Page Down raise
+// and lower it), R turns each piece 90 degrees, N copies, Delete removes, U undoes. Its panel sits bottom left. A moment after each change it rebuilds the walkable floor from its copy and reports
 // what the enemies or Rook can no longer walk to (src/level/reach.ts). Save sends the level to the dev server, which writes
 // src/data/levels/<name>.json; the page then reloads with it, and only then do collision, routes, cover and enemies use
 // the new layout. Until then it draws its own copy of the boxes.
@@ -55,14 +55,10 @@ const dragStepM = 0.05;
 /** The rotate ring turns in steps of this many degrees, or the bigger step with Shift held (5.5a). */
 const turnStepDeg = 5;
 const turnBigStepDeg = 15;
-/** How far a piece moves per count of mouse movement while dragged. */
-const dragMetresPerCount = 0.01;
 /** New pieces go this far in front of the camera, on the floor. */
 const placeAheadM = 4;
 /** The reach check runs this long after the last change (so a run of key presses builds once). */
 const previewAfterSec = 0.3;
-const leftButton = 0;
-const rightButton = 2;
 const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79cff, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d, outline: 0xffffff } as const;
 /** The model chooser shows this many matches; typing narrows the rest. */
 const maxModelRows = 60;
@@ -76,7 +72,7 @@ interface KitFile {
 const roleColours = { trooper: 0x6b7f3a, flanker: 0x9fb4c8, heavy: 0x222222, leader: 0x8a2a2a } as const;
 const previewColours = { mesh: 0x3fd0ff, problem: 0xff2a2a } as const;
 const keyHelp =
-  'click pick (Shift adds) · aim at an arrow or the ring, hold left button to drag it (ring: 5 deg, Shift 15) · M arrows or size handles · hold right button drag (wheel height, Shift grid) · arrows move · PgUp/PgDn height · R turn · N copy · Del delete · U undo · Esc panel · F2 off';
+  'click pick (Shift adds) · hold right button to look, W A S D fly · drag an arrow or the ring with the left button (ring: 5 deg, Shift 15) · M arrows or size handles · arrows move · PgUp/PgDn height · R turn · N copy · Del delete · U undo · F2 off';
 /** The list's rows and the folders that are open, in the panel. */
 const listStyle = 'background:#1a1a1a;color:#ddd;font:11px sans-serif;padding:4px;margin-bottom:4px;border-radius:2px';
 const selectedRowStyle = 'background:#5a4a14';
@@ -89,6 +85,8 @@ interface Parts {
   boxMeshes: readonly THREE.Mesh[];
   /** Turns the free camera on or off. */
   setFreeCamera: (on: boolean) => void;
+  /** Tells the game the editor is on, so it runs with the cursor free (5.2d). */
+  setEditing: (on: boolean) => void;
 }
 
 /** The walkable floor and the problems of one layout, for the reach preview. */
@@ -112,11 +110,8 @@ export class EditMode {
   private readonly selectedFolder: GUI;
   private fieldControllers: Controller[] = [];
   private message = '';
-  private readonly crosshair = document.createElement('div');
+  /** The direction from the camera through the cursor (5.2d: the cursor picks, not the middle of the screen). */
   private readonly ray = new THREE.Vector3();
-  private readonly mouse = { x: 0, y: 0 };
-  /** While the right button drags: the level before the drag (one undo step), where the main item started, and how far it has gone. */
-  private drag: { before: LevelData; startX: number; startZ: number; startY: number; dx: number; dz: number; dy: number } | null = null;
   // The arrows and size handles (5.2c).
   private readonly gizmo = new GizmoView();
   private gizmoMode: 'move' | 'size' = 'move';
@@ -124,11 +119,11 @@ export class EditMode {
   private readonly raycaster = new THREE.Raycaster();
   private readonly cursor = new THREE.Vector2();
   /**
-   * While a handle is dragged: the handle as it was at the start (the line or ring the drag follows stays put), the level
-   * before, and the virtual cursor. For the ring, `startParam` is the last angle under the cursor and `turnedRad` how far it
-   * has gone in all (so it can pass half a turn without jumping back).
+   * While a handle is dragged: the handle as it was at the start (the line or ring the drag follows stays put) and the level
+   * before. For the ring, `startParam` is the last angle under the cursor and `turnedRad` how far it has gone in all (so it
+   * can pass half a turn without jumping back).
    */
-  private handleDrag: { handle: GizmoHandle; before: LevelData; startParam: number; cursorX: number; cursorY: number; turnedRad: number } | null = null;
+  private handleDrag: { handle: GizmoHandle; before: LevelData; startParam: number; turnedRad: number } | null = null;
   // The list (5.2c).
   private readonly listBody = document.createElement('div');
   private searchText = '';
@@ -156,16 +151,12 @@ export class EditMode {
     this.previewGroup.visible = false;
     parts.scene.add(this.previewGroup);
     parts.scene.add(this.gizmo.group);
-    this.crosshair.style.cssText =
-      'position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;background:#ffc23d;' +
-      'box-shadow:0 0 0 1px #000;pointer-events:none;z-index:11;display:none';
-    document.body.appendChild(this.crosshair);
 
     // Its own panel, bottom left, shown while the editor is on (5.2b): the list of pieces on top, the editor's buttons below.
     this.panelBox.style.cssText = 'position:fixed;left:8px;bottom:8px;max-height:60vh;overflow-y:auto;z-index:12;display:none;width:300px';
     document.body.appendChild(this.panelBox);
     this.panelBox.appendChild(this.buildList());
-    this.panel = new GUI({ container: this.panelBox, title: `Level editor: ${parts.level.name} (Esc to use)`, width: 300 });
+    this.panel = new GUI({ container: this.panelBox, title: `Level editor: ${parts.level.name}`, width: 300 });
     this.panel.add({ save: () => void this.save() }, 'save').name('Save to the level file');
     this.panel.add({ undo: () => this.undo() }, 'undo').name('Undo (U)');
     const adds = this.panel.addFolder('Add (where you look)');
@@ -186,10 +177,9 @@ export class EditMode {
   toggle(on: boolean): void {
     this.active = on;
     this.parts.setFreeCamera(on);
-    this.crosshair.style.display = on ? 'block' : 'none';
+    this.parts.setEditing(on);
     this.panelBox.style.display = on ? 'block' : 'none';
     if (!on) {
-      this.endDrag();
       this.endHandleDrag();
       this.gizmo.hide();
     }
@@ -210,23 +200,26 @@ export class EditMode {
 
   /** Once per frame while it is on: picking, dragging, the keys, the arrows, and the reach preview's timer. */
   update(input: Input, dtSec = 0): void {
-    if (this.previewLeftSec >= 0 && !this.drag && !this.handleDrag) {
+    if (this.previewLeftSec >= 0 && !this.handleDrag) {
       this.previewLeftSec -= dtSec;
       if (this.previewLeftSec < 0) void this.preview();
     }
     if (!this.active) return;
     const { camera } = this.parts;
     const shift = input.isKeyDown('ShiftLeft') || input.isKeyDown('ShiftRight');
+    const looking = input.isButtonDown(mouseButtons.right); // the right button turns the view (debug/index.ts); nothing is picked meanwhile
     camera.updateMatrixWorld();
-    camera.getWorldDirection(this.ray);
-    // The arrows or handles: the one the dot is aimed at lights up; a left press on it starts a drag, anywhere else it picks.
+    this.cursor.set(input.pointer.x, input.pointer.y);
+    this.raycaster.setFromCamera(this.cursor, camera);
+    this.ray.copy(this.raycaster.ray.direction);
+    // The arrows or handles: the one under the cursor lights up; a left press on it starts a drag, anywhere else it picks.
     const handles = layoutGizmo(this.data, this.selection, this.gizmoMode, camera.position);
     if (this.handleDrag) {
-      if (input.isButtonDown(leftButton)) this.handleDragStep(input, shift);
+      if (input.isButtonDown(mouseButtons.left)) this.handleDragStep(shift);
       else this.endHandleDrag();
     } else {
-      this.hover = pickHandle(handles, camera.position, this.ray)?.key ?? null;
-      if (input.consumeButtonPress(leftButton)) {
+      this.hover = looking ? null : (pickHandle(handles, camera.position, this.ray)?.key ?? null);
+      if (input.consumeButtonPress(mouseButtons.left) && !looking) {
         const handle = handles.find((candidate) => candidate.key === this.hover);
         if (handle) this.startHandleDrag(handle);
         else this.clickPick(shift);
@@ -237,9 +230,6 @@ export class EditMode {
     if (input.consumePress('KeyU')) this.undo();
     if (input.consumePress('KeyM')) this.switchGizmo();
     if (this.selection.length === 0) return;
-    if (input.isButtonDown(rightButton)) this.dragStep(input, shift);
-    else if (this.drag) this.endDrag();
-    if (this.drag) return; // keys wait until the drag is over
     const step = shift ? bigStepM : stepM;
     // Arrows move along the floor axis nearest to where you look, so "up" is always away from you.
     const alongX = Math.abs(this.ray.x) > Math.abs(this.ray.z);
@@ -273,47 +263,13 @@ export class EditMode {
     const sizeNeedsOne = this.gizmoMode === 'size' && this.selection.length > 0 && layoutGizmo(this.data, this.selection, 'size', this.parts.camera.position).length === 0;
     return [
       `EDITOR    ${this.data.name}: ${this.data.boxes.length} boxes, ${this.data.spawns.length} spawns, ${this.data.dummies.length} dummies${this.dirty ? ', UNSAVED changes (collision and enemies still use the saved layout)' : ', saved'}`,
-      `selected  ${what}${this.drag || this.handleDrag ? ' (dragging)' : ''}`,
+      `selected  ${what}${this.handleDrag ? ' (dragging)' : ''}`,
       `handles   ${this.gizmoMode === 'move' ? 'move arrows and the turn ring' : 'size handles'} (M switches)${sizeNeedsOne ? ': size handles need exactly one box selected' : ''}`,
       `keys      ${keyHelp}`,
       ...(main && this.pick && locate(this.data, this.pick)?.list === 'boxes' && (main as LevelBox).model ? [`model     ${this.modelLine(main as LevelBox)}`] : []),
       ...this.reachLines.map((line, i) => `${i === 0 ? 'reach     ' : '          '}${line}`),
       ...(this.message ? [`note      ${this.message}`] : []),
     ];
-  }
-
-  /** One frame of a right-button drag: the mouse moves the selection on the floor, the wheel raises it. */
-  private dragStep(input: Input, shift: boolean): void {
-    const main = this.pick;
-    const item = main ? picked(this.data, main) : undefined;
-    if (!main || !item) return;
-    if (!this.drag) {
-      const yM = (item as LevelBox).yM ?? 0;
-      this.drag = { before: this.data, startX: item.xM, startZ: item.zM, startY: yM, dx: 0, dz: 0, dy: 0 };
-    }
-    input.consumeMouseMove(this.mouse); // taken here, so the free camera holds still meanwhile
-    const moved = dragOnFloor(this.parts.camera.rotation.y, this.mouse.x, this.mouse.y, dragMetresPerCount);
-    this.drag.dx += moved.dx;
-    this.drag.dz += moved.dz;
-    const isBox = locate(this.data, main)?.list === 'boxes';
-    if (isBox) this.drag.dy += input.consumeWheelSteps() * stepM;
-    const snap = shift ? stepM : dragStepM;
-    const x = snapTo(this.drag.startX + this.drag.dx, snap);
-    const z = snapTo(this.drag.startZ + this.drag.dz, snap);
-    const y = isBox ? Math.max(snapTo(this.drag.startY + this.drag.dy, stepM), 0) : 0;
-    // The main item goes to the snapped spot and every other selected one moves by the same amount.
-    this.showDragged(moveMany(this.drag.before, this.selection, x - this.drag.startX, y - this.drag.startY, z - this.drag.startZ));
-  }
-
-  /** The drag is over: it becomes one undo step, and the reach preview runs. */
-  private endDrag(): void {
-    if (!this.drag) return;
-    const { before } = this.drag;
-    this.drag = null;
-    if (this.data !== before) {
-      this.history.push(before);
-      this.afterChange();
-    }
   }
 
   // ---- The arrows and size handles (5.2c).
@@ -323,23 +279,17 @@ export class EditMode {
     this.message = '';
   }
 
-  /** A left press on an arrow, handle or the ring: the drag follows that line (or goes round the ring), with a virtual cursor that starts at the dot. */
+  /** A left press on an arrow, handle or the ring: the drag follows that line (or goes round the ring) under the cursor. */
   private startHandleDrag(handle: GizmoHandle): void {
     const startParam = handle.kind === 'turn' ? (ringAngle(handle, this.parts.camera.position, this.ray)?.angleRad ?? null) : closestOnAxis(this.parts.camera.position, this.ray, handle.origin, handle.dir);
     if (startParam === null) return;
-    this.handleDrag = { handle, before: this.data, startParam, cursorX: 0, cursorY: 0, turnedRad: 0 };
+    this.handleDrag = { handle, before: this.data, startParam, turnedRad: 0 };
   }
 
-  private handleDragStep(input: Input, shift: boolean): void {
+  /** One frame of a handle drag: the piece follows the nearest point of the handle's line (or ring) to the ray through the cursor (set in `update`). */
+  private handleDragStep(shift: boolean): void {
     const drag = this.handleDrag;
     if (!drag) return;
-    input.consumeMouseMove(this.mouse); // taken here, so the free camera holds still meanwhile
-    drag.cursorX += this.mouse.x;
-    drag.cursorY += this.mouse.y;
-    // A ray through where the cursor would be on screen; the piece follows the nearest point of the axis to it.
-    this.cursor.set(drag.cursorX / (window.innerWidth / 2), -drag.cursorY / (window.innerHeight / 2));
-    this.parts.camera.updateMatrixWorld();
-    this.raycaster.setFromCamera(this.cursor, this.parts.camera);
     if (drag.handle.kind === 'turn') {
       const hit = ringAngle(drag.handle, this.raycaster.ray.origin, this.raycaster.ray.direction);
       if (!hit) return;
@@ -794,19 +744,20 @@ export class EditMode {
     if (!pick || !item || !where) return;
     const folder = this.selectedFolder;
     const ids = this.selection;
-    const set = (field: string, value: unknown) => this.change(setFieldMany(this.data, ids, field, value));
-    const values: Record<string, unknown> = { ...item };
-    const number = (field: string, step = 0.05) =>
-      this.fieldControllers.push(folder.add(values, field).step(step).onFinishChange((v: number) => set(field, v)));
+    // Numbers are shown and stored rounded as the file rounds them (5.2d): millimetres, tenths of a degree.
+    const set = (field: string, value: unknown) => this.change(setFieldMany(this.data, ids, field, tidy(field, value)));
+    const values: Record<string, unknown> = Object.fromEntries(Object.entries(item).map(([key, value]) => [key, tidy(key, value)]));
+    const numberField = (field: string, step: number) => folder.add(values, field).step(step).decimals(tidyDecimals(field));
+    const number = (field: string, step = 0.05) => this.fieldControllers.push(numberField(field, step).onFinishChange((v: number) => set(field, v)));
     const allBoxes = ids.every((id) => locate(this.data, id)?.list === 'boxes');
     if (where.list === 'boxes' && allBoxes) {
       const box = item as LevelBox;
-      values.yM = box.yM ?? 0;
+      values.yM = tidy('yM', box.yM ?? 0);
       values.climbable = isClimbable(box);
       values.surface = box.surface ?? 'default';
       values.glass = box.glass ?? false;
       values.group = box.group ?? '';
-      values.yawDeg = box.yawDeg ?? 0;
+      values.yawDeg = tidy('yawDeg', box.yawDeg ?? 0);
       if (!many) {
         this.fieldControllers.push(folder.add(values, 'label').onFinishChange((v: string) => set('label', v)));
       }
@@ -817,8 +768,8 @@ export class EditMode {
       this.fieldControllers.push(folder.add({ go: () => this.clearModels() }, 'go').name('No model (grey box)'));
       if (!many) {
         for (const field of ['xM', 'zM', 'widthM', 'depthM', 'heightM']) number(field);
-        this.fieldControllers.push(folder.add(values, 'yM').step(0.05).name('yM (off the floor)').onFinishChange((v: number) => set('yM', v > 0 ? v : undefined)));
-        this.fieldControllers.push(folder.add(values, 'yawDeg').step(5).name('yawDeg (turned, left)').onFinishChange((v: number) => set('yawDeg', normalYawDeg(v) || undefined)));
+        this.fieldControllers.push(numberField('yM', 0.05).name('yM (off the floor)').onFinishChange((v: number) => set('yM', v > 0 ? v : undefined)));
+        this.fieldControllers.push(numberField('yawDeg', 5).name('yawDeg (turned, left)').onFinishChange((v: number) => set('yawDeg', normalYawDeg(v) || undefined)));
       }
       this.fieldControllers.push(folder.add(values, 'climbable').onChange((v: boolean) => set('climbable', v)));
       this.fieldControllers.push(folder.add(values, 'surface', ['default', 'concrete', 'metal', 'tile']).onChange((v: string) => set('surface', v === 'default' ? undefined : v)));
@@ -849,9 +800,10 @@ function describe(level: LevelData, pick: Pick, item: LevelBox | LevelSpot): str
   const list = locate(level, pick)?.list;
   if (list === 'boxes') {
     const box = item as LevelBox;
-    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${box.widthM} x ${box.depthM} x ${box.heightM} m${box.yM ? `, ${box.yM} m up` : ''}${box.yawDeg ? `, turned ${box.yawDeg} deg` : ''}`;
+    const m = (value: number) => tidy('M', value);
+    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${m(box.widthM)} x ${m(box.depthM)} x ${m(box.heightM)} m${box.yM ? `, ${m(box.yM)} m up` : ''}${box.yawDeg ? `, turned ${tidy('Deg', box.yawDeg)} deg` : ''}`;
   }
-  const facing = `facing ${(item as LevelSpot).yawDeg} deg`;
+  const facing = `facing ${tidy('Deg', (item as LevelSpot).yawDeg)} deg`;
   if (list === 'start') return `Rook's start ${at}, ${facing}`;
   if (list === 'dummies') return `dummy [${item.id}] ${at}, ${facing}`;
   return `enemy spawn [${item.id}] (${(item as LevelSpot & { role: string }).role}) ${at}, ${facing}`;

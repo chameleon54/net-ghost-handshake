@@ -102,3 +102,62 @@ describe('Game pause rules', () => {
     expect(game.state).toBe('playing');
   });
 });
+
+describe('the level editor runs with a free cursor (5.2d)', () => {
+  function setup() {
+    const input = new Input();
+    let released = 0;
+    let refused = 0;
+    const game = new Game(input, () => released++);
+    game.events.on('game:capture-refused', () => refused++);
+    return { input, game, released: () => released, refused: () => refused };
+  }
+
+  it('turning the editor on frees the mouse and keeps the game running, keys live', () => {
+    const { game, input, released } = setup();
+    game.handleLockChange(true);
+    game.setEditing(true);
+    expect(released()).toBe(1);
+    game.handleLockChange(false); // the browser reports the mouse freed
+    expect(game.state).toBe('playing');
+    input.keyDown('KeyR');
+    expect(input.consumePress('KeyR')).toBe(true);
+  });
+
+  it('looking (the mouse captured while the right button is held) and letting go never pauses', () => {
+    const { game } = setup();
+    game.setEditing(true);
+    game.handleLockChange(true);
+    game.handleLockChange(false);
+    expect(game.state).toBe('playing');
+  });
+
+  it('turning the editor off without the mouse captured pauses, so a click resumes as after Esc', () => {
+    const { game, input } = setup();
+    game.setEditing(true);
+    game.setEditing(false);
+    expect(game.state).toBe('paused');
+    expect(input.enabled).toBe(false);
+  });
+
+  it('losing focus while editing only lets go of held keys; a refused capture is not reported', () => {
+    const { game, input, released, refused } = setup();
+    game.setEditing(true);
+    input.keyDown('KeyW');
+    game.handleFocusLost();
+    expect(game.state).toBe('playing');
+    expect(input.isKeyDown('KeyW')).toBe(false);
+    expect(released()).toBe(0);
+    game.handleCaptureRefused();
+    expect(refused()).toBe(0);
+  });
+
+  it('the cursor position is kept from -1 to 1, the top of the screen up', () => {
+    const input = new Input();
+    expect(input.pointer).toEqual({ x: 0, y: 0 });
+    input.setPointer(0, 0, 800, 600);
+    expect(input.pointer).toEqual({ x: -1, y: 1 });
+    input.setPointer(600, 450, 800, 600);
+    expect(input.pointer).toEqual({ x: 0.5, y: -0.5 });
+  });
+});

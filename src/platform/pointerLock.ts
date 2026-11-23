@@ -37,3 +37,16 @@ export function createPointerLock(
     },
   };
 }
+
+/**
+ * While `when()` is true (the level editor is on, 5.2d), holding `button` on `target` captures the mouse, so the view can
+ * turn without the cursor stopping at the screen edge, and letting go frees it again.
+ */
+export function captureWhileHeld(target: HTMLElement, button: number, lock: PointerLock, when: () => boolean): void {
+  target.addEventListener('mousedown', (event) => {
+    if (event.button === button && when() && document.pointerLockElement !== target) void lock.request();
+  });
+  window.addEventListener('mouseup', (event) => {
+    if (event.button === button && when() && document.pointerLockElement === target) lock.exit();
+  });
+}

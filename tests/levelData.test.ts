@@ -3,7 +3,7 @@ import { checkLevel, coverRemoveRadiusM, LevelError, levelToJson, spotRad, type 
 import { levelCover } from '../src/level/cover';
 import { testArenaLevel } from '../src/data/testArena';
 import arenaText from '../src/data/levels/test-arena.json?raw';
-import { addBox, addMarker, dragOnFloor, duplicate, EditHistory, freeId, moveBy, pickAt, picked, rayBoxM, remove, setField, snapTo, turn } from '../src/level/levelEdit';
+import { addBox, addMarker, duplicate, EditHistory, freeId, moveBy, pickAt, picked, rayBoxM, remove, setField, snapTo, turn } from '../src/level/levelEdit';
 import { levelSaveRequest } from '../src/level/levelSave';
 
 /** A small valid level to break on purpose. */
@@ -215,16 +215,6 @@ describe('ids and dragging (5.2b, decision 281)', () => {
     expect(picked(fewer, 'wall')).toMatchObject({ label: 'north wall' }); // it was second, now first: still the wall
     expect(picked(fewer, 'crate')).toBeUndefined();
     expect(moveBy(fewer, 'crate', 1, 0, 0)).toBe(fewer); // nothing to move: the level is unchanged
-  });
-
-  it('a right-button drag moves on the floor: sideways along the camera right, pushed away along its view', () => {
-    expect(dragOnFloor(0, 100, 0, 0.01)).toEqual({ dx: 1, dz: 0 }); // looking north, mouse right: east
-    const away = dragOnFloor(0, 0, -100, 0.01); // mouse pushed away: north, where it looks
-    expect(away.dx).toBeCloseTo(0);
-    expect(away.dz).toBeCloseTo(-1);
-    const west = dragOnFloor(Math.PI / 2, 100, 0, 0.01); // looking west, mouse right: north
-    expect(west.dx).toBeCloseTo(0);
-    expect(west.dz).toBeCloseTo(-1);
   });
 
   it('dragging rounds to 0.05 m, and to the 0.25 m grid with Shift', () => {

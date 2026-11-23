@@ -8,6 +8,10 @@ export const inputConfigDefaults = {
   holdTimeSec: 0.25,
 } as const;
 
+/** Mouse buttons as browsers number them. The level editor (dev only, 5.2d) looks around while the right one is held. */
+export const mouseButtons = { left: 0, right: 2 } as const;
+export const editorLookButton = mouseButtons.right;
+
 /** The live values the game reads. The debug panel (dev server only) changes these; Reset puts the defaults above back. */
 export type InputConfig = { -readonly [K in keyof typeof inputConfigDefaults]: number };
 export const inputConfig: InputConfig = { ...inputConfigDefaults };

@@ -174,8 +174,7 @@
     {"id":"ring-w-planter","label":"planter (ring W, cover)","kind":"prop","xM":-17.4,"zM":9,"widthM":0.8,"depthM":1.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
     {"id":"ring-e-desk","label":"observation desk (ring E, cover)","kind":"prop","xM":17.4,"zM":-6,"widthM":0.8,"depthM":2.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
     {"id":"ring-e-planter","label":"planter (ring E, cover)","kind":"prop","xM":17.4,"zM":7,"widthM":0.8,"depthM":1.4,"heightM":1.1,"yM":4.5,"surface":"metal"},
-    {"id":"ring-e-locker-2","label":"equipment locker (ring E, cover)","kind":"prop","xM":15.7,"zM":0.5,"widthM":0.8,"depthM":1,"heightM":1.9,"yM":4.5,"surface":"metal"},
-    {"id":"control-console-2","label":"control console","kind":"prop","xM":14.9,"zM":0.7,"widthM":0.443,"depthM":0.264,"heightM":1,"yM":1.2,"yawDeg":80,"model":"kit:Lab Assets/GLB/All/ppe_fire_extinguisher_clamp.glb"}
+    {"id":"ring-e-locker-2","label":"equipment locker (ring E, cover)","kind":"prop","xM":15.7,"zM":0.5,"widthM":0.8,"depthM":1,"heightM":1.9,"yM":4.5,"surface":"metal"}
   ],
   "coverAdd": [],
   "coverRemove": [],

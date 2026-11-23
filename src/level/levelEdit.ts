@@ -259,21 +259,6 @@ export function listGroups(level: LevelData, search: string): ListGroup[] {
   return groups;
 }
 
-/**
- * The floor movement for a right-button drag (5.2b): the mouse's sideways counts move along the camera's right, its
- * up-and-down counts along where the camera looks (flat on the floor; pushing the mouse away moves the piece away).
- * `yawRad` is the camera's yaw (0 looks north, -z; positive turns left, as the player's).
- */
-export function dragOnFloor(yawRad: number, mouseX: number, mouseY: number, metresPerCount: number): { dx: number; dz: number } {
-  const forwardX = -Math.sin(yawRad);
-  const forwardZ = -Math.cos(yawRad);
-  const rightX = -forwardZ; // a quarter turn to the right of forward
-  const rightZ = forwardX;
-  const across = mouseX * metresPerCount;
-  const ahead = -mouseY * metresPerCount; // the mouse pushed away (up the screen) gives a negative count
-  return { dx: rightX * across + forwardX * ahead, dz: rightZ * across + forwardZ * ahead };
-}
-
 /** Rounds to a step (0.05 m while dragging, the 0.25 m grid with Shift); tidies the float's tail. */
 export function snapTo(m: number, stepM: number): number {
   return Math.round(Math.round(m / stepM) * stepM * 1000) / 1000;

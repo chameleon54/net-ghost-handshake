@@ -327,13 +327,18 @@ export function spotRad<T extends LevelSpot>(spot: T): Omit<T, 'yawDeg'> & { yaw
   return { ...rest, yawRad: (yawDeg * Math.PI) / 180 };
 }
 
-/** Distances (keys ending in M) to the millimetre, so floating-point dust from editing (0.30000000000000004) never reaches the file; angles in degrees to a tenth. */
-const tidy = (key: string, value: unknown): unknown => {
+/**
+ * Distances (keys ending in M) to the millimetre, so floating-point dust from editing (0.30000000000000004) never reaches the
+ * file; angles in degrees to a tenth. The editor's panel shows numbers the same way (5.2d).
+ */
+export const tidy = (key: string, value: unknown): unknown => {
   if (typeof value !== 'number') return value;
   if (key.endsWith('M')) return Math.round(value * 1000) / 1000;
   if (key.endsWith('Deg')) return Math.round(value * 10) / 10;
   return value;
 };
+/** How many decimals a field shows in the editor: millimetres for distances, tenths for degrees. */
+export const tidyDecimals = (key: string): number => (key.endsWith('Deg') ? 1 : 3);
 const mm = (value: number): number => tidy('M', value) as number;
 
 /**

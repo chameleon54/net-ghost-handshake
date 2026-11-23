@@ -11,7 +11,7 @@ import { GlassSystem } from './level/glassSystem';
 import { CoverPoints, levelCover } from './level/cover';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
-import { createPointerLock } from './platform/pointerLock';
+import { captureWhileHeld, createPointerLock } from './platform/pointerLock';
 import { Player } from './player/player';
 import { fallDamage } from './player/fall';
 import { PlayerHealth } from './player/playerHealth';
@@ -55,7 +55,7 @@ import { Exposure, type Glimpse } from './player/exposure';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
 import { grenadeConfig } from './config/grenade';
-import { inputConfig } from './config/input';
+import { editorLookButton, inputConfig } from './config/input';
 import { BarrelSmoke } from './fx/barrelSmoke';
 import { AudioSystem } from './audio/audioSystem';
 import { SoundTap } from './audio/soundTap';
@@ -441,7 +441,7 @@ window.addEventListener('resize', () => {
 
 // Wiring: input, the play state, pointer lock, focus, overlay, loop.
 const input = new Input();
-attachInputListeners(input);
+attachInputListeners(input, renderer.domElement);
 
 // `pointerLock` is assigned just below; the game only calls releaseMouse later, never during construction.
 const game = new Game(input, () => pointerLock.exit());
@@ -451,6 +451,8 @@ const pointerLock = createPointerLock(
   () => game.handleCaptureRefused(),
 );
 onFocusLost(() => game.handleFocusLost());
+// The level editor (dev only) runs with a free cursor; holding the right button captures the mouse to look around (5.2d).
+captureWhileHeld(renderer.domElement, editorLookButton, pointerLock, () => game.editing);
 
 // The click that starts or resumes the game is the one the browser lets sound start from.
 const overlay = createOverlay(() => {
@@ -516,7 +518,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: levelData, levelBoxMeshes: level.boxMeshes });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: levelData, levelBoxMeshes: level.boxMeshes, setEditing: (on) => game.setEditing(on) });
   });
 }
 
