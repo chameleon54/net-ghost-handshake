@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { distanceToBoxM } from './boxShape';
 import { levelCover } from './cover';
 import type { LevelData } from './levelData';
 import type { Navigation } from './navigation';
@@ -107,11 +108,7 @@ export function nearestLabel(level: LevelData, x: number, y: number, z: number):
   let bestM = Infinity;
   for (const box of level.boxes) {
     if (box.drawn === false) continue; // a stair's hidden ramp says nothing to the reader
-    const dx = Math.max(Math.abs(x - box.xM) - box.widthM / 2, 0);
-    const dz = Math.max(Math.abs(z - box.zM) - box.depthM / 2, 0);
-    const bottom = box.yM ?? 0;
-    const dy = y < bottom ? bottom - y : y > bottom + box.heightM ? y - bottom - box.heightM : 0;
-    const m = Math.hypot(dx, dy, dz);
+    const m = distanceToBoxM(box, x, y, z);
     if (m < bestM) {
       best = box.label;
       bestM = m;

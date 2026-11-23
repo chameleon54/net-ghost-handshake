@@ -15,6 +15,7 @@ export type NoiseKind =
   | 'knife-stab'
   | 'grenade-bounce'
   | 'grenade-blast'
+  | 'glass-break'
   | 'footstep'
   | 'slide'
   | 'vault'

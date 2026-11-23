@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import GUI from 'lil-gui';
-import { inputConfig, inputConfigDefaults } from '../config/input';
+import { editorLookButton, inputConfig, inputConfigDefaults } from '../config/input';
 import { playerConfig, playerConfigDefaults } from '../config/player';
 import { casingConfig, casingConfigDefaults } from '../config/casing';
 import { dummyConfig, dummyConfigDefaults } from '../config/dummy';
@@ -104,6 +104,8 @@ interface Parts {
   /** The level as loaded from its data file, and the meshes drawn for its boxes, for the level editor (5.2). */
   level: LevelData;
   levelBoxMeshes: readonly THREE.Mesh[];
+  /** Tells the game the editor is on or off: while on, it runs with a free cursor (5.2d). */
+  setEditing: (on: boolean) => void;
 }
 
 const maxFrameSec = 0.1; // a long pause must not fling the free camera across the room
@@ -118,7 +120,7 @@ const capsuleSegments = 12;
 const freeCameraKey = 'Backquote';
 const editModeKey = 'F2';
 
-export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events, level, levelBoxMeshes }: Parts): DebugTools {
+export function installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health, heals, soundTap, standIns, activeStandIns, squad, respawnSquad, flankFailure, navigation, coverPoints, camera, exposure, hitChance, renderer, collision, events, level, levelBoxMeshes, setEditing }: Parts): DebugTools {
   const freeCamera = new FreeCamera();
   // The performance readout (4.13b): rays and route searches are counted by wrapping the shared collision and navigation.
   const perf = new PerfMeter();
@@ -195,7 +197,7 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
   gui.add(log, 'printToConsole').name('Debug log: also print in the console (F12)');
   // The level editor (5.2; its own panel bottom left since 5.2b): F2, with the free camera; Save writes the level file and
   // the page reloads with it.
-  const editMode = new EditMode({ scene, camera, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on) });
+  const editMode = new EditMode({ scene, camera, level, boxMeshes: levelBoxMeshes, setFreeCamera: (on) => setFreeCamera(camera, on), setEditing });
   gui.add({ toggle: () => editMode.toggle(!editMode.active) }, 'toggle').name(`Level editor on or off (${editModeKey})`);
 
   const actions = {
@@ -611,7 +613,8 @@ export function installDebugTools({ scene, input, player, viewmodel, weapons, au
       }
       if (!freeCamera.active) return false;
       updateMarker();
-      freeCamera.update(dtSec, input, camera);
+      // In the editor the cursor is free, so the view turns only while the right button is held (5.2d).
+      freeCamera.update(dtSec, input, camera, !editMode.active || input.isButtonDown(editorLookButton));
       return true;
     },
   };

@@ -3,7 +3,7 @@ import { checkLevel, coverRemoveRadiusM, LevelError, levelToJson, spotRad, type 
 import { levelCover } from '../src/level/cover';
 import { testArenaLevel } from '../src/data/testArena';
 import arenaText from '../src/data/levels/test-arena.json?raw';
-import { addBox, addMarker, dragOnFloor, duplicate, EditHistory, freeId, moveBy, pickAt, picked, rayBoxM, remove, setField, snapTo, turn } from '../src/level/levelEdit';
+import { addBox, addMarker, duplicate, EditHistory, freeId, moveBy, pickAt, picked, rayBoxM, remove, setField, snapTo, turn } from '../src/level/levelEdit';
 import { levelSaveRequest } from '../src/level/levelSave';
 
 /** A small valid level to break on purpose. */
@@ -65,7 +65,7 @@ describe('the level data format (5.2)', () => {
     const noSpeakers: Partial<LevelData> = small();
     delete noSpeakers.speakers;
     expect(problemsOf(noSpeakers)).toEqual(['speakers must be a list']);
-    expect(problemsOf({ ...small(), formatVersion: 3 })).toEqual(['formatVersion must be 1 or 2 (this game reads both)']);
+    expect(problemsOf({ ...small(), formatVersion: 6 })).toEqual(['formatVersion must be one of 1, 2, 3, 4, 5 (this game reads all of them)']);
   });
 
   it('keeps optional fields out unless the file has them, and rounds editing dust off distances', () => {
@@ -198,9 +198,9 @@ describe('ids and dragging (5.2b, decision 281)', () => {
     for (const spot of [old.start, ...old.dummies, ...old.spawns]) delete (spot as Partial<typeof spot>).id;
     old.boxes[0].id = 'spawn-1'; // a box already holds the name a spawn would get
     const checked = checkLevel(old);
-    expect(checked.formatVersion).toBe(2);
+    expect(checked.formatVersion).toBe(5);
     expect([checked.start.id, checked.dummies[0].id, checked.spawns[0].id]).toEqual(['start', 'dummy-1', 'spawn-2']);
-    expect(levelToJson(checked)).toContain('"formatVersion": 2');
+    expect(levelToJson(checked)).toContain('"formatVersion": 5');
   });
 
   it('two items with one id are a problem, boxes and markers alike', () => {
@@ -215,16 +215,6 @@ describe('ids and dragging (5.2b, decision 281)', () => {
     expect(picked(fewer, 'wall')).toMatchObject({ label: 'north wall' }); // it was second, now first: still the wall
     expect(picked(fewer, 'crate')).toBeUndefined();
     expect(moveBy(fewer, 'crate', 1, 0, 0)).toBe(fewer); // nothing to move: the level is unchanged
-  });
-
-  it('a right-button drag moves on the floor: sideways along the camera right, pushed away along its view', () => {
-    expect(dragOnFloor(0, 100, 0, 0.01)).toEqual({ dx: 1, dz: 0 }); // looking north, mouse right: east
-    const away = dragOnFloor(0, 0, -100, 0.01); // mouse pushed away: north, where it looks
-    expect(away.dx).toBeCloseTo(0);
-    expect(away.dz).toBeCloseTo(-1);
-    const west = dragOnFloor(Math.PI / 2, 100, 0, 0.01); // looking west, mouse right: north
-    expect(west.dx).toBeCloseTo(0);
-    expect(west.dz).toBeCloseTo(-1);
   });
 
   it('dragging rounds to 0.05 m, and to the 0.25 m grid with Shift', () => {

@@ -1,20 +1,37 @@
 import { roles, type Role } from '../config/roles';
 import { rampRises, type FloorZone, type HazardPad, type RoomBox, type RoomLayout, type Surface } from '../data/greyboxRoom';
 import type { CoverPoint } from './cover';
+import { isModelName, modelTurnsDeg } from './modelFit';
 
 // The level data format (milestone 5.2, decision 273; level.md "Level data"). A level is a JSON file in src/data/levels/,
 // imported by the game (so it ships inside the build and works offline), checked here on load, and written back by the
 // dev server's edit mode. `formatVersion` lets the format grow. Some lists are reserved: typed and checked now, used later
 // (glass in 5.4, acoustic zones in 7d, the announcer's speakers, wave arrival areas in 7.1). No drawing here.
 
-/** Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; a version 1 file still loads and gets them. */
-export const levelFormatVersion = 2;
+/**
+ * Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; version 3 (5.2c, decision 285) lets a box carry
+ * a `group`; version 4 (5.5a, decision 286) lets a box be turned (`yawDeg`); version 5 (5.5b, decision 287) lets a box be
+ * drawn as a model (`model`, `modelYawDeg`). An older file still loads (a version 1 file gets the ids) and is written back
+ * as the current version.
+ */
+export const levelFormatVersion = 5;
+/** Every version this game reads. */
+const readableVersions = [1, 2, 3, 4, levelFormatVersion];
 
 /** A box in the level: a wall or a piece of equipment. `id` is unique in the level; `label` says what it is ("prep bench A"). */
 export interface LevelBox extends RoomBox {
   id: string;
   label: string;
   kind: 'wall' | 'prop';
+  /** A folder for the editor's list ("ring", "core"); only the editor uses it (5.2c). Left out: no group. */
+  group?: string;
+  /**
+   * Drawn as this model instead of a grey box (5.5b): `prop-<name>` (a game file) or `kit:<folder>/<file>` (a kit being
+   * tried, dev server only). The box stays the collision; the model is fitted inside it (src/level/modelFit.ts).
+   */
+  model?: string;
+  /** The model turned inside its box: 90, 180 or 270 degrees, positive left. Left out: 0. */
+  modelYawDeg?: number;
 }
 
 /** Where something stands and which way it faces, in degrees (0 = north, -z; 90 = west: positive turns left, as the player's yaw). */
@@ -175,19 +192,29 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
     heightM: r.number(o.heightM, `${path}.heightM`, 'positive'),
   };
   const yM = r.optional(o.yM, () => r.number(o.yM, `${path}.yM`, 'not negative'));
+  const yawDeg = r.optional(o.yawDeg, () => r.number(o.yawDeg, `${path}.yawDeg`));
   const climbable = r.flag(o.climbable, `${path}.climbable`);
   const surface = r.optional(o.surface, () => r.oneOf(o.surface, `${path}.surface`, surfaces));
   const glass = r.flag(o.glass, `${path}.glass`);
   const ramp = r.optional(o.ramp, () => r.oneOf(o.ramp, `${path}.ramp`, rampRises));
   const drawn = r.flag(o.drawn, `${path}.drawn`);
   const solid = r.flag(o.solid, `${path}.solid`);
+  const group = r.optional(o.group, () => r.text(o.group, `${path}.group`));
+  const model = r.optional(o.model, () => r.text(o.model, `${path}.model`));
+  const modelYawDeg = r.optional(o.modelYawDeg, () => r.number(o.modelYawDeg, `${path}.modelYawDeg`));
+  if (model !== undefined && !isModelName(model)) r.problems.push(`${path}.model must be "prop-<name>" (a game model) or "kit:<folder>/<file>" (a kit being tried)`);
+  if (modelYawDeg !== undefined && !modelTurnsDeg.includes(modelYawDeg)) r.problems.push(`${path}.modelYawDeg must be one of ${modelTurnsDeg.join(', ')}`);
   if (yM !== undefined) box.yM = yM;
+  if (yawDeg !== undefined) box.yawDeg = yawDeg;
   if (climbable !== undefined) box.climbable = climbable;
   if (surface !== undefined) box.surface = surface;
   if (glass !== undefined) box.glass = glass;
   if (ramp !== undefined) box.ramp = ramp;
   if (drawn !== undefined) box.drawn = drawn;
   if (solid !== undefined) box.solid = solid;
+  if (group !== undefined) box.group = group;
+  if (model !== undefined) box.model = model;
+  if (modelYawDeg) box.modelYawDeg = modelYawDeg; // 0 is left out
   if (drawn === false && solid === false) r.problems.push(`${path} is neither drawn nor solid, so it does nothing`);
   return box;
 }
@@ -213,7 +240,7 @@ export function checkLevel(raw: unknown): LevelData {
   const r = new Reader();
   const o = r.object(raw, 'level');
   const version = r.number(o.formatVersion, 'formatVersion');
-  if (version !== 1 && version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be 1 or ${levelFormatVersion} (this game reads both)`);
+  if (!readableVersions.includes(version) && r.problems.length === 0) r.problems.push(`formatVersion must be one of ${readableVersions.join(', ')} (this game reads all of them)`);
   const name = r.text(o.name, 'name');
   if (!levelNamePattern.test(name)) r.problems.push('name must be lowercase letters, digits and hyphens (it is also the file name)');
   const floorIn = r.object(o.floor, 'floor');
@@ -228,7 +255,7 @@ export function checkLevel(raw: unknown): LevelData {
   };
   const boxes = r.list(o.boxes, 'boxes').map((b, i) => readBox(r, b, `boxes[${i}]`));
   const level: LevelData = {
-    formatVersion: levelFormatVersion, // a version 1 file is upgraded as it is read: it gains the markers' ids
+    formatVersion: levelFormatVersion, // an older file is upgraded as it is read (a version 1 file gains the markers' ids)
     name,
     floor,
     start: r.spot(o.start, 'start'),
@@ -300,13 +327,18 @@ export function spotRad<T extends LevelSpot>(spot: T): Omit<T, 'yawDeg'> & { yaw
   return { ...rest, yawRad: (yawDeg * Math.PI) / 180 };
 }
 
-/** Distances (keys ending in M) to the millimetre, so floating-point dust from editing (0.30000000000000004) never reaches the file; angles in degrees to a tenth. */
-const tidy = (key: string, value: unknown): unknown => {
+/**
+ * Distances (keys ending in M) to the millimetre, so floating-point dust from editing (0.30000000000000004) never reaches the
+ * file; angles in degrees to a tenth. The editor's panel shows numbers the same way (5.2d).
+ */
+export const tidy = (key: string, value: unknown): unknown => {
   if (typeof value !== 'number') return value;
   if (key.endsWith('M')) return Math.round(value * 1000) / 1000;
   if (key.endsWith('Deg')) return Math.round(value * 10) / 10;
   return value;
 };
+/** How many decimals a field shows in the editor: millimetres for distances, tenths for degrees. */
+export const tidyDecimals = (key: string): number => (key.endsWith('Deg') ? 1 : 3);
 const mm = (value: number): number => tidy('M', value) as number;
 
 /**

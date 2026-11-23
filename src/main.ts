@@ -5,11 +5,13 @@ import { Loop } from './core/loop';
 import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
+import { drawBoxModels, loadLevelModels, modelledBoxes } from './level/models';
 import { Navigation } from './level/navigation';
+import { GlassSystem } from './level/glassSystem';
 import { CoverPoints, levelCover } from './level/cover';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
-import { createPointerLock } from './platform/pointerLock';
+import { captureWhileHeld, createPointerLock } from './platform/pointerLock';
 import { Player } from './player/player';
 import { fallDamage } from './player/fall';
 import { PlayerHealth } from './player/playerHealth';
@@ -47,12 +49,13 @@ import type { CalloutKind } from './weapons/events';
 import type { NoiseKind } from './stealth/noise';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
+import { GlassFx } from './fx/glassFx';
 import { ImpactSparks } from './fx/impactSparks';
 import { Exposure, type Glimpse } from './player/exposure';
 import { pistolConfig } from './config/pistol';
 import { viewConfig } from './config/view';
 import { grenadeConfig } from './config/grenade';
-import { inputConfig } from './config/input';
+import { editorLookButton, inputConfig } from './config/input';
 import { BarrelSmoke } from './fx/barrelSmoke';
 import { AudioSystem } from './audio/audioSystem';
 import { SoundTap } from './audio/soundTap';
@@ -101,14 +104,20 @@ scene.add(sun);
 // (decision 236) instead, for comparing the AI between the two.
 const levelData = import.meta.env.DEV && new URLSearchParams(location.search).get('level') === 'test-arena' ? testArenaLevel : chamberLevel;
 const levelFloor = levelLayout(levelData);
-const level = buildGreybox(levelData.boxes, levelFloor);
+// The boxes' models (5.5b) load before the first frame; a box whose model cannot load is drawn grey.
+const levelModels = await loadLevelModels(levelData.boxes);
+const level = buildGreybox(levelData.boxes, levelFloor, new Set(modelledBoxes(levelData.boxes, levelModels)));
+const levelModelMeshes = drawBoxModels(levelData.boxes, levelModels);
+if (levelModelMeshes.length > 0) level.group.add(...levelModelMeshes);
+level.boxMeshes.push(...levelModelMeshes); // hidden with the grey boxes while the editor draws its own copy
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
+// A room with floor-standing glass (5.4) gets a mesh that can open a gap when a pane breaks; one without is as before.
 // If the library cannot start, the game still runs: enemies find no routes and stand still, and the start screen says so.
 let navigation: Navigation;
 let navigationFailed = false;
 try {
-  navigation = await Navigation.create(level.navigationGeometry);
+  navigation = await Navigation.create(level.navigationGeometryWithoutFloorGlass, {}, level.floorGlass);
 } catch (error) {
   console.error('Navigation could not load:', error);
   navigation = Navigation.unavailable();
@@ -327,7 +336,10 @@ const storeyPush = new StoreyPush();
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
 // Each stand-in keeps its line of fire clear of the others in the room (4.16).
-for (const { world } of standIns) world.squadmates = activeEnemies;
+for (const { world } of standIns) {
+  world.squadmates = activeEnemies;
+  world.glass = level.glass; // their misses prefer to strike glass near Rook (5.4)
+}
 /** Keeping apart (4.16): each stand-in's body, and whether it holds its spot (in cover, or standing) this update. */
 const spacedBodies = standIns.map(({ enemy }) => ({ feet: enemy.feet, fixed: false, enemy }));
 const spacedMoved: typeof spacedBodies = [];
@@ -340,6 +352,9 @@ const targets: Target[] = [];
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, targets);
 const tracers = new Tracers(scene, weaponEvents);
+// Breakable glass (5.4): bullets and blasts crack and shatter panes; the effects show it, the sound and the noise follow.
+const glassSystem = new GlassSystem(weaponEvents, level, navigation);
+const glassFx = new GlassFx(scene, weaponEvents, level.glassMeshes);
 const impactSparks = new ImpactSparks(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
@@ -426,7 +441,7 @@ window.addEventListener('resize', () => {
 
 // Wiring: input, the play state, pointer lock, focus, overlay, loop.
 const input = new Input();
-attachInputListeners(input);
+attachInputListeners(input, renderer.domElement);
 
 // `pointerLock` is assigned just below; the game only calls releaseMouse later, never during construction.
 const game = new Game(input, () => pointerLock.exit());
@@ -436,6 +451,8 @@ const pointerLock = createPointerLock(
   () => game.handleCaptureRefused(),
 );
 onFocusLost(() => game.handleFocusLost());
+// The level editor (dev only) runs with a free cursor; holding the right button captures the mouse to look around (5.2d).
+captureWhileHeld(renderer.domElement, editorLookButton, pointerLock, () => game.editing);
 
 // The click that starts or resumes the game is the one the browser lets sound start from.
 const overlay = createOverlay(() => {
@@ -470,6 +487,8 @@ function restart(): void {
   placeSquad();
   coverPoints.clearClaims();
   bulletMarks.clear();
+  glassSystem.reset();
+  glassFx.clear();
   tracers.clear();
   impactSparks.clear();
   exposure.reset();
@@ -499,7 +518,7 @@ game.events.on('game:capture-refused', () => overlay.show(uiText.captureRefused)
 let debug: DebugTools | null = null;
 if (import.meta.env.DEV) {
   void import('./debug').then((tools) => {
-    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: levelData, levelBoxMeshes: level.boxMeshes });
+    debug = tools.installDebugTools({ scene, input, player, viewmodel, weapons, audio, thrower, health: playerHealth, heals, soundTap: sounds, standIns: standIns.map((standIn) => standIn.enemy), activeStandIns: activeEnemies, squad, respawnSquad: placeSquad, flankFailure: () => flankFailure, navigation, coverPoints, camera, exposure, hitChance: () => standIns[0].world.hitChance(), renderer, collision: level.collision, events: weaponEvents, level: levelData, levelBoxMeshes: level.boxMeshes, setEditing: (on) => game.setEditing(on) });
   });
 }
 
@@ -580,6 +599,7 @@ const loop = new Loop(
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
     impactSparks.update(stepSec);
+    glassFx.update(stepSec);
     casings.update(stepSec);
     weaponSounds.update(stepSec);
     audio.update(stepSec);

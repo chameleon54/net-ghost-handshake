@@ -18,6 +18,7 @@ import { greyboxStandIns } from '../src/data/greyboxEnemies';
 import { CoverPoints, type CoverPoint } from '../src/level/cover';
 import { dummyConfig } from '../src/config/dummy';
 import { exposureConfig } from '../src/config/exposure';
+import { glassConfig } from '../src/config/glass';
 import { grenadeConfig } from '../src/config/grenade';
 import { enemyGunConfig, gunOfRole } from '../src/config/enemyGuns';
 import { enemyGrenadeConfig } from '../src/config/enemyGrenades';
@@ -1631,13 +1632,13 @@ describe('StandInWorld', () => {
     const fired: Vector3[] = [];
     events.on('shot:landed', (s) => landed.push({ muzzle: s.muzzle.clone(), end: s.end.clone(), hit: s.hit, shooter: s.shooter }));
     events.on('enemy:fired', ({ position }) => fired.push(position.clone()));
-    const { collision } = buildGreybox([farProp, ...boxes]);
+    const { collision, glass } = buildGreybox([farProp, ...boxes]);
     const world = new StandInWorld(events, collision, navigation, new CoverPoints([], collision), player, (amount, from) => {
       damage.push(amount);
       damageFrom.push(from.clone());
     });
     const enemy = new StandInEnemy({ xM: 0, zM: -8, yawRad: Math.PI }, world); // 8 m north, facing south at him
-    return { world, enemy, damage, damageFrom, landed, fired, cracks, pins };
+    return { world, enemy, damage, damageFrom, landed, fired, cracks, pins, glass };
   };
 
   it('sees the player in the open, not through a wall', () => {
@@ -1714,6 +1715,33 @@ describe('StandInWorld', () => {
     const chest = new Vector3(0, 1.6 * standInConfig.aimHeightShareOfEyes, 0);
     const near = landed.filter((shot) => shot.hit && shot.end.distanceTo(chest) <= exposureConfig.missNearSurfaceM).length;
     expect(near / landed.length).toBeGreaterThan(0.75);
+  });
+
+  // A narrow pane of glass off to one side of him, 1 m in front of him (5.4): only a miss aimed that way goes through it.
+  const sidePane: RoomBox = { kind: 'prop', xM: 1, zM: -1, widthM: 1, depthM: 0.1, heightM: 3, glass: true };
+  const throughPaneShare = (preferGlass: boolean): number => {
+    const { world, enemy, landed, glass } = setupWorld([sidePane]);
+    if (preferGlass) world.glass = glass;
+    for (let i = 0; i < 300; i++) world.fire(enemy, 'miss');
+    return landed.filter((shot) => glass.panes[0] && glass.crossing(glass.panes[0], shot.muzzle, shot.end, new Vector3())).length / landed.length;
+  };
+
+  it('misses prefer to go through glass near him: far more of them cross the pane than when glass is not looked for (5.4)', () => {
+    expect(throughPaneShare(true)).toBeGreaterThan(throughPaneShare(false) + 0.2);
+  });
+
+  it('a hit through a whole pane still hurts him by default; if the setting says the glass takes the shot, it does not (5.4)', () => {
+    const { world, enemy, damage, glass } = setupWorld([{ kind: 'prop', xM: 0, zM: -1, widthM: 4, depthM: 0.1, heightM: 3, glass: true }]);
+    world.glass = glass;
+    world.fire(enemy, 'hit');
+    expect(damage).toHaveLength(1);
+    glassConfig.enemyHitsLandThroughGlass = false;
+    try {
+      world.fire(enemy, 'hit');
+      expect(damage).toHaveLength(1);
+    } finally {
+      glassConfig.enemyHitsLandThroughGlass = true;
+    }
   });
 
   it('a miss that flies past his head cracks; one stopped by his cover does not', () => {

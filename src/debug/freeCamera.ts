@@ -62,9 +62,13 @@ export class FreeCamera {
     this.active = false;
   }
 
-  /** Look, fly and place `camera`. Keys and mouse only count while the game is playing (Input ignores them when paused). */
-  update(dtSec: number, input: Input, camera: PerspectiveCamera): void {
+  /**
+   * Look, fly and place `camera`. Keys and mouse only count while the game is playing (Input ignores them when paused).
+   * `look`: the mouse turns the view; off, its movement is dropped (the level editor's free cursor, 5.2d).
+   */
+  update(dtSec: number, input: Input, camera: PerspectiveCamera, look = true): void {
     input.consumeMouseMove(this.mouseMove);
+    if (!look) this.mouseMove.x = this.mouseMove.y = 0;
     this.yawRad -= this.mouseMove.x * inputConfig.mouseSensitivityRadPerPx;
     this.pitchRad -= this.mouseMove.y * inputConfig.mouseSensitivityRadPerPx;
     this.pitchRad = Math.max(-inputConfig.pitchLimitRad, Math.min(inputConfig.pitchLimitRad, this.pitchRad));

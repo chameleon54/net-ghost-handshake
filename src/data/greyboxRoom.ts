@@ -29,7 +29,7 @@ export interface RoomBox {
   climbable?: boolean;
   /** Height of the box's bottom above the floor. Leave out for a box standing on the floor. */
   yM?: number;
-  /** Glass (reserved for 5.4, level.md "Breakable glass"): drawn see-through and never cover; it still blocks sight and bullets until 5.4. */
+  /** Glass (5.4, level.md "Breakable glass"): drawn see-through and never cover; sight and bullets pass a whole pane, bodies do not, and it breaks. */
   glass?: boolean;
   /**
    * A ramp (5.3 follow-up): the box's top slopes from its bottom at one end up to its full height at the end it names
@@ -40,9 +40,11 @@ export interface RoomBox {
   drawn?: boolean;
   /** False: drawn but does not collide, and is not on the navigation mesh (a stair's steps over its ramp). Left out: solid. */
   solid?: boolean;
-  widthM: number; // size along x
+  widthM: number; // size along x (its own x, once turned)
   depthM: number; // size along z
   heightM: number;
+  /** Turned about its centre, in degrees (positive turns left, as a marker's yaw; 5.5a). Left out: square to the walls. */
+  yawDeg?: number;
 }
 
 export function isClimbable(box: RoomBox): boolean {

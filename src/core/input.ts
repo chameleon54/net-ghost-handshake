@@ -12,6 +12,14 @@ export class Input {
   private wheelNotches = 0;
   private mouseDx = 0;
   private mouseDy = 0;
+  /** Where the cursor is on screen, from -1 (left, bottom) to 1 (right, top); the middle when it has not moved. Used by the level editor's free cursor (5.2d). */
+  readonly pointer = { x: 0, y: 0 };
+
+  /** The cursor moved to (xPx, yPx) on a screen `widthPx` by `heightPx` (counted from the top left, as browsers do). */
+  setPointer(xPx: number, yPx: number, widthPx: number, heightPx: number): void {
+    this.pointer.x = (xPx / widthPx) * 2 - 1;
+    this.pointer.y = 1 - (yPx / heightPx) * 2;
+  }
 
   keyDown(code: string): void {
     if (!this.enabled) return;

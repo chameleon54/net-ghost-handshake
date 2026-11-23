@@ -1,9 +1,13 @@
+import { normalYawDeg, rayBoxM, rayTurnedBoxM } from './boxShape';
 import { unusedId, type LevelBox, type LevelData, type LevelSpot } from './levelData';
+
+export { rayBoxM };
 
 // The level edit operations (milestone 5.2, decision 273): picking a piece with a ray, moving, turning, duplicating,
 // deleting and adding, and undo. Each takes a level and returns a new one (the old one is left as it was, which is what
 // undo keeps). Plain functions, no drawing, so they can be tested; src/debug/editMode.ts drives them in game.
 // Since 5.2b (decision 281) a selection is the item's id, so it never points at the wrong thing after a delete or undo.
+// Since 5.2c (decision 285) a selection is a list of ids, and the `...Many` functions edit all of them as one change.
 
 /** What is selected: the id of a box, a dummy, an enemy spawn, or Rook's start. */
 export type Pick = string;
@@ -21,36 +25,6 @@ interface Vec3 {
   readonly z: number;
 }
 
-/** Distance along the ray (unit `dir`) to an axis-aligned box, or Infinity if it misses. The slab method. */
-export function rayBoxM(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3): number {
-  let near = -Infinity;
-  let far = Infinity;
-  for (const axis of ['x', 'y', 'z'] as const) {
-    const o = origin[axis];
-    const d = dir[axis];
-    if (Math.abs(d) < 1e-12) {
-      if (o < min[axis] || o > max[axis]) return Infinity; // parallel to this slab and outside it
-      continue;
-    }
-    let t1 = (min[axis] - o) / d;
-    let t2 = (max[axis] - o) / d;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    near = Math.max(near, t1);
-    far = Math.min(far, t2);
-    if (near > far) return Infinity;
-  }
-  if (far < 0) return Infinity; // behind the eye
-  return Math.max(near, 0);
-}
-
-function boxBounds(box: LevelBox): [Vec3, Vec3] {
-  const y = box.yM ?? 0;
-  return [
-    { x: box.xM - box.widthM / 2, y, z: box.zM - box.depthM / 2 },
-    { x: box.xM + box.widthM / 2, y: y + box.heightM, z: box.zM + box.depthM / 2 },
-  ];
-}
-
 function markerBounds(spot: LevelSpot): [Vec3, Vec3] {
   const half = markerWidthM / 2;
   return [
@@ -63,17 +37,20 @@ function markerBounds(spot: LevelSpot): [Vec3, Vec3] {
 export function pickAt(level: LevelData, origin: Vec3, dir: Vec3): Pick | null {
   let best: Pick | null = null;
   let bestM = Infinity;
-  const consider = (id: string, [min, max]: [Vec3, Vec3]) => {
-    const m = rayBoxM(origin, dir, min, max);
+  const consider = (id: string, m: number) => {
     if (m < bestM) {
       best = id;
       bestM = m;
     }
   };
-  for (const box of level.boxes) consider(box.id, boxBounds(box));
-  for (const spot of level.dummies) consider(spot.id, markerBounds(spot));
-  for (const spot of level.spawns) consider(spot.id, markerBounds(spot));
-  consider(level.start.id, markerBounds(level.start));
+  for (const box of level.boxes) consider(box.id, rayTurnedBoxM(origin, dir, box)); // a turned box is hit where it is drawn (5.5a)
+  const marker = (spot: LevelSpot) => {
+    const [min, max] = markerBounds(spot);
+    return rayBoxM(origin, dir, min, max);
+  };
+  for (const spot of level.dummies) consider(spot.id, marker(spot));
+  for (const spot of level.spawns) consider(spot.id, marker(spot));
+  consider(level.start.id, marker(level.start));
   return best;
 }
 
@@ -117,12 +94,29 @@ export function moveBy(level: LevelData, id: Pick, dx: number, dy: number, dz: n
   });
 }
 
-/** Turns the item 90 degrees: a box swaps its width and depth (boxes stay square to the walls); a marker turns left. */
+/**
+ * Turns the item 90 degrees left. A box square to the walls swaps its width and depth (so the file stays without a turn); a
+ * turned box (5.5a) and a marker add 90 degrees to their yaw.
+ */
 export function turn(level: LevelData, id: Pick): LevelData {
   const isBox = locate(level, id)?.list === 'boxes';
-  return withItem(level, id, (item) =>
-    isBox ? { ...item, widthM: item.depthM, depthM: item.widthM } : { ...item, yawDeg: (((item.yawDeg + 90) % 360) + 360) % 360 },
-  );
+  return withItem(level, id, (item) => (isBox && !item.yawDeg ? { ...item, widthM: item.depthM, depthM: item.widthM } : withYaw(item, (item.yawDeg ?? 0) + 90, isBox)));
+}
+
+/** The item with its yaw set to `deg` (brought into 0 to 360); a box at 0 leaves the field out, a marker always has it. */
+function withYaw<T extends { yawDeg?: number }>(item: T, deg: number, isBox: boolean): T {
+  const yawDeg = normalYawDeg(deg);
+  const next = { ...item, yawDeg };
+  if (isBox && yawDeg === 0) delete (next as { yawDeg?: number }).yawDeg;
+  return next;
+}
+
+/** Turns every selected item `deg` degrees left (negative: right), each about its own centre (the rotate ring, 5.5a). */
+export function turnByMany(level: LevelData, ids: readonly Pick[], deg: number): LevelData {
+  return ids.reduce((next, id) => {
+    const isBox = locate(next, id)?.list === 'boxes';
+    return withItem(next, id, (item) => withYaw(item, (item.yawDeg ?? 0) + deg, isBox));
+  }, level);
 }
 
 /** Every id in the level, boxes and markers. */
@@ -184,19 +178,85 @@ export function setField(level: LevelData, id: Pick, field: string, value: unkno
   });
 }
 
+// ---- Many pieces at once (5.2c, decision 285). Each applies the single-item operation to every id in turn, so the editor
+// pushes the level once and the whole thing is one undo step. An id that is gone is skipped.
+
+/** Moves every selected item by (dx, dy, dz). */
+export function moveMany(level: LevelData, ids: readonly Pick[], dx: number, dy: number, dz: number): LevelData {
+  return ids.reduce((next, id) => moveBy(next, id, dx, dy, dz), level);
+}
+
+/** Turns every selected item 90 degrees, each around its own centre. */
+export function turnMany(level: LevelData, ids: readonly Pick[]): LevelData {
+  return ids.reduce((next, id) => turn(next, id), level);
+}
+
+/** Sets one field of every selected item. `undefined` takes an optional field out. */
+export function setFieldMany(level: LevelData, ids: readonly Pick[], field: string, value: unknown): LevelData {
+  return ids.reduce((next, id) => setField(next, id, field, value), level);
+}
+
+/** The level without the selected items (Rook's start is left alone); null if there was nothing to remove. */
+export function removeMany(level: LevelData, ids: readonly Pick[]): LevelData | null {
+  let next = level;
+  for (const id of ids) next = remove(next, id) ?? next;
+  return next === level ? null : next;
+}
+
+/** A copy of each selected item (not Rook's start), 1 m east; the copies are the new selection. Null if nothing could be copied. */
+export function duplicateMany(level: LevelData, ids: readonly Pick[]): { level: LevelData; picks: Pick[] } | null {
+  let next = level;
+  const picks: Pick[] = [];
+  for (const id of ids) {
+    const copy = duplicate(next, id);
+    if (!copy) continue;
+    next = copy.level;
+    picks.push(copy.pick);
+  }
+  return picks.length > 0 ? { level: next, picks } : null;
+}
+
+/** One line of the editor's list: an item's id and what to call it. */
+export interface ListEntry {
+  id: Pick;
+  label: string;
+}
+
+/** A folder of the editor's list: the boxes that share a `group`, or the two folders for the rest. */
+export interface ListGroup {
+  name: string;
+  entries: ListEntry[];
+}
+
+export const noGroupName = '(no group)';
+export const markersGroupName = '(markers)';
+
 /**
- * The floor movement for a right-button drag (5.2b): the mouse's sideways counts move along the camera's right, its
- * up-and-down counts along where the camera looks (flat on the floor; pushing the mouse away moves the piece away).
- * `yawRad` is the camera's yaw (0 looks north, -z; positive turns left, as the player's).
+ * What the editor's list shows: every box and marker whose label, id or group contains `search` (any case), in folders:
+ * the named groups in alphabetical order, then the boxes with no group, then the markers. An empty folder is left out.
  */
-export function dragOnFloor(yawRad: number, mouseX: number, mouseY: number, metresPerCount: number): { dx: number; dz: number } {
-  const forwardX = -Math.sin(yawRad);
-  const forwardZ = -Math.cos(yawRad);
-  const rightX = -forwardZ; // a quarter turn to the right of forward
-  const rightZ = forwardX;
-  const across = mouseX * metresPerCount;
-  const ahead = -mouseY * metresPerCount; // the mouse pushed away (up the screen) gives a negative count
-  return { dx: rightX * across + forwardX * ahead, dz: rightZ * across + forwardZ * ahead };
+export function listGroups(level: LevelData, search: string): ListGroup[] {
+  const needle = search.trim().toLowerCase();
+  const matches = (...texts: (string | undefined)[]) => needle === '' || texts.some((text) => text?.toLowerCase().includes(needle));
+  const named = new Map<string, ListEntry[]>();
+  const loose: ListEntry[] = [];
+  for (const box of level.boxes) {
+    if (!matches(box.label, box.id, box.group)) continue;
+    const entry = { id: box.id, label: box.label };
+    if (box.group) named.set(box.group, [...(named.get(box.group) ?? []), entry]);
+    else loose.push(entry);
+  }
+  const markers: ListEntry[] = [];
+  const marker = (id: string, label: string) => {
+    if (matches(label, id)) markers.push({ id, label });
+  };
+  marker(level.start.id, "Rook's start");
+  level.dummies.forEach((spot) => marker(spot.id, 'dummy'));
+  level.spawns.forEach((spot) => marker(spot.id, `enemy spawn (${spot.role})`));
+  const groups: ListGroup[] = [...named.keys()].sort().map((name) => ({ name, entries: named.get(name)! }));
+  if (loose.length > 0) groups.push({ name: noGroupName, entries: loose });
+  if (markers.length > 0) groups.push({ name: markersGroupName, entries: markers });
+  return groups;
 }
 
 /** Rounds to a step (0.05 m while dragging, the 0.25 m grid with Shift); tidies the float's tail. */

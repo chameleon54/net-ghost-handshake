@@ -196,7 +196,7 @@ function cornerShare(turnRad: number): number {
   return Math.max(1 - (turnRad / (Math.PI / 2)) * (1 - standInConfig.cornerSpeedShareRightAngle), 0);
 }
 /** Noises made where Rook's bullet or grenade ended up, not where he is. */
-const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'grenade-bounce', 'grenade-blast']);
+const awayFromRook: ReadonlySet<NoiseKind> = new Set<NoiseKind>(['impact', 'grenade-bounce', 'grenade-blast', 'glass-break']);
 
 // A temporary enemy (milestone 4.1, decision 197), growing step by step into the real one. It starts idle, wakes on a
 // noise it hears or a hit, and from then on always knows where Rook is. It follows routes on the navigation mesh (4.2).
