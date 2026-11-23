@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { LevelBox } from './levelData';
-import { isKitModel, kitFilesUrl, kitPrefix, modelMatrix } from './modelFit';
+import { isKitModel, kitFilesUrl, kitPrefix, modelMatrices } from './modelFit';
 
 // Loads the models boxes are drawn with and draws them (5.5b, decision 287). The fitting maths is in modelFit.ts. A model
 // that cannot load never stops the game: its boxes are drawn grey as before, and the console names it.
@@ -116,17 +116,17 @@ export function modelledBoxes(boxes: readonly LevelBox[], models: ReadonlyMap<st
   return boxes.filter((box) => drawsModel(box) && models.has(box.model!));
 }
 
-/** The modelled boxes drawn: one instanced mesh per part of each model, so ten benches of one model cost what one costs. */
+/** The modelled boxes drawn: one instanced mesh per part of each model, so ten benches of one model cost what one costs (a "repeat" box adds copies, not draw calls). */
 export function drawBoxModels(boxes: readonly LevelBox[], models: ReadonlyMap<string, LoadedModel>): THREE.InstancedMesh[] {
   const byModel = new Map<string, LevelBox[]>();
   for (const box of modelledBoxes(boxes, models)) byModel.set(box.model!, [...(byModel.get(box.model!) ?? []), box]);
   const meshes: THREE.InstancedMesh[] = [];
-  const matrix = new THREE.Matrix4();
   for (const [name, users] of byModel) {
     const model = models.get(name)!;
+    const matrices = users.flatMap((box) => modelMatrices(box, model.bounds, box.modelYawDeg ?? 0, box.modelFit));
     for (const part of model.parts) {
-      const mesh = new THREE.InstancedMesh(part.geometry, part.material, users.length);
-      users.forEach((box, i) => mesh.setMatrixAt(i, modelMatrix(box, model.bounds, box.modelYawDeg ?? 0, matrix)));
+      const mesh = new THREE.InstancedMesh(part.geometry, part.material, matrices.length);
+      matrices.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
       mesh.instanceMatrix.needsUpdate = true;
       mesh.computeBoundingSphere(); // over all the instances, so the whole set is culled correctly
       meshes.push(mesh);

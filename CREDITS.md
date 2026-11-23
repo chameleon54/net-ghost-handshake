@@ -1,0 +1,23 @@
+# Credits
+
+Third-party assets in this repository, with their sources and licences. The game's code is not covered here: it is all
+rights reserved.
+
+## Models
+
+### Lab Assets, by MilkAndBanana
+
+- **Source:** https://milkandbanana.itch.io/lab-assets
+- **Author:** MilkAndBanana (https://milkandbanana.itch.io)
+- **Licence:** Creative Commons Zero (CC0 1.0), https://creativecommons.org/publicdomain/zero/1.0/
+- **Credit required:** no (the author asks for it as a courtesy: "Support us by crediting MilkAndBanana")
+- **Changes:** none; files renamed only.
+
+| File in this repo | Original file in the pack |
+|---|---|
+| prop-cabinet.glb | GLB/Furniture/Cabinets/cabinet_cabinet.glb |
+| prop-counter-top-outlet.glb | GLB/Furniture/Counters/counter_counter_top_outlet.glb |
+| prop-cabinet-two-shelves.glb | GLB/Furniture/Cabinets/cabinet_cabinet_two_shelves.glb |
+| prop-counter-sink.glb | GLB/Furniture/Counters/counter_counter_sink.glb |
+| prop-counter-2-shelves.glb | GLB/Furniture/Counters/counter_counter_2_shelves.glb |
+| prop-counter.glb | GLB/Furniture/Counters/counter_counter.glb |

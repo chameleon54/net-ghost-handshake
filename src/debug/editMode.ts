@@ -15,6 +15,9 @@ import {
   EditHistory,
   listGroups,
   locate,
+  modelCount,
+  noModelGroup,
+  noModelGroupName,
   markerHeightM,
   markerWidthM,
   moveMany,
@@ -29,7 +32,7 @@ import {
   type Pick,
 } from '../level/levelEdit';
 import { applyHandleDrag, closestOnAxis, layoutGizmo, minBoxSizeM, pickHandle, ringAngle, type GizmoHandle } from '../level/gizmo';
-import { boxSizeFittedToModel, kitListUrl, kitPrefix, maxTexturePx, modelMatrix, propTriangleBudget } from '../level/modelFit';
+import { boxSizeFittedToModel, kitCopyUrl, kitListUrl, kitPrefix, maxTexturePx, modelMatrices, propTriangleBudget } from '../level/modelFit';
 import { drawsModel, loadModel, type LoadedModel } from '../level/models';
 import { normalYawDeg } from '../level/boxShape';
 import { levelNameHeader, levelSaveUrl } from '../level/levelSave';
@@ -164,6 +167,7 @@ export class EditMode {
     this.panel.add({ mode: () => this.switchGizmo() }, 'mode').name('Arrows or size handles (M)');
     this.panel.add(this.previewGroup, 'visible').name('Show the reach preview');
     this.panel.add({ open: () => this.browser.toggle() }, 'open').name('Asset browser: models (B)');
+    this.panel.add({ copy: () => void this.copyKitModels() }, 'copy').name('Copy kit models into the game (and save)');
     this.selectedFolder = this.panel.addFolder('Selected');
     this.refreshList();
   }
@@ -256,11 +260,13 @@ export class EditMode {
         : this.selection.length > 1
           ? `${this.selection.length} pieces, the main one: ${describe(this.data, this.pick, main)}`
           : describe(this.data, this.pick, main);
-    const sizeNeedsOne = this.gizmoMode === 'size' && this.selection.length > 0 && layoutGizmo(this.data, this.selection, 'size', this.parts.camera.position).length === 0;
+    const counted = modelCount(this.data);
+    const sizeNeedsOne =this.gizmoMode === 'size' && this.selection.length > 0 && layoutGizmo(this.data, this.selection, 'size', this.parts.camera.position).length === 0;
     return [
       `EDITOR    ${this.data.name}: ${this.data.boxes.length} boxes, ${this.data.spawns.length} spawns, ${this.data.dummies.length} dummies${this.dirty ? ', UNSAVED changes (collision and enemies still use the saved layout)' : ', saved'}`,
       `selected  ${what}${this.handleDrag ? ' (dragging)' : ''}`,
       `handles   ${this.gizmoMode === 'move' ? 'move arrows and the turn ring' : 'size handles'} (M switches)${sizeNeedsOne ? ': size handles need exactly one box selected' : ''}`,
+      `models    ${counted.withModel} of ${counted.total} pieces of equipment have a model; the rest are in the list's "${noModelGroupName}" folder`,
       `keys      ${keyHelp}`,
       ...(main && this.pick && locate(this.data, this.pick)?.list === 'boxes' && (main as LevelBox).model ? [`model     ${this.modelLine(main as LevelBox)}`] : []),
       ...this.reachLines.map((line, i) => `${i === 0 ? 'reach     ' : '          '}${line}`),
@@ -424,6 +430,25 @@ export class EditMode {
     }
   }
 
+  /**
+   * "Copy kit models into the game" (5.5b Part 2): the dev server copies the kit files from credited packs into
+   * src/assets/models/, renames the boxes' models and saves the level (src/level/kitCopy.ts); the page then reloads.
+   */
+  private async copyKitModels(): Promise<void> {
+    try {
+      const response = await fetch(kitCopyUrl, { method: 'POST', headers: { [levelNameHeader]: this.data.name, 'content-type': 'application/json' }, body: JSON.stringify(this.data) });
+      if (!response.ok) {
+        this.message = `not copied: ${await response.text()}`;
+        return;
+      }
+      const result = (await response.json()) as { copied: string[]; refused: { model: string; why: string }[] };
+      const refused = result.refused.map((item) => `${item.model} (${item.why})`).join('; ');
+      this.message = `copied ${result.copied.length} model file(s) into the game and saved: the page reloads${refused ? `. Left as kit files: ${refused}` : ''}`;
+    } catch (error) {
+      this.message = `not copied: the dev server did not answer (${String(error)})`;
+    }
+  }
+
   // ---- The list (5.2c).
 
   /** The search box and the folders of pieces, above the panel. Filled by `refreshList`. */
@@ -447,7 +472,8 @@ export class EditMode {
   private refreshList(): void {
     this.listBody.replaceChildren();
     const searching = this.searchText.trim() !== '';
-    for (const folder of listGroups(this.data, this.searchText)) {
+    const noModel = noModelGroup(this.data, this.searchText); // the equipment still grey (5.5b), first so it is easy to work through
+    for (const folder of [...(noModel ? [noModel] : []), ...listGroups(this.data, this.searchText)]) {
       const details = document.createElement('details');
       details.open = searching || this.openFolders.has(folder.name);
       details.addEventListener('toggle', () => {
@@ -523,7 +549,7 @@ export class EditMode {
         if (box.model) waiting++;
         continue;
       }
-      const size = boxSizeFittedToModel(box, model.bounds, box.modelYawDeg ?? 0, minBoxSizeM);
+      const size = boxSizeFittedToModel(box, model.bounds, box.modelYawDeg ?? 0, minBoxSizeM, box.modelFit);
       next = setField(setField(setField(next, id, 'widthM', size.widthM), id, 'depthM', size.depthM), id, 'heightM', size.heightM);
     }
     this.change(next);
@@ -568,13 +594,14 @@ export class EditMode {
       return boxMesh(box, selected);
     }
     const holder = new THREE.Group();
-    const matrix = modelMatrix(box, model.bounds, box.modelYawDeg ?? 0);
-    for (const part of model.parts) {
-      const mesh = new THREE.Mesh(part.geometry, part.material);
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.copy(matrix);
-      mesh.userData.shared = true; // the loaded model's geometry and materials are kept for the next redraw
-      holder.add(mesh);
+    for (const matrix of modelMatrices(box, model.bounds, box.modelYawDeg ?? 0, box.modelFit)) {
+      for (const part of model.parts) {
+        const mesh = new THREE.Mesh(part.geometry, part.material);
+        mesh.matrixAutoUpdate = false;
+        mesh.matrix.copy(matrix);
+        mesh.userData.shared = true; // the loaded model's geometry and materials are kept for the next redraw
+        holder.add(mesh);
+      }
     }
     holder.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeometry(box)), new THREE.LineBasicMaterial({ color: selected ? colours.selected : colours.outline })));
     return holder;
@@ -704,6 +731,7 @@ export class EditMode {
       values.surface = box.surface ?? 'default';
       values.glass = box.glass ?? false;
       values.group = box.group ?? '';
+      values.repeat = box.modelFit === 'repeat';
       values.yawDeg = tidy('yawDeg', box.yawDeg ?? 0);
       if (!many) {
         this.fieldControllers.push(folder.add(values, 'label').onFinishChange((v: string) => set('label', v)));
@@ -711,6 +739,7 @@ export class EditMode {
       this.fieldControllers.push(folder.add(values, 'group').name('group (a folder in the list)').onFinishChange((v: string) => set('group', v.trim() === '' ? undefined : v.trim())));
       this.fieldControllers.push(folder.add(values, 'kind', ['prop', 'wall']).onChange((v: string) => set('kind', v)));
       this.fieldControllers.push(folder.add({ go: () => this.turnModels() }, 'go').name('Turn the model 90 deg in its box'));
+      this.fieldControllers.push(folder.add(values, 'repeat').name('Repeat the model along the long side').onChange((v: boolean) => set('modelFit', v ? 'repeat' : undefined)));
       this.fieldControllers.push(folder.add({ go: () => this.fitBoxesToModels() }, 'go').name('Fit the box to its model'));
       this.fieldControllers.push(folder.add({ go: () => this.clearModels() }, 'go').name('No model (grey box)'));
       if (!many) {

@@ -1,5 +1,5 @@
 {
-  "formatVersion": 5,
+  "formatVersion": 6,
   "name": "test-arena",
   "floor": {
     "widthM": 30,

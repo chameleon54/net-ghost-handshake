@@ -65,7 +65,7 @@ describe('the level data format (5.2)', () => {
     const noSpeakers: Partial<LevelData> = small();
     delete noSpeakers.speakers;
     expect(problemsOf(noSpeakers)).toEqual(['speakers must be a list']);
-    expect(problemsOf({ ...small(), formatVersion: 6 })).toEqual(['formatVersion must be one of 1, 2, 3, 4, 5 (this game reads all of them)']);
+    expect(problemsOf({ ...small(), formatVersion: 7 })).toEqual(['formatVersion must be one of 1, 2, 3, 4, 5, 6 (this game reads all of them)']);
   });
 
   it('keeps optional fields out unless the file has them, and rounds editing dust off distances', () => {
@@ -198,9 +198,9 @@ describe('ids and dragging (5.2b, decision 281)', () => {
     for (const spot of [old.start, ...old.dummies, ...old.spawns]) delete (spot as Partial<typeof spot>).id;
     old.boxes[0].id = 'spawn-1'; // a box already holds the name a spawn would get
     const checked = checkLevel(old);
-    expect(checked.formatVersion).toBe(5);
+    expect(checked.formatVersion).toBe(6);
     expect([checked.start.id, checked.dummies[0].id, checked.spawns[0].id]).toEqual(['start', 'dummy-1', 'spawn-2']);
-    expect(levelToJson(checked)).toContain('"formatVersion": 5');
+    expect(levelToJson(checked)).toContain('"formatVersion": 6');
   });
 
   it('two items with one id are a problem, boxes and markers alike', () => {

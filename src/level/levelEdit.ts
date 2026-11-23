@@ -230,6 +230,26 @@ export interface ListGroup {
 
 export const noGroupName = '(no group)';
 export const markersGroupName = '(markers)';
+export const noModelGroupName = '(no model yet)';
+
+/** A piece of equipment the player sees: a drawn prop that is not glass (5.5b: these are the boxes that should get a model). */
+const isVisibleProp = (box: LevelData['boxes'][number]) => box.kind === 'prop' && box.drawn !== false && !box.glass;
+
+/** How many pieces of equipment have a model, out of all of them (the editor's readout, the asset tracker). */
+export function modelCount(level: LevelData): { withModel: number; total: number } {
+  const props = level.boxes.filter(isVisibleProp);
+  return { withModel: props.filter((box) => box.model !== undefined).length, total: props.length };
+}
+
+/** The editor's "(no model yet)" folder: the pieces of equipment still drawn as grey boxes that match `search`; null if none. */
+export function noModelGroup(level: LevelData, search: string): ListGroup | null {
+  const needle = search.trim().toLowerCase();
+  const entries = level.boxes
+    .filter((box) => isVisibleProp(box) && box.model === undefined)
+    .filter((box) => needle === '' || [box.label, box.id, box.group].some((text) => text?.toLowerCase().includes(needle)))
+    .map((box) => ({ id: box.id, label: box.label }));
+  return entries.length > 0 ? { name: noModelGroupName, entries } : null;
+}
 
 /**
  * What the editor's list shows: every box and marker whose label, id or group contains `search` (any case), in folders:

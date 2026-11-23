@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { defineConfig, isRunnableDevEnvironment, type Plugin } from 'vite';
 
@@ -198,12 +198,68 @@ function measureKitFile(root: string, path: string): KitFile {
   return { path, bytes, texturePx };
 }
 
+// "Copy kit models into the game" (5.5b Part 2, decision 289): the editor sends the level; the plan (src/level/kitCopy.ts)
+// says which kit files from credited packs to copy into src/assets/models/ and renames the boxes' models; every file is
+// checked before anything is written, then the files are copied and the level saved in one go (the page then reloads).
+const kitCopyUrl = '/__kits/copy';
+const modelsFolder = 'src/assets/models';
+type KitCopyModule = typeof import('./src/level/kitCopy');
+type LevelDataModule = typeof import('./src/level/levelData');
+
 function kits(): Plugin {
   return {
     name: 'kits',
     apply: 'serve',
     configureServer(server) {
       const root = resolve(server.config.root, kitsFolder);
+      server.middlewares.use(kitCopyUrl, (req, res) => {
+        const answer = (status: number, text: string) => {
+          res.statusCode = status;
+          res.setHeader('content-type', 'text/plain; charset=utf-8');
+          res.end(text);
+        };
+        if (req.method !== 'POST') return answer(405, 'POST only');
+        let body = '';
+        req.setEncoding('utf8');
+        req.on('data', (chunk: string) => (body += chunk));
+        req.on('end', async () => {
+          if (body.length > maxLevelBytes) return answer(413, 'The level is too big to be a level file.');
+          const environment = server.environments.ssr;
+          if (!isRunnableDevEnvironment(environment)) return answer(500, 'The dev server cannot run the level checker.');
+          const { creditsWithCopies, planKitCopy } = await environment.runner.import<KitCopyModule>('/src/level/kitCopy.ts');
+          const { checkLevel, levelToJson } = await environment.runner.import<LevelDataModule>('/src/level/levelData.ts');
+          const { levelSaveRequest } = await environment.runner.import<LevelSaveModule>('/src/level/levelSave.ts');
+          let plan: ReturnType<typeof planKitCopy>;
+          try {
+            plan = planKitCopy(checkLevel(JSON.parse(body)));
+          } catch (error) {
+            return answer(400, `The level does not pass the checker: ${String(error)}`);
+          }
+          const header = req.headers[levelNameHeader];
+          const saved = levelSaveRequest(typeof header === 'string' ? header : undefined, levelToJson(plan.level));
+          if (!saved.ok) return answer(saved.status, saved.message);
+          // Every file is checked first, so nothing is half done.
+          const target = join(server.config.root, modelsFolder);
+          const written = new Map<string, Buffer>();
+          for (const copy of plan.copies) {
+            const source = resolve(root, copy.from);
+            const inside = relative(root, source);
+            if (inside.startsWith('..') || isAbsolute(inside) || !existsSync(source)) return answer(404, `Not found in the kits folder: ${copy.from}`);
+            const data = readFileSync(source);
+            const file = join(target, `${copy.to}.glb`);
+            const before = written.get(copy.to) ?? (existsSync(file) ? readFileSync(file) : null);
+            if (before && !before.equals(data)) return answer(409, `${copy.to}.glb already exists with different content (from another file of the same name): rename one first.`);
+            written.set(copy.to, data);
+          }
+          mkdirSync(target, { recursive: true });
+          for (const [name, data] of written) writeFileSync(join(target, `${name}.glb`), data);
+          const creditsFile = join(server.config.root, 'CREDITS.md');
+          if (existsSync(creditsFile)) writeFileSync(creditsFile, creditsWithCopies(readFileSync(creditsFile, 'utf8'), plan.copies));
+          writeFileSync(join(server.config.root, levelsFolder, saved.fileName), saved.text);
+          res.setHeader('content-type', 'application/json');
+          res.end(JSON.stringify({ copied: [...written.keys()], refused: plan.refused }));
+        });
+      });
       server.middlewares.use(kitListUrl, (_req, res) => {
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(existsSync(root) ? listKits(root) : []));
@@ -233,4 +289,6 @@ function kits(): Plugin {
 
 export default defineConfig({
   plugins: [debugLog(), levelSave(), kits()],
+  // Models (5.5b) are assets: the game loads them by URL, the tests read their bytes (`?inline`) to check the asset rules.
+  assetsInclude: ['**/*.glb'],
 });

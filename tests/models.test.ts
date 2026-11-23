@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { checkLevel, LevelError, levelToJson } from '../src/level/levelData';
-import { boxSizeFittedToModel, fitScale, gameModelPattern, isKitModel, modelMatrix } from '../src/level/modelFit';
+import { boxSizeFittedToModel, fitScale, gameModelPattern, isKitModel, modelMatrices, modelMatrix } from '../src/level/modelFit';
 import { disposeModel, drawBoxModels, flattenModel } from '../src/level/models';
 
 // Models on boxes (5.5b, decision 287): the model is fitted inside its box, and the level files only use game models.
@@ -66,6 +66,94 @@ describe('fitting a model inside its box', () => {
     const flat = new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(1, 0, 1)); // a decal
     expect(fitScale(bench, flat)).toBeCloseTo(1);
     expect(boxSizeFittedToModel(bench, flat, 0, 0.1).heightM).toBe(0.1);
+  });
+});
+
+describe('repeating a model along its box (5.5b Part 2)', () => {
+  /** A Lab Assets counter unit: 0.62 wide, 0.70 tall, 0.76 deep. */
+  const unit = new THREE.Box3(new THREE.Vector3(-0.31, 0, -0.38), new THREE.Vector3(0.31, 0.7, 0.38));
+  const longBench: RoomBox = { kind: 'prop', xM: 2, zM: -1, widthM: 4, depthM: 1, heightM: 1 };
+
+  /** Every corner of every copy, in the box's own axes (its centre and base at 0). */
+  function cornersInBox(box: RoomBox, matrices: THREE.Matrix4[]): THREE.Vector3[] {
+    const yawRad = ((box.yawDeg ?? 0) * Math.PI) / 180;
+    const corners: THREE.Vector3[] = [];
+    for (const matrix of matrices)
+      for (const x of [unit.min.x, unit.max.x])
+        for (const y of [unit.min.y, unit.max.y])
+          for (const z of [unit.min.z, unit.max.z]) {
+            const p = new THREE.Vector3(x, y, z).applyMatrix4(matrix);
+            const dx = p.x - box.xM;
+            const dz = p.z - box.zM;
+            corners.push(new THREE.Vector3(dx * Math.cos(yawRad) - dz * Math.sin(yawRad), p.y - (box.yM ?? 0), dx * Math.sin(yawRad) + dz * Math.cos(yawRad)));
+          }
+    return corners;
+  }
+
+  it('a 4 m bench shows five counter units filling its length exactly, none bigger than the bench', () => {
+    const matrices = modelMatrices(longBench, unit, 0, 'repeat');
+    expect(matrices).toHaveLength(5);
+    const corners = cornersInBox(longBench, matrices);
+    expect(Math.min(...corners.map((c) => c.x))).toBeCloseTo(-2);
+    expect(Math.max(...corners.map((c) => c.x))).toBeCloseTo(2);
+    for (const c of corners) {
+      expect(Math.abs(c.z)).toBeLessThanOrEqual(0.5 + 1e-9);
+      expect(c.y).toBeGreaterThanOrEqual(-1e-9);
+      expect(c.y).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it('follows a turned box, and a desk that runs along z with the unit turned a quarter', () => {
+    const turned = { ...longBench, yawDeg: 30 };
+    for (const c of cornersInBox(turned, modelMatrices(turned, unit, 0, 'repeat'))) {
+      expect(Math.abs(c.x)).toBeLessThanOrEqual(2 + 1e-9);
+      expect(Math.abs(c.z)).toBeLessThanOrEqual(0.5 + 1e-9);
+    }
+    const desk: RoomBox = { kind: 'prop', xM: 0, zM: 0, widthM: 0.8, depthM: 2.4, heightM: 1.1 };
+    // Turned a quarter, the unit's 0.76 m depth lies across the 0.8 m desk (scale 1.05), so each copy is 0.65 m along it: 4 copies.
+    expect(modelMatrices(desk, unit, 90, 'repeat')).toHaveLength(4);
+  });
+
+  it('stacks up a tall box, each copy standing on the one below', () => {
+    const cube = new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5));
+    const tall: RoomBox = { kind: 'prop', xM: 0, zM: 0, widthM: 0.6, depthM: 0.6, heightM: 2.4, yM: 1 };
+    const bases = modelMatrices(tall, cube, 0, 'repeat').map((matrix) => new THREE.Vector3(0, 0, 0).applyMatrix4(matrix).y);
+    expect(bases.map((y) => +y.toFixed(3))).toEqual([1, 1.6, 2.2, 2.8]);
+  });
+
+  it('"even" (or no fit) is one copy; repeat adds instances, not draw calls', () => {
+    expect(modelMatrices(longBench, unit)).toHaveLength(1);
+    const model = flattenModel(new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.7, 0.76), new THREE.MeshStandardMaterial()));
+    const box = { ...longBench, id: 'bench', label: 'bench', kind: 'prop' as const, model: 'kit:a/b.glb', modelFit: 'repeat' as const };
+    const meshes = drawBoxModels([box], new Map([['kit:a/b.glb', model]]));
+    expect(meshes).toHaveLength(1);
+    expect(meshes[0].count).toBe(5);
+  });
+
+  it('"fit box to model" on a repeating box keeps its length and shrinks the other sides to the row', () => {
+    const size = boxSizeFittedToModel(longBench, unit, 0, 0.1, 'repeat');
+    expect(size.widthM).toBeCloseTo(4);
+    expect(size.depthM).toBeCloseTo(0.76 * (4 / (5 * 0.62)));
+    expect(size.heightM).toBeCloseTo(0.7 * (4 / (5 * 0.62)));
+  });
+
+  it('the format writes "repeat" and leaves an even fit out', () => {
+    const file = {
+      formatVersion: 6,
+      name: 'repeat',
+      floor: { widthM: 10, depthM: 10, surfaces: [], hazards: [] },
+      start: { id: 'start', xM: 0, zM: 0, yawDeg: 0 },
+      dummies: [],
+      spawns: [],
+      boxes: [{ id: 'bench', label: 'bench', kind: 'prop', xM: 1, zM: 1, widthM: 4, depthM: 1, heightM: 1, model: 'prop-counter', modelFit: 'repeat' }],
+      coverAdd: [],
+      coverRemove: [],
+      acousticZones: [],
+      speakers: [],
+      arrivals: [],
+    };
+    expect(checkLevel(JSON.parse(levelToJson(checkLevel(file)))).boxes[0].modelFit).toBe('repeat');
+    expect(() => checkLevel({ ...file, boxes: [{ ...file.boxes[0], modelFit: 'stretch' }] })).toThrow(LevelError);
   });
 });
 
