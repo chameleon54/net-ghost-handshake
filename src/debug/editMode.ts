@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import GUI, { type Controller } from 'lil-gui';
 import type { Input } from '../core/input';
 import { mouseButtons } from '../config/input';
+import { defaultMaterial, materialDef } from '../data/materials';
 import { roles } from '../config/roles';
 import { playerConfig } from '../config/player';
 import { isClimbable, rampRises } from '../data/greyboxRoom';
-import { boxGeometry, buildGreybox } from '../level/greybox';
+import { boxGeometry, boxPieces, buildGreybox } from '../level/greybox';
+import { texturedMaterial } from '../level/materials';
 import { LevelError, levelLayout, levelToJson, tidy, tidyDecimals, type LevelBox, type LevelData, type LevelSpot } from '../level/levelData';
 import {
   addBox,
@@ -139,6 +141,7 @@ export class EditMode {
     files: () => this.kitFiles,
     selectedBoxes: () => this.selectedBoxIds().length,
     apply: (model) => this.change(setFieldMany(this.data, this.selectedBoxIds(), 'model', model)),
+    applyMaterial: (material) => this.change(setFieldMany(this.data, this.selectedBoxIds(), 'material', material)),
   });
 
   constructor(private readonly parts: Parts) {
@@ -533,7 +536,8 @@ export class EditMode {
     let next = this.data;
     for (const id of this.selectedBoxIds()) {
       const box = picked(next, id) as LevelBox;
-      if (box.model) next = setField(next, id, 'modelYawDeg', ((box.modelYawDeg ?? 0) + 90) % 360 || undefined);
+      const hasFront = materialDef(box.material ?? '')?.front !== undefined; // an equipment front turns to the next face (5.5c)
+      if (box.model || hasFront) next = setField(next, id, 'modelYawDeg', ((box.modelYawDeg ?? 0) + 90) % 360 || undefined);
     }
     this.change(next);
   }
@@ -738,7 +742,7 @@ export class EditMode {
       }
       this.fieldControllers.push(folder.add(values, 'group').name('group (a folder in the list)').onFinishChange((v: string) => set('group', v.trim() === '' ? undefined : v.trim())));
       this.fieldControllers.push(folder.add(values, 'kind', ['prop', 'wall']).onChange((v: string) => set('kind', v)));
-      this.fieldControllers.push(folder.add({ go: () => this.turnModels() }, 'go').name('Turn the model 90 deg in its box'));
+      this.fieldControllers.push(folder.add({ go: () => this.turnModels() }, 'go').name('Turn the model or front 90 deg in its box'));
       this.fieldControllers.push(folder.add(values, 'repeat').name('Repeat the model along the long side').onChange((v: boolean) => set('modelFit', v ? 'repeat' : undefined)));
       this.fieldControllers.push(folder.add({ go: () => this.fitBoxesToModels() }, 'go').name('Fit the box to its model'));
       this.fieldControllers.push(folder.add({ go: () => this.clearModels() }, 'go').name('No model (grey box)'));
@@ -777,7 +781,7 @@ function describe(level: LevelData, pick: Pick, item: LevelBox | LevelSpot): str
   if (list === 'boxes') {
     const box = item as LevelBox;
     const m = (value: number) => tidy('M', value);
-    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${m(box.widthM)} x ${m(box.depthM)} x ${m(box.heightM)} m${box.yM ? `, ${m(box.yM)} m up` : ''}${box.yawDeg ? `, turned ${tidy('Deg', box.yawDeg)} deg` : ''}`;
+    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${m(box.widthM)} x ${m(box.depthM)} x ${m(box.heightM)} m${box.yM ? `, ${m(box.yM)} m up` : ''}${box.yawDeg ? `, turned ${tidy('Deg', box.yawDeg)} deg` : ''}, material ${box.material ?? `${defaultMaterial(box.kind)} (default)`}`;
   }
   const facing = `facing ${tidy('Deg', (item as LevelSpot).yawDeg)} deg`;
   if (list === 'start') return `Rook's start ${at}, ${facing}`;
@@ -785,8 +789,21 @@ function describe(level: LevelData, pick: Pick, item: LevelBox | LevelSpot): str
   return `enemy spawn [${item.id}] (${(item as LevelSpot & { role: string }).role}) ${at}, ${facing}`;
 }
 
-/** A box as the editor draws it; one the game does not draw (a stair's ramp) is a see-through violet, so it can be found. */
-function boxMesh(box: LevelBox, selected: boolean): THREE.Mesh {
+/**
+ * A box as the editor draws it: with its material (5.5c) and, when selected, a yellow outline; one the game does not draw
+ * (a stair's ramp) is a see-through violet so it can be found, and glass stays see-through blue.
+ */
+function boxMesh(box: LevelBox, selected: boolean): THREE.Object3D {
+  if (box.drawn !== false && !box.glass) {
+    const holder = new THREE.Group();
+    for (const piece of boxPieces(box)) {
+      const mesh = new THREE.Mesh(piece.geometry, texturedMaterial(piece.material));
+      mesh.userData.sharedMaterial = true; // the material is the game's, kept for every box that uses it
+      holder.add(mesh);
+    }
+    if (selected) holder.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeometry(box)), new THREE.LineBasicMaterial({ color: colours.selected })));
+    return holder;
+  }
   const geometry = boxGeometry(box);
   const hidden = box.drawn === false;
   const material = new THREE.MeshStandardMaterial({
@@ -822,6 +839,7 @@ function disposeMesh(object: THREE.Object3D): void {
   if (object.userData.shared) return; // part of a loaded model, drawn again later
   const mesh = object as Partial<THREE.Mesh>;
   mesh.geometry?.dispose();
+  if (object.userData.sharedMaterial) return; // a game material, shared by every box using it
   const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
   if (Array.isArray(material)) material.forEach((m) => m.dispose());
   else material?.dispose();

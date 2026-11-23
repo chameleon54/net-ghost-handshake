@@ -45,6 +45,8 @@ export interface RoomBox {
   heightM: number;
   /** Turned about its centre, in degrees (positive turns left, as a marker's yaw; 5.5a). Left out: square to the walls. */
   yawDeg?: number;
+  /** How it looks (5.5c): a name from src/data/materials.ts. Left out: its kind's default (walls lab wall panels, props metal). */
+  material?: string;
 }
 
 export function isClimbable(box: RoomBox): boolean {

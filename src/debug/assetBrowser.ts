@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { materialDefs } from '../data/materials';
+import { materialPictureUrl } from '../level/materials';
 import { kitPrefix, maxTexturePx, propTriangleBudget } from '../level/modelFit';
 import { disposeModel, isModelKept, loadModel, loadModelOnce, type LoadedModel } from '../level/models';
 
@@ -23,7 +25,12 @@ export interface BrowserParts {
   selectedBoxes: () => number;
   /** Puts this model on the selected boxes (one undo step). */
   apply: (model: string) => void;
+  /** Puts this material on the selected boxes; undefined puts back their kind's default (5.5c). */
+  applyMaterial: (material: string | undefined) => void;
 }
+
+/** The Materials tab's first tile: no material named, so the box takes its kind's default. */
+const defaultMaterialTile = '(default)';
 
 const thumbPx = 112;
 const previewWidthPx = 300;
@@ -106,6 +113,10 @@ export class AssetBrowser {
   private chosen: string | null = null;
   private lastFrameMs = 0;
   private frameRequest = 0;
+  // The tabs (5.5c): models, or the lab's materials; the material preview is a picture, not the turning model.
+  private tab: 'models' | 'materials' = 'models';
+  private readonly tabButtons = { models: document.createElement('button'), materials: document.createElement('button') };
+  private readonly materialPreview = document.createElement('img');
 
   constructor(private readonly parts: BrowserParts) {
     this.window.style.cssText = style.window;
@@ -113,13 +124,14 @@ export class AssetBrowser {
     header.style.cssText = style.header;
     const title = document.createElement('b');
     title.textContent = 'Assets';
-    const tab = document.createElement('span');
-    tab.textContent = '[Models]'; // 5.5c adds Materials
+    this.tabButtons.models.textContent = 'Models';
+    this.tabButtons.materials.textContent = 'Materials';
+    for (const tab of ['models', 'materials'] as const) this.tabButtons[tab].addEventListener('click', () => this.switchTab(tab));
     const close = document.createElement('button');
     close.textContent = 'Close (B)';
     close.style.marginLeft = 'auto';
     close.addEventListener('click', () => this.hide());
-    header.append(title, tab, close);
+    header.append(title, this.tabButtons.models, this.tabButtons.materials, close);
     this.dragBy(header);
 
     const filters = document.createElement('div');
@@ -146,7 +158,9 @@ export class AssetBrowser {
     this.applyButton.disabled = true;
     this.applyButton.addEventListener('click', () => this.applyChosen());
     side.append(this.info, this.applyButton);
-    preview.append(this.previewRenderer.domElement, side);
+    this.materialPreview.style.cssText = `width:${previewHeightPx}px;height:${previewHeightPx}px;object-fit:contain;image-rendering:pixelated;background:#2a2f35;display:none`;
+    preview.append(this.previewRenderer.domElement, this.materialPreview, side);
+    this.markTab();
 
     this.thumbRenderer.setSize(thumbPx, thumbPx);
     this.window.append(header, filters, this.grid, preview);
@@ -184,8 +198,72 @@ export class AssetBrowser {
     this.fillGrid();
   }
 
+  /** Models or materials: the grid, the filters and the preview change with the tab. */
+  private switchTab(tab: 'models' | 'materials'): void {
+    if (tab === this.tab) return;
+    this.tab = tab;
+    this.chosen = null;
+    this.applyButton.disabled = true;
+    this.info.textContent = 'Click a picture to see it here.';
+    this.markTab();
+    this.fillGrid();
+  }
+
+  private markTab(): void {
+    for (const tab of ['models', 'materials'] as const) this.tabButtons[tab].style.fontWeight = tab === this.tab ? 'bold' : 'normal';
+    this.pack.style.display = this.tab === 'models' ? '' : 'none';
+    this.previewRenderer.domElement.style.display = this.tab === 'models' ? '' : 'none';
+    this.materialPreview.style.display = this.tab === 'materials' ? '' : 'none';
+  }
+
+  /** The Materials tab: the default tile, then every material in src/data/materials.ts, with its picture and tile size. */
+  private fillMaterials(): void {
+    const words = this.search.value.toLowerCase().split(/\s+/).filter((word) => word !== '');
+    const entries = [{ name: defaultMaterialTile, label: "the box's default (walls: lab wall, props: metal panel)", size: '' }, ...materialDefs.map((def) => ({ name: def.name, label: def.label, size: `${def.tileM[0]} x ${def.tileM[1]} m${def.front ? ', front face' : ''}` }))].filter((entry) =>
+      words.every((word) => `${entry.name} ${entry.label}`.toLowerCase().includes(word)),
+    );
+    if (entries.length === 0) this.grid.textContent = 'no match';
+    for (const entry of entries) {
+      const tile = document.createElement('div');
+      tile.style.cssText = style.tile + (entry.name === this.chosen ? `;${style.tileSelected}` : '');
+      tile.title = entry.label;
+      tile.dataset.material = entry.name;
+      const picture = document.createElement('img');
+      picture.style.cssText = style.picture;
+      picture.alt = '';
+      if (entry.name !== defaultMaterialTile) picture.src = materialPictureUrl(entry.name);
+      const label = document.createElement('div');
+      label.style.cssText = style.name;
+      label.textContent = entry.name;
+      const size = document.createElement('div');
+      size.textContent = entry.size;
+      tile.append(picture, label, size);
+      tile.addEventListener('click', () => this.chooseMaterial(entry.name, entry.label, entry.size));
+      tile.addEventListener('dblclick', () => {
+        this.chooseMaterial(entry.name, entry.label, entry.size);
+        this.applyChosen();
+      });
+      this.grid.append(tile);
+    }
+  }
+
+  private chooseMaterial(name: string, label: string, size: string): void {
+    this.chosen = name;
+    for (const tile of this.grid.querySelectorAll<HTMLElement>('[data-material]')) tile.style.cssText = style.tile + (tile.dataset.material === name ? `;${style.tileSelected}` : '');
+    this.materialPreview.src = name === defaultMaterialTile ? '' : materialPictureUrl(name);
+    this.info.replaceChildren(...[name, label, size ? `one picture covers ${size}` : ''].filter(Boolean).map((text) => Object.assign(document.createElement('div'), { textContent: text })));
+    this.applyButton.disabled = false;
+  }
+
   /** The tiles for the current search and pack. A tile's picture is drawn once it scrolls into view. */
   private fillGrid(): void {
+    if (this.tab === 'materials') {
+      this.observer.disconnect();
+      this.tiles.clear();
+      this.grid.replaceChildren();
+      this.fillMaterials();
+      return;
+    }
     const files = this.parts.files();
     this.observer.disconnect();
     this.inView.clear();
@@ -328,7 +406,8 @@ export class AssetBrowser {
       this.info.textContent = 'Select one or more boxes in the level first (click them), then apply.';
       return;
     }
-    this.parts.apply(this.chosen);
+    if (this.tab === 'materials') this.parts.applyMaterial(this.chosen === defaultMaterialTile ? undefined : this.chosen);
+    else this.parts.apply(this.chosen);
   }
 
   /** While open: the preview turns slowly. */

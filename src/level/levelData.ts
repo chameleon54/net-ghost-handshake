@@ -1,4 +1,5 @@
 import { roles, type Role } from '../config/roles';
+import { materialNames } from '../data/materials';
 import { rampRises, type FloorZone, type HazardPad, type RoomBox, type RoomLayout, type Surface } from '../data/greyboxRoom';
 import type { CoverPoint } from './cover';
 import { isModelName, modelTurnsDeg } from './modelFit';
@@ -12,11 +13,12 @@ import { isModelName, modelTurnsDeg } from './modelFit';
  * Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; version 3 (5.2c, decision 285) lets a box carry
  * a `group`; version 4 (5.5a, decision 286) lets a box be turned (`yawDeg`); version 5 (5.5b, decision 287) lets a box be
  * drawn as a model (`model`, `modelYawDeg`); version 6 (5.5b Part 2, decision 289) lets the model repeat along the box
- * (`modelFit`). An older file still loads (a version 1 file gets the ids) and is written back as the current version.
+ * (`modelFit`); version 7 (5.5c, decision 290) gives a box a `material`. An older file still loads (a version 1 file gets
+ * the ids) and is written back as the current version.
  */
-export const levelFormatVersion = 6;
+export const levelFormatVersion = 7;
 /** Every version this game reads. */
-const readableVersions = [1, 2, 3, 4, 5, levelFormatVersion];
+const readableVersions = [1, 2, 3, 4, 5, 6, levelFormatVersion];
 
 /** A box in the level: a wall or a piece of equipment. `id` is unique in the level; `label` says what it is ("prep bench A"). */
 export interface LevelBox extends RoomBox {
@@ -205,6 +207,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   const model = r.optional(o.model, () => r.text(o.model, `${path}.model`));
   const modelYawDeg = r.optional(o.modelYawDeg, () => r.number(o.modelYawDeg, `${path}.modelYawDeg`));
   const modelFit = r.optional(o.modelFit, () => r.oneOf(o.modelFit, `${path}.modelFit`, ['repeat'] as const));
+  const material = r.optional(o.material, () => r.oneOf(o.material, `${path}.material`, materialNames));
   if (model !== undefined && !isModelName(model)) r.problems.push(`${path}.model must be "prop-<name>" (a game model) or "kit:<folder>/<file>" (a kit being tried)`);
   if (modelYawDeg !== undefined && !modelTurnsDeg.includes(modelYawDeg)) r.problems.push(`${path}.modelYawDeg must be one of ${modelTurnsDeg.join(', ')}`);
   if (yM !== undefined) box.yM = yM;
@@ -219,6 +222,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   if (model !== undefined) box.model = model;
   if (modelYawDeg) box.modelYawDeg = modelYawDeg; // 0 is left out
   if (modelFit !== undefined) box.modelFit = modelFit;
+  if (material !== undefined) box.material = material;
   if (drawn === false && solid === false) r.problems.push(`${path} is neither drawn nor solid, so it does nothing`);
   return box;
 }

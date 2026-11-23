@@ -6,6 +6,7 @@ import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
 import { drawBoxModels, loadLevelModels, modelledBoxes } from './level/models';
+import { texturedMaterial } from './level/materials';
 import { Navigation } from './level/navigation';
 import { GlassSystem } from './level/glassSystem';
 import { CoverPoints, levelCover } from './level/cover';
@@ -106,7 +107,7 @@ const levelData = import.meta.env.DEV && new URLSearchParams(location.search).ge
 const levelFloor = levelLayout(levelData);
 // The boxes' models (5.5b) load before the first frame; a box whose model cannot load is drawn grey.
 const levelModels = await loadLevelModels(levelData.boxes);
-const level = buildGreybox(levelData.boxes, levelFloor, new Set(modelledBoxes(levelData.boxes, levelModels)));
+const level = buildGreybox(levelData.boxes, levelFloor, new Set(modelledBoxes(levelData.boxes, levelModels)), texturedMaterial);
 const levelModelMeshes = drawBoxModels(levelData.boxes, levelModels);
 if (levelModelMeshes.length > 0) level.group.add(...levelModelMeshes);
 level.boxMeshes.push(...levelModelMeshes); // hidden with the grey boxes while the editor draws its own copy
