@@ -40,9 +40,11 @@ export interface RoomBox {
   drawn?: boolean;
   /** False: drawn but does not collide, and is not on the navigation mesh (a stair's steps over its ramp). Left out: solid. */
   solid?: boolean;
-  widthM: number; // size along x
+  widthM: number; // size along x (its own x, once turned)
   depthM: number; // size along z
   heightM: number;
+  /** Turned about its centre, in degrees (positive turns left, as a marker's yaw; 5.5a). Left out: square to the walls. */
+  yawDeg?: number;
 }
 
 export function isClimbable(box: RoomBox): boolean {

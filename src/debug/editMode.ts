@@ -27,7 +27,8 @@ import {
   type BoxPreset,
   type Pick,
 } from '../level/levelEdit';
-import { applyHandleDrag, closestOnAxis, layoutGizmo, pickHandle, type GizmoHandle } from '../level/gizmo';
+import { applyHandleDrag, closestOnAxis, layoutGizmo, pickHandle, ringAngle, type GizmoHandle } from '../level/gizmo';
+import { normalYawDeg } from '../level/boxShape';
 import { levelNameHeader, levelSaveUrl } from '../level/levelSave';
 import { Navigation } from '../level/navigation';
 import { describeReach, newSince, reachProblems, type ReachProblem } from '../level/reach';
@@ -35,8 +36,8 @@ import { GizmoView } from './gizmoView';
 
 // The in-game level editor (milestone 5.2, decision 273; 5.2b, decision 281; 5.2c, decision 285), dev server only. F2 turns
 // it on, with the free camera. Aim at a piece or marker and click to select it (Shift-click adds or takes away); or pick
-// from the list at the top of the panel (search it by name, id or group; click a folder's "select all"). Arrows (M switches
-// them to size handles) are dragged by aiming at one and holding the left button. The right button drags the selection on
+// from the list at the top of the panel (search it by name, id or group; click a folder's "select all"). Arrows and the
+// rotate ring (5.5a; M switches them to size handles) are dragged by aiming at one and holding the left button. The right button drags the selection on
 // the floor (the wheel raises it; Shift snaps to the 0.25 m grid); the keys move it too (arrows, Shift: 1 m; Page Up and
 // Page Down raise and lower it), R turns each piece 90 degrees, N copies, Delete removes, U undoes. Its panel sits bottom
 // left (Esc frees the mouse to use it). A moment after each change it rebuilds the walkable floor from its copy and reports
@@ -48,6 +49,9 @@ const stepM = 0.25;
 const bigStepM = 1;
 /** A drag rounds to this, or to `stepM` with Shift held. */
 const dragStepM = 0.05;
+/** The rotate ring turns in steps of this many degrees, or the bigger step with Shift held (5.5a). */
+const turnStepDeg = 5;
+const turnBigStepDeg = 15;
 /** How far a piece moves per count of mouse movement while dragged. */
 const dragMetresPerCount = 0.01;
 /** New pieces go this far in front of the camera, on the floor. */
@@ -60,7 +64,7 @@ const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79
 const roleColours = { trooper: 0x6b7f3a, flanker: 0x9fb4c8, heavy: 0x222222, leader: 0x8a2a2a } as const;
 const previewColours = { mesh: 0x3fd0ff, problem: 0xff2a2a } as const;
 const keyHelp =
-  'click pick (Shift adds) · aim at an arrow, hold left button to drag it · M arrows or size handles · hold right button drag (wheel height, Shift grid) · arrows move · PgUp/PgDn height · R turn · N copy · Del delete · U undo · Esc panel · F2 off';
+  'click pick (Shift adds) · aim at an arrow or the ring, hold left button to drag it (ring: 5 deg, Shift 15) · M arrows or size handles · hold right button drag (wheel height, Shift grid) · arrows move · PgUp/PgDn height · R turn · N copy · Del delete · U undo · Esc panel · F2 off';
 /** The list's rows and the folders that are open, in the panel. */
 const listStyle = 'background:#1a1a1a;color:#ddd;font:11px sans-serif;padding:4px;margin-bottom:4px;border-radius:2px';
 const selectedRowStyle = 'background:#5a4a14';
@@ -107,8 +111,12 @@ export class EditMode {
   private hover: string | null = null;
   private readonly raycaster = new THREE.Raycaster();
   private readonly cursor = new THREE.Vector2();
-  /** While a handle is dragged: the handle as it was at the start (the axis the drag follows stays put), the level before, and the virtual cursor. */
-  private handleDrag: { handle: GizmoHandle; before: LevelData; startParam: number; cursorX: number; cursorY: number } | null = null;
+  /**
+   * While a handle is dragged: the handle as it was at the start (the line or ring the drag follows stays put), the level
+   * before, and the virtual cursor. For the ring, `startParam` is the last angle under the cursor and `turnedRad` how far it
+   * has gone in all (so it can pass half a turn without jumping back).
+   */
+  private handleDrag: { handle: GizmoHandle; before: LevelData; startParam: number; cursorX: number; cursorY: number; turnedRad: number } | null = null;
   // The list (5.2c).
   private readonly listBody = document.createElement('div');
   private searchText = '';
@@ -243,7 +251,7 @@ export class EditMode {
     return [
       `EDITOR    ${this.data.name}: ${this.data.boxes.length} boxes, ${this.data.spawns.length} spawns, ${this.data.dummies.length} dummies${this.dirty ? ', UNSAVED changes (collision and enemies still use the saved layout)' : ', saved'}`,
       `selected  ${what}${this.drag || this.handleDrag ? ' (dragging)' : ''}`,
-      `handles   ${this.gizmoMode === 'move' ? 'move arrows' : 'size handles'} (M switches)${sizeNeedsOne ? ': size handles need exactly one box selected' : ''}`,
+      `handles   ${this.gizmoMode === 'move' ? 'move arrows and the turn ring' : 'size handles'} (M switches)${sizeNeedsOne ? ': size handles need exactly one box selected' : ''}`,
       `keys      ${keyHelp}`,
       ...this.reachLines.map((line, i) => `${i === 0 ? 'reach     ' : '          '}${line}`),
       ...(this.message ? [`note      ${this.message}`] : []),
@@ -291,11 +299,11 @@ export class EditMode {
     this.message = '';
   }
 
-  /** A left press on an arrow or handle: the drag follows that axis line, with a virtual cursor that starts at the dot. */
+  /** A left press on an arrow, handle or the ring: the drag follows that line (or goes round the ring), with a virtual cursor that starts at the dot. */
   private startHandleDrag(handle: GizmoHandle): void {
-    const startParam = closestOnAxis(this.parts.camera.position, this.ray, handle.origin, axisUnit(handle));
+    const startParam = handle.kind === 'turn' ? (ringAngle(handle, this.parts.camera.position, this.ray)?.angleRad ?? null) : closestOnAxis(this.parts.camera.position, this.ray, handle.origin, handle.dir);
     if (startParam === null) return;
-    this.handleDrag = { handle, before: this.data, startParam, cursorX: 0, cursorY: 0 };
+    this.handleDrag = { handle, before: this.data, startParam, cursorX: 0, cursorY: 0, turnedRad: 0 };
   }
 
   private handleDragStep(input: Input, shift: boolean): void {
@@ -308,7 +316,17 @@ export class EditMode {
     this.cursor.set(drag.cursorX / (window.innerWidth / 2), -drag.cursorY / (window.innerHeight / 2));
     this.parts.camera.updateMatrixWorld();
     this.raycaster.setFromCamera(this.cursor, this.parts.camera);
-    const param = closestOnAxis(this.raycaster.ray.origin, this.raycaster.ray.direction, drag.handle.origin, axisUnit(drag.handle));
+    if (drag.handle.kind === 'turn') {
+      const hit = ringAngle(drag.handle, this.raycaster.ray.origin, this.raycaster.ray.direction);
+      if (!hit) return;
+      const step = hit.angleRad - drag.startParam;
+      drag.turnedRad += Math.atan2(Math.sin(step), Math.cos(step)); // the short way round since the last frame
+      drag.startParam = hit.angleRad;
+      const deg = snapTo((drag.turnedRad * 180) / Math.PI, shift ? turnBigStepDeg : turnStepDeg);
+      this.showDragged(applyHandleDrag(drag.before, this.selection, drag.handle, deg));
+      return;
+    }
+    const param = closestOnAxis(this.raycaster.ray.origin, this.raycaster.ray.direction, drag.handle.origin, drag.handle.dir);
     if (param === null) return;
     const along = snapTo(param - drag.startParam, shift ? stepM : dragStepM);
     this.showDragged(applyHandleDrag(drag.before, this.selection, drag.handle, along));
@@ -613,6 +631,7 @@ export class EditMode {
       values.surface = box.surface ?? 'default';
       values.glass = box.glass ?? false;
       values.group = box.group ?? '';
+      values.yawDeg = box.yawDeg ?? 0;
       if (!many) {
         this.fieldControllers.push(folder.add(values, 'label').onFinishChange((v: string) => set('label', v)));
       }
@@ -621,6 +640,7 @@ export class EditMode {
       if (!many) {
         for (const field of ['xM', 'zM', 'widthM', 'depthM', 'heightM']) number(field);
         this.fieldControllers.push(folder.add(values, 'yM').step(0.05).name('yM (off the floor)').onFinishChange((v: number) => set('yM', v > 0 ? v : undefined)));
+        this.fieldControllers.push(folder.add(values, 'yawDeg').step(5).name('yawDeg (turned, left)').onFinishChange((v: number) => set('yawDeg', normalYawDeg(v) || undefined)));
       }
       this.fieldControllers.push(folder.add(values, 'climbable').onChange((v: boolean) => set('climbable', v)));
       this.fieldControllers.push(folder.add(values, 'surface', ['default', 'concrete', 'metal', 'tile']).onChange((v: string) => set('surface', v === 'default' ? undefined : v)));
@@ -646,17 +666,12 @@ function toggled(ids: readonly Pick[], id: Pick): Pick[] {
   return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
 }
 
-/** The unit vector along a handle's axis (always the + way; a handle's `sign` is applied by the drag). */
-function axisUnit(handle: GizmoHandle): { x: number; y: number; z: number } {
-  return { x: handle.axis === 'x' ? 1 : 0, y: handle.axis === 'y' ? 1 : 0, z: handle.axis === 'z' ? 1 : 0 };
-}
-
 function describe(level: LevelData, pick: Pick, item: LevelBox | LevelSpot): string {
   const at = `at (${item.xM.toFixed(2)}, ${item.zM.toFixed(2)})`;
   const list = locate(level, pick)?.list;
   if (list === 'boxes') {
     const box = item as LevelBox;
-    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${box.widthM} x ${box.depthM} x ${box.heightM} m${box.yM ? `, ${box.yM} m up` : ''}`;
+    return `${box.label} [${box.id}]${box.group ? ` in "${box.group}"` : ''} ${at}, ${box.widthM} x ${box.depthM} x ${box.heightM} m${box.yM ? `, ${box.yM} m up` : ''}${box.yawDeg ? `, turned ${box.yawDeg} deg` : ''}`;
   }
   const facing = `facing ${(item as LevelSpot).yawDeg} deg`;
   if (list === 'start') return `Rook's start ${at}, ${facing}`;

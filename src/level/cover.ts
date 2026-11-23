@@ -3,6 +3,7 @@ import { coverConfig } from '../config/cover';
 import { roleConfig } from '../config/roles';
 import { dummyConfig } from '../config/dummy';
 import { standInConfig } from '../config/standInEnemy';
+import { toLocal, toWorld, yawRadOf } from './boxShape';
 import type { LevelCollision } from './collision';
 import { coverRemoveRadiusM, type LevelData } from './levelData';
 
@@ -56,12 +57,13 @@ export function levelCover(level: LevelData): CoverPoint[] {
   return [...kept, ...level.coverAdd];
 }
 
-export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number; ramp?: string }[]): CoverPoint[] {
+export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number; zM: number; yM?: number; widthM: number; depthM: number; heightM: number; ramp?: string; yawDeg?: number }[]): CoverPoint[] {
   const points: CoverPoint[] = [];
   for (const box of boxes) {
     if (box.kind !== 'prop' || box.ramp || box.heightM < lowCoverM) continue; // a ramp still blocks spots, but is never cover
     const baseM = box.yM ?? 0; // a prop standing on the upper level makes cover up there
     const height: CoverPoint['height'] = box.heightM >= highCoverM ? 'high' : 'low';
+    const turnRad = yawRadOf(box); // the sides are worked out in the box's own axes, then turned with it (5.5a)
     // The four sides: where the spot line runs, which way it faces (toward the box), and the side's length.
     const sides = [
       { outX: 0, outZ: -1, facingYawRad: Math.PI, lengthM: box.widthM }, // north side: the box is to the spot's south
@@ -70,8 +72,8 @@ export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number;
       { outX: 1, outZ: 0, facingYawRad: Math.PI / 2, lengthM: box.depthM },
     ];
     for (const side of sides) {
-      const centreX = box.xM + side.outX * (box.widthM / 2 + spotOutM);
-      const centreZ = box.zM + side.outZ * (box.depthM / 2 + spotOutM);
+      const centreX = side.outX * (box.widthM / 2 + spotOutM); // from the box's centre, in its own axes
+      const centreZ = side.outZ * (box.depthM / 2 + spotOutM);
       const alongX = side.outZ !== 0 ? 1 : 0; // the side runs along x on the north and south, along z on the west and east
       const alongZ = side.outX !== 0 ? 1 : 0;
       const rightX = Math.cos(side.facingYawRad); // the right-hand side when facing the cover (as in peekEyesAt)
@@ -90,18 +92,14 @@ export function coverPointsFromBoxes(boxes: readonly { kind: string; xM: number;
         if (height === 'low' && side.lengthM >= lowMiddleFromM) spots.push({ offsetM: 0 });
       }
       for (const { offsetM, lean } of spots) {
-        const xM = centreX + alongX * offsetM;
-        const zM = centreZ + alongZ * offsetM;
-        const blocked = boxes.some(
-          (other) =>
-            other !== box &&
-            (other.yM ?? 0) >= baseM - standsOnM &&
-            (other.yM ?? 0) < baseM + highCoverM &&
-            Math.abs(xM - other.xM) < other.widthM / 2 + clearOfOtherM &&
-            Math.abs(zM - other.zM) < other.depthM / 2 + clearOfOtherM,
-        );
+        const { x: xM, z: zM } = toWorld(box, centreX + alongX * offsetM, centreZ + alongZ * offsetM);
+        const blocked = boxes.some((other) => {
+          if (other === box || (other.yM ?? 0) < baseM - standsOnM || (other.yM ?? 0) >= baseM + highCoverM) return false;
+          const p = toLocal(other, xM, zM);
+          return Math.abs(p.x) < other.widthM / 2 + clearOfOtherM && Math.abs(p.z) < other.depthM / 2 + clearOfOtherM;
+        });
         if (blocked) continue;
-        const spot = { xM, zM, ...(baseM > 0 ? { yM: baseM } : {}), height, facingYawRad: side.facingYawRad };
+        const spot = { xM, zM, ...(baseM > 0 ? { yM: baseM } : {}), height, facingYawRad: side.facingYawRad + turnRad };
         points.push(lean ? { ...spot, lean } : spot);
       }
     }

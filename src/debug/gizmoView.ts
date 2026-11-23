@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { arrowStart, handleHalfSize, type GizmoHandle } from '../level/gizmo';
+import { arrowStart, handleHalfSize, ringRadius, type GizmoHandle } from '../level/gizmo';
 
 // Draws the editor's arrows and size handles (5.2c, decision 285; the maths is in src/level/gizmo.ts). Always on top of the
 // level and the same size on screen. Dev server only.
 
 const axisColours = { x: 0xff4d4d, y: 0x4dff6a, z: 0x4d8dff } as const;
 const sizeColours = { x: 0xff9a9a, y: 0x9aff9a, z: 0x9ab8ff } as const;
+const ringColour = 0xffd24d;
 const hoverColour = 0xffffff;
 const activeColour = 0xffc23d;
 /** Drawn after everything else, with no depth test, so a handle inside or behind a piece can still be seen and aimed at. */
@@ -32,9 +33,9 @@ export class GizmoView {
       const part = this.parts.get(handle.key) ?? this.make(handle);
       part.root.visible = true;
       part.root.scale.setScalar(handle.scale);
-      const where = handle.kind === 'move' ? handle.origin : handle.at;
+      const where = handle.kind === 'size' ? handle.at : handle.origin;
       part.root.position.set(where.x, where.y, where.z);
-      const base = (handle.kind === 'move' ? axisColours : sizeColours)[handle.axis];
+      const base = handle.kind === 'turn' ? ringColour : (handle.kind === 'move' ? axisColours : sizeColours)[handle.axis];
       part.material.color.setHex(handle.key === activeKey ? activeColour : handle.key === hoverKey ? hoverColour : base);
     }
     this.group.visible = handles.length > 0;
@@ -45,7 +46,7 @@ export class GizmoView {
     this.group.visible = false;
   }
 
-  /** An arrow: a shaft and a cone along +y, turned to its axis; or a handle: a small cube. Built once, in gizmo units (1 = `scale` metres). */
+  /** An arrow: a shaft and a cone along +y, turned to its axis; the rotate ring: a flat circle; or a handle: a small cube. Built once, in gizmo units (1 = `scale` metres). */
   private make(handle: GizmoHandle): Part {
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.95 });
     const root = new THREE.Group();
@@ -58,6 +59,10 @@ export class GizmoView {
       root.add(shaft, tip);
       if (handle.axis === 'x') root.rotation.z = -Math.PI / 2; // +y turned to +x
       if (handle.axis === 'z') root.rotation.x = Math.PI / 2; // +y turned to +z
+    } else if (handle.kind === 'turn') {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(ringRadius, 0.015, 6, 64), material);
+      ring.rotation.x = Math.PI / 2; // flat, round the selection
+      root.add(ring);
     } else {
       root.add(new THREE.Mesh(new THREE.BoxGeometry(handleHalfSize * 2, handleHalfSize * 2, handleHalfSize * 2), material));
     }

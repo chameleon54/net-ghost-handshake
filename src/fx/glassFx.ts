@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { glassConfig } from '../config/glass';
 import type { EventBus } from '../core/events';
+import { toLocal, toWorld, yawRadOf } from '../level/boxShape';
 import type { GlassPane } from '../level/glass';
 import type { WeaponEvents } from '../weapons/events';
 
@@ -108,10 +109,12 @@ export class GlassFx {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(points, 3));
     const mark = new THREE.LineSegments(geometry, this.crackMaterial);
-    // The pane is thin along its smaller side; the mark lies in the plane through its middle (the pane is see-through).
+    // The pane is thin along its smaller side; the mark lies in the plane through its middle (the pane is see-through), turned with it.
     const alongX = pane.box.depthM <= pane.box.widthM;
-    mark.position.set(alongX ? at.x : pane.box.xM, at.y, alongX ? pane.box.zM : at.z);
-    if (!alongX) mark.rotation.y = Math.PI / 2;
+    const local = toLocal(pane.box, at.x, at.z);
+    const onPlane = toWorld(pane.box, alongX ? local.x : 0, alongX ? 0 : local.z);
+    mark.position.set(onPlane.x, at.y, onPlane.z);
+    mark.rotation.y = yawRadOf(pane.box) + (alongX ? 0 : Math.PI / 2);
     this.scene.add(mark);
     this.cracks.set(pane.id, [...(this.cracks.get(pane.id) ?? []), mark]);
   }
@@ -128,10 +131,12 @@ export class GlassFx {
   private spawnShards(pane: GlassPane, direction: THREE.Vector3): void {
     const burst = this.bursts[this.next];
     this.next = (this.next + 1) % this.bursts.length;
-    const { min, max } = pane.bounds;
+    const { box } = pane;
+    const bottomM = box.yM ?? 0;
     const position = burst.points.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < glassConfig.shardsPerBurst; i++) {
-      position.setXYZ(i, min.x + Math.random() * (max.x - min.x), min.y + Math.random() * Math.min(max.y - min.y, shardStartMaxHeightM), min.z + Math.random() * (max.z - min.z));
+      const start = toWorld(box, (Math.random() - 0.5) * box.widthM, (Math.random() - 0.5) * box.depthM); // anywhere on the pane, turned with it
+      position.setXYZ(i, start.x, bottomM + Math.random() * Math.min(box.heightM, shardStartMaxHeightM), start.z);
       const speedMps = glassConfig.shardSpeedMps * (0.4 + Math.random() * 0.6);
       burst.velocities[i * 3] = (direction.x + (Math.random() * 2 - 1) * sprayShare) * speedMps;
       burst.velocities[i * 3 + 1] = (direction.y + (Math.random() * 2 - 1) * sprayShare) * speedMps;

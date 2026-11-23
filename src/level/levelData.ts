@@ -9,9 +9,12 @@ import type { CoverPoint } from './cover';
 
 /**
  * Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; version 3 (5.2c, decision 285) lets a box carry
- * a `group`. A file of version 1 or 2 still loads (a version 1 file gets the ids) and is written back as version 3.
+ * a `group`; version 4 (5.5a, decision 286) lets a box be turned (`yawDeg`). An older file still loads (a version 1 file
+ * gets the ids) and is written back as the current version.
  */
-export const levelFormatVersion = 3;
+export const levelFormatVersion = 4;
+/** Every version this game reads. */
+const readableVersions = [1, 2, 3, levelFormatVersion];
 
 /** A box in the level: a wall or a piece of equipment. `id` is unique in the level; `label` says what it is ("prep bench A"). */
 export interface LevelBox extends RoomBox {
@@ -180,6 +183,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
     heightM: r.number(o.heightM, `${path}.heightM`, 'positive'),
   };
   const yM = r.optional(o.yM, () => r.number(o.yM, `${path}.yM`, 'not negative'));
+  const yawDeg = r.optional(o.yawDeg, () => r.number(o.yawDeg, `${path}.yawDeg`));
   const climbable = r.flag(o.climbable, `${path}.climbable`);
   const surface = r.optional(o.surface, () => r.oneOf(o.surface, `${path}.surface`, surfaces));
   const glass = r.flag(o.glass, `${path}.glass`);
@@ -188,6 +192,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   const solid = r.flag(o.solid, `${path}.solid`);
   const group = r.optional(o.group, () => r.text(o.group, `${path}.group`));
   if (yM !== undefined) box.yM = yM;
+  if (yawDeg !== undefined) box.yawDeg = yawDeg;
   if (climbable !== undefined) box.climbable = climbable;
   if (surface !== undefined) box.surface = surface;
   if (glass !== undefined) box.glass = glass;
@@ -220,7 +225,7 @@ export function checkLevel(raw: unknown): LevelData {
   const r = new Reader();
   const o = r.object(raw, 'level');
   const version = r.number(o.formatVersion, 'formatVersion');
-  if (version !== 1 && version !== 2 && version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be 1, 2 or ${levelFormatVersion} (this game reads all of them)`);
+  if (!readableVersions.includes(version) && r.problems.length === 0) r.problems.push(`formatVersion must be one of ${readableVersions.join(', ')} (this game reads all of them)`);
   const name = r.text(o.name, 'name');
   if (!levelNamePattern.test(name)) r.problems.push('name must be lowercase letters, digits and hyphens (it is also the file name)');
   const floorIn = r.object(o.floor, 'floor');

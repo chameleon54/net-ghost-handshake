@@ -28,7 +28,7 @@ export interface GreyboxLevel {
 const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33, glass: 0x7fc8e8 } as const;
 
 /**
- * A box's triangles, in place. A ramp is the box with the top edge at its low end brought down to the bottom, so its top
+ * A box's triangles, in place (turned by its `yawDeg`, 5.5a). A ramp is the box with the top edge at its low end brought down to the bottom, so its top
  * slopes up toward the side it names (north is -z).
  */
 export function boxGeometry(box: RoomBox): THREE.BufferGeometry {
@@ -41,6 +41,7 @@ export function boxGeometry(box: RoomBox): THREE.BufferGeometry {
     }
     geometry.computeVertexNormals(); // each face has its own corners, so the normals stay flat per face
   }
+  if (box.yawDeg) geometry.rotateY((box.yawDeg * Math.PI) / 180); // turned about its own centre (5.5a)
   geometry.translate(box.xM, (box.yM ?? 0) + box.heightM / 2, box.zM);
   return geometry;
 }

@@ -30,8 +30,8 @@ export class GlassSystem {
     });
     events.on('grenade:exploded', ({ position, radiusM }) => {
       for (const pane of this.level.glass.blast(position, radiusM)) {
-        pane.bounds.clampPoint(position, this.point); // the edge of the pane nearest the blast
-        this.direction.subVectors(pane.bounds.getCenter(new Vector3()), position).normalize(); // blown away from it
+        pane.bounds.clampPoint(position, this.point); // about the edge of the pane nearest the blast
+        this.direction.set(pane.box.xM - position.x, (pane.box.yM ?? 0) + pane.box.heightM / 2 - position.y, pane.box.zM - position.z).normalize(); // blown away from it
         this.broke(pane, 'blast');
       }
     });

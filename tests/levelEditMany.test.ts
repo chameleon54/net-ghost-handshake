@@ -96,10 +96,10 @@ describe('the editor list and groups', () => {
     expect(() => checkLevel(bad)).toThrow(LevelError);
   });
 
-  it('a version 2 file (no groups) still loads, and is written as version 3', () => {
+  it('a version 2 file (no groups) still loads, and is written as the current version', () => {
     const old = { ...level(), formatVersion: 2 };
     for (const b of old.boxes) delete b.group;
-    expect(checkLevel(JSON.parse(JSON.stringify(old))).formatVersion).toBe(3);
+    expect(checkLevel(JSON.parse(JSON.stringify(old))).formatVersion).toBe(4);
   });
 });
 
@@ -158,9 +158,9 @@ describe('pulling a face of a box', () => {
 describe('the arrows and handles', () => {
   const camera = { x: 0, y: 1.5, z: 10 };
 
-  it('the move arrows: x and z for markers, and y too when a box is selected', () => {
-    expect(layoutGizmo(level(), ['dummy-1'], 'move', camera).map((h) => h.key)).toEqual(['move-x', 'move-z']);
-    expect(layoutGizmo(level(), ['crate', 'bench', 'pillar'], 'move', camera).map((h) => h.key)).toEqual(['move-x', 'move-y', 'move-z']);
+  it('the move arrows: x and z for markers, and y too when a box is selected, with the rotate ring (5.5a)', () => {
+    expect(layoutGizmo(level(), ['dummy-1'], 'move', camera).map((h) => h.key)).toEqual(['move-x', 'move-z', 'turn']);
+    expect(layoutGizmo(level(), ['crate', 'bench', 'pillar'], 'move', camera).map((h) => h.key)).toEqual(['move-x', 'move-y', 'move-z', 'turn']);
     expect(layoutGizmo(level(), [], 'move', camera)).toEqual([]);
   });
 
@@ -204,7 +204,7 @@ describe('the arrows and handles', () => {
     const move = layoutGizmo(level(), ['crate'], 'move', camera);
     view.update(move, 'move-x', null);
     expect(view.group.visible).toBe(true);
-    expect(view.group.children.filter((child) => child.visible)).toHaveLength(3);
+    expect(view.group.children.filter((child) => child.visible)).toHaveLength(4); // three arrows and the ring
     const size = layoutGizmo(level(), ['crate'], 'size', camera);
     view.update(size, null, 'size-east');
     expect(view.group.children.filter((child) => child.visible)).toHaveLength(6); // the arrows are hidden, not rebuilt

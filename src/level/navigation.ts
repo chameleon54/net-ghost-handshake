@@ -1,7 +1,8 @@
-import { Vector3, type Box3, type BufferGeometry } from 'three';
+import { Vector3, type BufferGeometry } from 'three';
 import { getNavMeshPositionsAndIndices, init, NavMeshQuery, type NavMesh, type Obstacle, type TileCache } from 'recast-navigation';
 import { generateSoloNavMesh, generateTileCache } from 'recast-navigation/generators';
 import { navigationConfig } from '../config/navigation';
+import { yawRadOf, type TurnedBox } from './boxShape';
 
 /** Metres to whole grid cells, rounding up so the margin is never smaller than asked. */
 /** A path that ends this close to its goal is good enough: the other height is not tried. */
@@ -23,10 +24,10 @@ const cells = (metres: number, cellM: number): number => Math.ceil(metres / cell
 // cache instead, with each pane an obstacle in it: breaking a pane removes its obstacle and only the tiles around it are
 // rebuilt (about 0.5 ms), so the gap becomes a route in the middle of a fight. The two meshes are not identical (a few routes
 // differ by a metre or two), so a room without such glass keeps the solo mesh and its tuned routes.
-/** A pane the mesh must be able to open: where it stands (the obstacle is its box, grown by the body's radius). */
+/** A pane the mesh must be able to open: its box, turned or not (the obstacle is that box, grown by the body's radius). */
 export interface NavigationPane {
   readonly id: string;
-  readonly bounds: Box3;
+  readonly box: TurnedBox;
 }
 /** The most rounds of tile rebuilding one change gets; a pane touches a handful of tiles, so a few rounds finish it. */
 const maxTileCacheRounds = 20;
@@ -105,11 +106,11 @@ export class Navigation {
   }
 
   private addObstacle(pane: NavigationPane): void {
-    const { min, max } = pane.bounds;
+    const { box } = pane;
     const added = this.tileCache!.addBoxObstacle(
-      { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2 + meshLiftM, z: (min.z + max.z) / 2 },
-      { x: (max.x - min.x) / 2 + this.obstacleGrowM, y: (max.y - min.y) / 2 + obstacleSlackM, z: (max.z - min.z) / 2 + this.obstacleGrowM }, // the mesh is already kept off walls by the body's radius; an obstacle is not, so it is grown by hand
-      0,
+      { x: box.xM, y: (box.yM ?? 0) + box.heightM / 2 + meshLiftM, z: box.zM },
+      { x: box.widthM / 2 + this.obstacleGrowM, y: box.heightM / 2 + obstacleSlackM, z: box.depthM / 2 + this.obstacleGrowM }, // the mesh is already kept off walls by the body's radius; an obstacle is not, so it is grown by hand
+      yawRadOf(box), // turned with the pane (5.5a)
     );
     if (!added.success) throw new Error(`Could not add the glass pane ${pane.id} to the navigation mesh`);
     this.obstacles.set(pane.id, added.obstacle);

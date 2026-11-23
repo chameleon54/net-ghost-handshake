@@ -1,4 +1,7 @@
+import { normalYawDeg, rayBoxM, rayTurnedBoxM } from './boxShape';
 import { unusedId, type LevelBox, type LevelData, type LevelSpot } from './levelData';
+
+export { rayBoxM };
 
 // The level edit operations (milestone 5.2, decision 273): picking a piece with a ray, moving, turning, duplicating,
 // deleting and adding, and undo. Each takes a level and returns a new one (the old one is left as it was, which is what
@@ -22,36 +25,6 @@ interface Vec3 {
   readonly z: number;
 }
 
-/** Distance along the ray (unit `dir`) to an axis-aligned box, or Infinity if it misses. The slab method. */
-export function rayBoxM(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3): number {
-  let near = -Infinity;
-  let far = Infinity;
-  for (const axis of ['x', 'y', 'z'] as const) {
-    const o = origin[axis];
-    const d = dir[axis];
-    if (Math.abs(d) < 1e-12) {
-      if (o < min[axis] || o > max[axis]) return Infinity; // parallel to this slab and outside it
-      continue;
-    }
-    let t1 = (min[axis] - o) / d;
-    let t2 = (max[axis] - o) / d;
-    if (t1 > t2) [t1, t2] = [t2, t1];
-    near = Math.max(near, t1);
-    far = Math.min(far, t2);
-    if (near > far) return Infinity;
-  }
-  if (far < 0) return Infinity; // behind the eye
-  return Math.max(near, 0);
-}
-
-function boxBounds(box: LevelBox): [Vec3, Vec3] {
-  const y = box.yM ?? 0;
-  return [
-    { x: box.xM - box.widthM / 2, y, z: box.zM - box.depthM / 2 },
-    { x: box.xM + box.widthM / 2, y: y + box.heightM, z: box.zM + box.depthM / 2 },
-  ];
-}
-
 function markerBounds(spot: LevelSpot): [Vec3, Vec3] {
   const half = markerWidthM / 2;
   return [
@@ -64,17 +37,20 @@ function markerBounds(spot: LevelSpot): [Vec3, Vec3] {
 export function pickAt(level: LevelData, origin: Vec3, dir: Vec3): Pick | null {
   let best: Pick | null = null;
   let bestM = Infinity;
-  const consider = (id: string, [min, max]: [Vec3, Vec3]) => {
-    const m = rayBoxM(origin, dir, min, max);
+  const consider = (id: string, m: number) => {
     if (m < bestM) {
       best = id;
       bestM = m;
     }
   };
-  for (const box of level.boxes) consider(box.id, boxBounds(box));
-  for (const spot of level.dummies) consider(spot.id, markerBounds(spot));
-  for (const spot of level.spawns) consider(spot.id, markerBounds(spot));
-  consider(level.start.id, markerBounds(level.start));
+  for (const box of level.boxes) consider(box.id, rayTurnedBoxM(origin, dir, box)); // a turned box is hit where it is drawn (5.5a)
+  const marker = (spot: LevelSpot) => {
+    const [min, max] = markerBounds(spot);
+    return rayBoxM(origin, dir, min, max);
+  };
+  for (const spot of level.dummies) consider(spot.id, marker(spot));
+  for (const spot of level.spawns) consider(spot.id, marker(spot));
+  consider(level.start.id, marker(level.start));
   return best;
 }
 
@@ -118,12 +94,29 @@ export function moveBy(level: LevelData, id: Pick, dx: number, dy: number, dz: n
   });
 }
 
-/** Turns the item 90 degrees: a box swaps its width and depth (boxes stay square to the walls); a marker turns left. */
+/**
+ * Turns the item 90 degrees left. A box square to the walls swaps its width and depth (so the file stays without a turn); a
+ * turned box (5.5a) and a marker add 90 degrees to their yaw.
+ */
 export function turn(level: LevelData, id: Pick): LevelData {
   const isBox = locate(level, id)?.list === 'boxes';
-  return withItem(level, id, (item) =>
-    isBox ? { ...item, widthM: item.depthM, depthM: item.widthM } : { ...item, yawDeg: (((item.yawDeg + 90) % 360) + 360) % 360 },
-  );
+  return withItem(level, id, (item) => (isBox && !item.yawDeg ? { ...item, widthM: item.depthM, depthM: item.widthM } : withYaw(item, (item.yawDeg ?? 0) + 90, isBox)));
+}
+
+/** The item with its yaw set to `deg` (brought into 0 to 360); a box at 0 leaves the field out, a marker always has it. */
+function withYaw<T extends { yawDeg?: number }>(item: T, deg: number, isBox: boolean): T {
+  const yawDeg = normalYawDeg(deg);
+  const next = { ...item, yawDeg };
+  if (isBox && yawDeg === 0) delete (next as { yawDeg?: number }).yawDeg;
+  return next;
+}
+
+/** Turns every selected item `deg` degrees left (negative: right), each about its own centre (the rotate ring, 5.5a). */
+export function turnByMany(level: LevelData, ids: readonly Pick[], deg: number): LevelData {
+  return ids.reduce((next, id) => {
+    const isBox = locate(next, id)?.list === 'boxes';
+    return withItem(next, id, (item) => withYaw(item, (item.yawDeg ?? 0) + deg, isBox));
+  }, level);
 }
 
 /** Every id in the level, boxes and markers. */

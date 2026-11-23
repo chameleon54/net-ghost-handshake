@@ -1,5 +1,6 @@
+import { dirToWorld, worldBounds } from './boxShape';
 import type { LevelBox, LevelData } from './levelData';
-import { locate, markerHeightM, markerWidthM, moveMany, picked, rayBoxM, type Pick } from './levelEdit';
+import { locate, markerHeightM, markerWidthM, moveMany, picked, rayBoxM, turnByMany, type Pick } from './levelEdit';
 
 // The maths of the editor's arrows and handles (milestone 5.2c, decision 285): where they are, which one the dot is aimed
 // at, and what dragging one does. Plain functions with no drawing, so they can be tested; src/debug/gizmoView.ts draws them
@@ -37,6 +38,11 @@ const handleHalf = 0.07;
 const aimSlack = 0.08;
 /** An arrow's shaft starts this far (in gizmo lengths) from the centre. */
 const arrowStart = 0.3;
+/** The rotate ring (5.5a): its radius, and how far either side of it still counts as aiming at it (in gizmo lengths). */
+export const ringRadius = 1.3;
+const ringBand = 0.12;
+/** Looking this flat at the ring's plane, it is edge-on and cannot be aimed at. */
+const ringMinSlope = 0.08;
 
 const axes: readonly Axis[] = ['x', 'y', 'z'];
 const unit = (axis: Axis, sign = 1): Vec3 => ({ x: axis === 'x' ? sign : 0, y: axis === 'y' ? sign : 0, z: axis === 'z' ? sign : 0 });
@@ -61,7 +67,8 @@ export function closestOnAxis(origin: Vec3, dir: Vec3, axisOrigin: Vec3, axisDir
 
 /**
  * The box with one face pushed `deltaM` outward (negative: pulled in); the opposite face stays where it is. Never under
- * `minBoxSizeM`, and the bottom never goes below the floor. Not a box, or no such item: the level as it is.
+ * `minBoxSizeM`, and the bottom never goes below the floor. Not a box, or no such item: the level as it is. The faces are
+ * the box's own: on a turned box (5.5a) "east" is its own +x.
  */
 export function resizeFace(level: LevelData, id: Pick, face: Face, deltaM: number): LevelData {
   const at = locate(level, id);
@@ -72,8 +79,11 @@ export function resizeFace(level: LevelData, id: Pick, face: Face, deltaM: numbe
   let d = Math.max(deltaM, minBoxSizeM - box[sizeKey]);
   if (face === 'bottom') d = Math.min(d, box.yM ?? 0); // growing down cannot pass the floor
   const next: LevelBox = { ...box, [sizeKey]: box[sizeKey] + d };
-  if (axis === 'x') next.xM = box.xM + (sign * d) / 2;
-  if (axis === 'z') next.zM = box.zM + (sign * d) / 2;
+  if (axis !== 'y') {
+    const shift = dirToWorld(box, axis === 'x' ? (sign * d) / 2 : 0, axis === 'z' ? (sign * d) / 2 : 0); // the centre moves half as far, along the box's own axis
+    next.xM = box.xM + shift.x;
+    next.zM = box.zM + shift.z;
+  }
   if (face === 'bottom') {
     const yM = (box.yM ?? 0) - d;
     if (yM > 1e-9) next.yM = yM;
@@ -99,9 +109,7 @@ export function selectionBounds(level: LevelData, ids: readonly Pick[]): { min: 
     let lo: Vec3;
     let hi: Vec3;
     if (locate(level, id)?.list === 'boxes') {
-      const box = item as LevelBox;
-      lo = { x: box.xM - box.widthM / 2, y: box.yM ?? 0, z: box.zM - box.depthM / 2 };
-      hi = { x: box.xM + box.widthM / 2, y: (box.yM ?? 0) + box.heightM, z: box.zM + box.depthM / 2 };
+      ({ min: lo, max: hi } = worldBounds(item as LevelBox)); // a turned box's square outline
     } else {
       lo = { x: item.xM - markerWidthM / 2, y: 0, z: item.zM - markerWidthM / 2 };
       hi = { x: item.xM + markerWidthM / 2, y: markerHeightM, z: item.zM + markerWidthM / 2 };
@@ -112,11 +120,14 @@ export function selectionBounds(level: LevelData, ids: readonly Pick[]): { min: 
   return min && max ? { min, max } : null;
 }
 
-/** One arrow (moves the selection along an axis) or handle (pulls one face of a box out or in). */
+/** One arrow (moves the selection along an axis), handle (pulls one face of a box out or in) or the rotate ring (turns it). */
 export interface GizmoHandle {
   key: string;
-  kind: 'move' | 'size';
+  kind: 'move' | 'size' | 'turn';
+  /** The world axis an arrow moves along; for a handle, the box's own axis its face is square to. */
   axis: Axis;
+  /** The + way of the line a drag follows, in the world (a turned box's handles follow its own axes). */
+  dir: Vec3;
   /** A size handle's face (the one it pulls). */
   face?: Face;
   /** + or - along `axis`: the way an arrow points, or the way a face's outside lies. */
@@ -134,7 +145,8 @@ export interface GizmoHandle {
 
 /**
  * The arrows or handles for what is selected, sized by the distance to the camera. `move`: an arrow on x and z, and on y if
- * a box is selected (markers stand on the floor). `size`: six handles, only when exactly one box is selected.
+ * a box is selected (markers stand on the floor), and the rotate ring round them (5.5a). `size`: six handles on the box's
+ * own faces, only when exactly one box is selected.
  */
 export function layoutGizmo(level: LevelData, ids: readonly Pick[], mode: 'move' | 'size', camera: Vec3): GizmoHandle[] {
   const bounds = selectionBounds(level, ids);
@@ -152,21 +164,30 @@ export function layoutGizmo(level: LevelData, ids: readonly Pick[], mode: 'move'
     for (const axis of axes) {
       if (axis === 'y' && !anyBox) continue;
       const tip = at(centre, axis, scale);
-      handles.push({ key: `move-${axis}`, kind: 'move', axis, sign: 1, origin: centre, at: tip, scale, ...around(at(centre, axis, scale * arrowStart), tip, scale * aimSlack) });
+      handles.push({ key: `move-${axis}`, kind: 'move', axis, dir: unit(axis), sign: 1, origin: centre, at: tip, scale, ...around(at(centre, axis, scale * arrowStart), tip, scale * aimSlack) });
     }
+    const r = scale * ringRadius;
+    handles.push({ key: 'turn', kind: 'turn', axis: 'y', dir: unit('y'), sign: 1, origin: centre, at: centre, scale, min: { x: centre.x - r, y: centre.y, z: centre.z - r }, max: { x: centre.x + r, y: centre.y, z: centre.z + r } });
     return handles;
   }
   const only = ids.length === 1 && locate(level, ids[0])?.list === 'boxes';
   if (!only) return [];
+  const box = picked(level, ids[0]) as LevelBox;
+  const boxCentre = { x: box.xM, y: (box.yM ?? 0) + box.heightM / 2, z: box.zM };
+  const halfOf: Record<Axis, number> = { x: box.widthM / 2, y: box.heightM / 2, z: box.depthM / 2 };
+  const step = (from: Vec3, dir: Vec3, metres: number): Vec3 => ({ x: from.x + dir.x * metres, y: from.y + dir.y * metres, z: from.z + dir.z * metres });
   for (const face of Object.keys(faceAxes) as Face[]) {
     const { axis, sign } = faceAxes[face];
-    const faceCentre = at(centre, axis, (sign * (bounds.max[axis] - bounds.min[axis])) / 2);
-    const cube = at(faceCentre, axis, sign * scale * handleOffset);
+    const flat = axis === 'y' ? null : dirToWorld(box, axis === 'x' ? 1 : 0, axis === 'z' ? 1 : 0); // the box's own axis, turned with it
+    const dir = flat ? { x: flat.x, y: 0, z: flat.z } : unit('y');
+    const faceCentre = step(boxCentre, dir, sign * halfOf[axis]);
+    const cube = step(faceCentre, dir, sign * scale * handleOffset);
     const half = scale * (handleHalf + aimSlack);
     handles.push({
       key: `size-${face}`,
       kind: 'size',
       axis,
+      dir,
       face,
       sign,
       origin: faceCentre,
@@ -179,12 +200,32 @@ export function layoutGizmo(level: LevelData, ids: readonly Pick[], mode: 'move'
   return handles;
 }
 
-/** The nearest handle the ray (unit `dir`) hits, or null. */
+/**
+ * Where the ray meets the rotate ring's flat plane, as an angle round its centre in radians (0 is +x, growing as a yaw
+ * does: to the left seen from above), and how far along the ray that is. Null if the ray runs too flat to the plane or
+ * meets it behind the eye.
+ */
+export function ringAngle(handle: GizmoHandle, origin: Vec3, dir: Vec3): { angleRad: number; alongM: number; fromCentreM: number } | null {
+  if (Math.abs(dir.y) < ringMinSlope) return null;
+  const alongM = (handle.origin.y - origin.y) / dir.y;
+  if (alongM <= 0) return null;
+  const dx = origin.x + dir.x * alongM - handle.origin.x;
+  const dz = origin.z + dir.z * alongM - handle.origin.z;
+  return { angleRad: Math.atan2(-dz, dx), alongM, fromCentreM: Math.hypot(dx, dz) };
+}
+
+/** The nearest handle the ray (unit `dir`) hits, or null. The ring counts where the ray crosses its band. */
 export function pickHandle(handles: readonly GizmoHandle[], origin: Vec3, dir: Vec3): GizmoHandle | null {
   let best: GizmoHandle | null = null;
   let bestM = Infinity;
   for (const handle of handles) {
-    const m = rayBoxM(origin, dir, handle.min, handle.max);
+    let m = Infinity;
+    if (handle.kind === 'turn') {
+      const hit = ringAngle(handle, origin, dir);
+      if (hit && Math.abs(hit.fromCentreM - handle.scale * ringRadius) <= handle.scale * ringBand) m = hit.alongM;
+    } else {
+      m = rayBoxM(origin, dir, handle.min, handle.max);
+    }
     if (m < bestM) {
       best = handle;
       bestM = m;
@@ -193,8 +234,13 @@ export function pickHandle(handles: readonly GizmoHandle[], origin: Vec3, dir: V
   return best;
 }
 
-/** What dragging a handle `alongM` metres along its axis does to the level as it was when the drag began. */
-export function applyHandleDrag(before: LevelData, ids: readonly Pick[], handle: GizmoHandle, alongM: number): LevelData {
+/**
+ * What dragging a handle does to the level as it was when the drag began: `amount` is metres along its line for an arrow or
+ * handle, degrees (to the left) for the ring, which turns each selected piece about its own centre.
+ */
+export function applyHandleDrag(before: LevelData, ids: readonly Pick[], handle: GizmoHandle, amount: number): LevelData {
+  const alongM = amount;
+  if (handle.kind === 'turn') return turnByMany(before, ids, amount);
   if (handle.kind === 'move') return moveAlong(before, ids, handle.axis, alongM);
   return handle.face ? resizeFace(before, ids[0], handle.face, handle.sign * alongM) : before; // a face pulled outward is a positive change
 }
