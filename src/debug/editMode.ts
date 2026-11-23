@@ -21,13 +21,16 @@ import {
   pickAt,
   picked,
   removeMany,
+  setField,
   setFieldMany,
   snapTo,
   turnMany,
   type BoxPreset,
   type Pick,
 } from '../level/levelEdit';
-import { applyHandleDrag, closestOnAxis, layoutGizmo, pickHandle, ringAngle, type GizmoHandle } from '../level/gizmo';
+import { applyHandleDrag, closestOnAxis, layoutGizmo, minBoxSizeM, pickHandle, ringAngle, type GizmoHandle } from '../level/gizmo';
+import { boxSizeFittedToModel, kitListUrl, kitPrefix, maxTexturePx, modelMatrix, propTriangleBudget } from '../level/modelFit';
+import { drawsModel, loadModel, type LoadedModel } from '../level/models';
 import { normalYawDeg } from '../level/boxShape';
 import { levelNameHeader, levelSaveUrl } from '../level/levelSave';
 import { Navigation } from '../level/navigation';
@@ -60,7 +63,16 @@ const placeAheadM = 4;
 const previewAfterSec = 0.3;
 const leftButton = 0;
 const rightButton = 2;
-const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79cff, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d } as const;
+const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79cff, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d, outline: 0xffffff } as const;
+/** The model chooser shows this many matches; typing narrows the rest. */
+const maxModelRows = 60;
+
+/** A model file in the kits folder, as the dev server lists it (vite.config.ts): its size with every file it uses, and its biggest texture. */
+interface KitFile {
+  path: string;
+  bytes: number;
+  texturePx: number;
+}
 const roleColours = { trooper: 0x6b7f3a, flanker: 0x9fb4c8, heavy: 0x222222, leader: 0x8a2a2a } as const;
 const previewColours = { mesh: 0x3fd0ff, problem: 0xff2a2a } as const;
 const keyHelp =
@@ -127,6 +139,14 @@ export class EditMode {
   private reachLines: string[] = [];
   private previewLeftSec = -1;
   private previewRun = 0;
+  // Models on boxes (5.5b): the kits' files (null until the dev server has listed them), the models loaded so far, and why some could not load.
+  private kitFiles: KitFile[] | null = null;
+  private readonly models = new Map<string, LoadedModel>();
+  private readonly modelErrors = new Map<string, string>();
+  private readonly modelsLoading = new Set<string>();
+  private readonly modelBox = document.createElement('div');
+  private readonly modelListBody = document.createElement('div');
+  private modelSearch = '';
 
   constructor(private readonly parts: Parts) {
     this.data = parts.level;
@@ -158,7 +178,9 @@ export class EditMode {
     this.panel.add({ mode: () => this.switchGizmo() }, 'mode').name('Arrows or size handles (M)');
     this.panel.add(this.previewGroup, 'visible').name('Show the reach preview');
     this.selectedFolder = this.panel.addFolder('Selected');
+    this.selectedFolder.$children.prepend(this.buildModelChooser());
     this.refreshList();
+    this.refreshModelList();
   }
 
   toggle(on: boolean): void {
@@ -172,6 +194,7 @@ export class EditMode {
       this.gizmo.hide();
     }
     if (on && this.baseline === null) void this.measureBaseline();
+    if (on && this.kitFiles === null) void this.loadKitList();
     this.redraw();
   }
 
@@ -253,6 +276,7 @@ export class EditMode {
       `selected  ${what}${this.drag || this.handleDrag ? ' (dragging)' : ''}`,
       `handles   ${this.gizmoMode === 'move' ? 'move arrows and the turn ring' : 'size handles'} (M switches)${sizeNeedsOne ? ': size handles need exactly one box selected' : ''}`,
       `keys      ${keyHelp}`,
+      ...(main && this.pick && locate(this.data, this.pick)?.list === 'boxes' && (main as LevelBox).model ? [`model     ${this.modelLine(main as LevelBox)}`] : []),
       ...this.reachLines.map((line, i) => `${i === 0 ? 'reach     ' : '          '}${line}`),
       ...(this.message ? [`note      ${this.message}`] : []),
     ];
@@ -368,6 +392,7 @@ export class EditMode {
     this.redraw();
     this.showFields();
     this.refreshList();
+    this.refreshModelList();
   }
 
   /** A change: remembered for undo, then drawn. `selection` replaces the selection if given. */
@@ -384,6 +409,7 @@ export class EditMode {
     this.redraw();
     this.showFields();
     this.refreshList();
+    this.refreshModelList();
     this.previewLeftSec = previewAfterSec;
   }
 
@@ -508,6 +534,155 @@ export class EditMode {
     }
   }
 
+  // ---- Models on boxes (5.5b).
+
+  /** The selected boxes (markers in the selection are left out). */
+  private selectedBoxIds(): Pick[] {
+    return this.selection.filter((id) => locate(this.data, id)?.list === 'boxes');
+  }
+
+  /** The model chooser at the top of "Selected": a search box and the kits' model files; a click puts that model on every selected box. */
+  private buildModelChooser(): HTMLElement {
+    this.modelBox.style.cssText = listStyle;
+    const title = document.createElement('div');
+    title.textContent = 'Model (from the kits folder; the box stays the collision)';
+    const search = document.createElement('input');
+    search.type = 'search';
+    search.placeholder = 'search models (name or kit, several words)';
+    search.style.cssText = 'width:100%;box-sizing:border-box;margin:4px 0';
+    search.addEventListener('input', () => {
+      this.modelSearch = search.value;
+      this.refreshModelList();
+    });
+    this.modelListBody.style.cssText = 'max-height:180px;overflow-y:auto';
+    this.modelBox.append(title, search, this.modelListBody);
+    return this.modelBox;
+  }
+
+  private async loadKitList(): Promise<void> {
+    try {
+      const response = await fetch(kitListUrl);
+      this.kitFiles = response.ok ? ((await response.json()) as KitFile[]) : [];
+    } catch {
+      this.kitFiles = [];
+    }
+    this.refreshModelList();
+  }
+
+  /** The chooser's rows for the current search; shown only while a box is selected. */
+  private refreshModelList(): void {
+    const boxIds = this.selectedBoxIds();
+    this.modelBox.style.display = boxIds.length > 0 ? 'block' : 'none';
+    this.modelListBody.replaceChildren();
+    if (boxIds.length === 0) return;
+    if (this.kitFiles === null) {
+      this.modelListBody.textContent = 'listing the kits...';
+      return;
+    }
+    if (this.kitFiles.length === 0) {
+      this.modelListBody.textContent = 'no model files found in the kits folder (see vite.config.ts)';
+      return;
+    }
+    const main = picked(this.data, boxIds[boxIds.length - 1]) as LevelBox | undefined;
+    const words = this.modelSearch.toLowerCase().split(/\s+/).filter((word) => word !== '');
+    const matches = this.kitFiles.filter((file) => words.every((word) => file.path.toLowerCase().includes(word)));
+    for (const file of matches.slice(0, maxModelRows)) {
+      const name = kitPrefix + file.path;
+      const row = document.createElement('div');
+      row.textContent = `${file.path} (${(file.bytes / 1e6).toFixed(1)} MB)`;
+      row.title = name;
+      row.style.cssText = `cursor:pointer;padding:1px 4px;${main?.model === name ? selectedRowStyle : ''}`;
+      row.addEventListener('click', () => this.change(setFieldMany(this.data, boxIds, 'model', name)));
+      this.modelListBody.append(row);
+    }
+    if (matches.length > maxModelRows) this.modelListBody.append(`${matches.length - maxModelRows} more: type to narrow the list`);
+    if (matches.length === 0) this.modelListBody.append('no match');
+  }
+
+  /** Takes the model off every selected box: they are grey boxes again. */
+  private clearModels(): void {
+    const ids = this.selectedBoxIds();
+    this.change(setFieldMany(setFieldMany(this.data, ids, 'model', undefined), ids, 'modelYawDeg', undefined));
+  }
+
+  /** Turns the model a quarter turn inside each selected box (the box itself does not move). */
+  private turnModels(): void {
+    let next = this.data;
+    for (const id of this.selectedBoxIds()) {
+      const box = picked(next, id) as LevelBox;
+      if (box.model) next = setField(next, id, 'modelYawDeg', ((box.modelYawDeg ?? 0) + 90) % 360 || undefined);
+    }
+    this.change(next);
+  }
+
+  /** "Fit box to model": each selected box with a loaded model shrinks to the model's footprint (its collision and cover change). */
+  private fitBoxesToModels(): void {
+    let next = this.data;
+    let waiting = 0;
+    for (const id of this.selectedBoxIds()) {
+      const box = picked(next, id) as LevelBox;
+      const model = box.model ? this.models.get(box.model) : undefined;
+      if (!model) {
+        if (box.model) waiting++;
+        continue;
+      }
+      const size = boxSizeFittedToModel(box, model.bounds, box.modelYawDeg ?? 0, minBoxSizeM);
+      next = setField(setField(setField(next, id, 'widthM', size.widthM), id, 'depthM', size.depthM), id, 'heightM', size.heightM);
+    }
+    this.change(next);
+    if (waiting > 0) this.message = `${waiting} box${waiting === 1 ? "'s model has" : "es' models have"} not loaded, so ${waiting === 1 ? 'it was' : 'they were'} left as ${waiting === 1 ? 'it was' : 'they were'}`;
+  }
+
+  /** Starts loading a model the editor wants to draw; once it is in, the boxes that use it are redrawn with it. */
+  private requestModel(name: string): void {
+    if (this.models.has(name) || this.modelErrors.has(name) || this.modelsLoading.has(name)) return;
+    this.modelsLoading.add(name);
+    loadModel(name)
+      .then(
+        (model) => void this.models.set(name, model),
+        (error: unknown) => void this.modelErrors.set(name, error instanceof Error ? error.message : 'the file could not be read'),
+      )
+      .finally(() => {
+        this.modelsLoading.delete(name);
+        if (!this.group.visible) return;
+        for (const box of this.data.boxes) if (box.model === name) this.rebuildMesh(box.id);
+      });
+  }
+
+  /** The readout's line about the main box's model: its triangles and size against the asset rules, or why it is grey. */
+  private modelLine(box: LevelBox): string {
+    const name = box.model!;
+    const model = this.models.get(name);
+    const error = this.modelErrors.get(name);
+    const file = this.kitFiles?.find((kitFile) => kitPrefix + kitFile.path === name);
+    const parts = [`${name}${box.modelYawDeg ? `, turned ${box.modelYawDeg} deg in its box` : ''}`];
+    if (error) parts.push(`could not load (${error}), drawn grey`);
+    else if (!model) parts.push('loading...');
+    else parts.push(`${model.triangles} triangles${model.triangles > propTriangleBudget ? ` (OVER the ${propTriangleBudget} budget)` : ''}`);
+    if (file) parts.push(`${(file.bytes / 1e6).toFixed(2)} MB with its files${file.texturePx > 0 ? `, textures up to ${file.texturePx} px${file.texturePx > maxTexturePx ? ` (OVER ${maxTexturePx}: would need shrinking)` : ''}` : ''}`);
+    return parts.join(', ');
+  }
+
+  /** A box as the editor draws it: its model with the box's outline (the real collision), or the grey box while there is no model. */
+  private boxView(box: LevelBox, selected: boolean): THREE.Object3D {
+    const model = drawsModel(box) ? this.models.get(box.model!) : undefined;
+    if (!model) {
+      if (drawsModel(box)) this.requestModel(box.model!);
+      return boxMesh(box, selected);
+    }
+    const holder = new THREE.Group();
+    const matrix = modelMatrix(box, model.bounds, box.modelYawDeg ?? 0);
+    for (const part of model.parts) {
+      const mesh = new THREE.Mesh(part.geometry, part.material);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix.copy(matrix);
+      mesh.userData.shared = true; // the loaded model's geometry and materials are kept for the next redraw
+      holder.add(mesh);
+    }
+    holder.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeometry(box)), new THREE.LineBasicMaterial({ color: selected ? colours.selected : colours.outline })));
+    return holder;
+  }
+
   // ---- The reach preview (5.2b).
 
   /** Builds a layout's walkable floor for the enemies and for Rook on foot, and what cannot be reached in it. */
@@ -572,7 +747,7 @@ export class EditMode {
     const where = locate(this.data, id);
     if (!item || !where) return null;
     const selected = this.selection.includes(id);
-    if (where.list === 'boxes') return boxMesh(item as LevelBox, selected);
+    if (where.list === 'boxes') return this.boxView(item as LevelBox, selected);
     const colour = where.list === 'start' ? colours.start : where.list === 'dummies' ? colours.dummy : roleColours[(item as LevelSpot & { role: keyof typeof roleColours }).role];
     return markerMesh(item as LevelSpot, colour, selected);
   }
@@ -637,6 +812,9 @@ export class EditMode {
       }
       this.fieldControllers.push(folder.add(values, 'group').name('group (a folder in the list)').onFinishChange((v: string) => set('group', v.trim() === '' ? undefined : v.trim())));
       this.fieldControllers.push(folder.add(values, 'kind', ['prop', 'wall']).onChange((v: string) => set('kind', v)));
+      this.fieldControllers.push(folder.add({ go: () => this.turnModels() }, 'go').name('Turn the model 90 deg in its box'));
+      this.fieldControllers.push(folder.add({ go: () => this.fitBoxesToModels() }, 'go').name('Fit the box to its model'));
+      this.fieldControllers.push(folder.add({ go: () => this.clearModels() }, 'go').name('No model (grey box)'));
       if (!many) {
         for (const field of ['xM', 'zM', 'widthM', 'depthM', 'heightM']) number(field);
         this.fieldControllers.push(folder.add(values, 'yM').step(0.05).name('yM (off the floor)').onFinishChange((v: number) => set('yM', v > 0 ? v : undefined)));
@@ -713,6 +891,7 @@ function markerMesh(spot: LevelSpot, colour: number, selected: boolean): THREE.O
 
 function disposeMesh(object: THREE.Object3D): void {
   for (const child of object.children) disposeMesh(child);
+  if (object.userData.shared) return; // part of a loaded model, drawn again later
   const mesh = object as Partial<THREE.Mesh>;
   mesh.geometry?.dispose();
   const material = mesh.material as THREE.Material | THREE.Material[] | undefined;

@@ -50,7 +50,8 @@ export function boxGeometry(box: RoomBox): THREE.BufferGeometry {
 const isDrawn = (box: RoomBox) => box.drawn !== false;
 const isSolid = (box: RoomBox) => box.solid !== false;
 
-export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: RoomLayout = greyboxLayout): GreyboxLevel {
+/** `modelled`: boxes drawn as a model instead (5.5b, src/level/models.ts); they still collide and stay on the navigation mesh. */
+export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: RoomLayout = greyboxLayout, modelled: ReadonlySet<RoomBox> = new Set()): GreyboxLevel {
   const { size, floors, hazards } = layout;
   const group = new THREE.Group();
   const geometries = boxes.map(boxGeometry);
@@ -65,6 +66,7 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   boxes.forEach((box, index) => {
     if (!isDrawn(box)) return; // a stair's ramp: walked on, not seen
     if (box.glass) return; // glass is drawn pane by pane below, so a broken one can disappear
+    if (modelled.has(box)) return;
     looks.set(box.kind, [...(looks.get(box.kind) ?? []), geometries[index]]);
   });
   for (const [look, parts] of looks) {

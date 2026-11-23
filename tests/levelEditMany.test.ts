@@ -99,7 +99,7 @@ describe('the editor list and groups', () => {
   it('a version 2 file (no groups) still loads, and is written as the current version', () => {
     const old = { ...level(), formatVersion: 2 };
     for (const b of old.boxes) delete b.group;
-    expect(checkLevel(JSON.parse(JSON.stringify(old))).formatVersion).toBe(4);
+    expect(checkLevel(JSON.parse(JSON.stringify(old))).formatVersion).toBe(5);
   });
 });
 

@@ -5,6 +5,7 @@ import { Loop } from './core/loop';
 import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
+import { drawBoxModels, loadLevelModels, modelledBoxes } from './level/models';
 import { Navigation } from './level/navigation';
 import { GlassSystem } from './level/glassSystem';
 import { CoverPoints, levelCover } from './level/cover';
@@ -103,7 +104,12 @@ scene.add(sun);
 // (decision 236) instead, for comparing the AI between the two.
 const levelData = import.meta.env.DEV && new URLSearchParams(location.search).get('level') === 'test-arena' ? testArenaLevel : chamberLevel;
 const levelFloor = levelLayout(levelData);
-const level = buildGreybox(levelData.boxes, levelFloor);
+// The boxes' models (5.5b) load before the first frame; a box whose model cannot load is drawn grey.
+const levelModels = await loadLevelModels(levelData.boxes);
+const level = buildGreybox(levelData.boxes, levelFloor, new Set(modelledBoxes(levelData.boxes, levelModels)));
+const levelModelMeshes = drawBoxModels(levelData.boxes, levelModels);
+if (levelModelMeshes.length > 0) level.group.add(...levelModelMeshes);
+level.boxMeshes.push(...levelModelMeshes); // hidden with the grey boxes while the editor draws its own copy
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
 // A room with floor-standing glass (5.4) gets a mesh that can open a gap when a pane breaks; one without is as before.
