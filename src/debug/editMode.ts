@@ -35,6 +35,7 @@ import { normalYawDeg } from '../level/boxShape';
 import { levelNameHeader, levelSaveUrl } from '../level/levelSave';
 import { Navigation } from '../level/navigation';
 import { describeReach, newSince, reachProblems, type ReachProblem } from '../level/reach';
+import { AssetBrowser, type KitFile } from './assetBrowser';
 import { GizmoView } from './gizmoView';
 
 // The in-game level editor (milestone 5.2, decision 273; 5.2b, decision 281; 5.2c, decision 285), dev server only. F2 turns
@@ -60,15 +61,6 @@ const placeAheadM = 4;
 /** The reach check runs this long after the last change (so a run of key presses builds once). */
 const previewAfterSec = 0.3;
 const colours = { wall: 0x4a4f55, prop: 0x8a9097, glass: 0x7fc8e8, hidden: 0xb79cff, start: 0x33dd66, dummy: 0xe8e8e8, selected: 0xffc23d, outline: 0xffffff } as const;
-/** The model chooser shows this many matches; typing narrows the rest. */
-const maxModelRows = 60;
-
-/** A model file in the kits folder, as the dev server lists it (vite.config.ts): its size with every file it uses, and its biggest texture. */
-interface KitFile {
-  path: string;
-  bytes: number;
-  texturePx: number;
-}
 const roleColours = { trooper: 0x6b7f3a, flanker: 0x9fb4c8, heavy: 0x222222, leader: 0x8a2a2a } as const;
 const previewColours = { mesh: 0x3fd0ff, problem: 0xff2a2a } as const;
 const keyHelp =
@@ -139,9 +131,12 @@ export class EditMode {
   private readonly models = new Map<string, LoadedModel>();
   private readonly modelErrors = new Map<string, string>();
   private readonly modelsLoading = new Set<string>();
-  private readonly modelBox = document.createElement('div');
-  private readonly modelListBody = document.createElement('div');
-  private modelSearch = '';
+  /** The asset browser window (5.2d part B): pictures of the kits' models, put on the selected boxes. */
+  private readonly browser = new AssetBrowser({
+    files: () => this.kitFiles,
+    selectedBoxes: () => this.selectedBoxIds().length,
+    apply: (model) => this.change(setFieldMany(this.data, this.selectedBoxIds(), 'model', model)),
+  });
 
   constructor(private readonly parts: Parts) {
     this.data = parts.level;
@@ -168,10 +163,9 @@ export class EditMode {
     this.panel.add({ del: () => this.removePick() }, 'del').name('Delete (Del)');
     this.panel.add({ mode: () => this.switchGizmo() }, 'mode').name('Arrows or size handles (M)');
     this.panel.add(this.previewGroup, 'visible').name('Show the reach preview');
+    this.panel.add({ open: () => this.browser.toggle() }, 'open').name('Asset browser: models (B)');
     this.selectedFolder = this.panel.addFolder('Selected');
-    this.selectedFolder.$children.prepend(this.buildModelChooser());
     this.refreshList();
-    this.refreshModelList();
   }
 
   toggle(on: boolean): void {
@@ -182,6 +176,7 @@ export class EditMode {
     if (!on) {
       this.endHandleDrag();
       this.gizmo.hide();
+      this.browser.hide();
     }
     if (on && this.baseline === null) void this.measureBaseline();
     if (on && this.kitFiles === null) void this.loadKitList();
@@ -229,6 +224,7 @@ export class EditMode {
     if (this.handleDrag) return; // everything else waits until the drag is over
     if (input.consumePress('KeyU')) this.undo();
     if (input.consumePress('KeyM')) this.switchGizmo();
+    if (input.consumePress('KeyB')) this.browser.toggle();
     if (this.selection.length === 0) return;
     const step = shift ? bigStepM : stepM;
     // Arrows move along the floor axis nearest to where you look, so "up" is always away from you.
@@ -342,7 +338,6 @@ export class EditMode {
     this.redraw();
     this.showFields();
     this.refreshList();
-    this.refreshModelList();
   }
 
   /** A change: remembered for undo, then drawn. `selection` replaces the selection if given. */
@@ -359,7 +354,6 @@ export class EditMode {
     this.redraw();
     this.showFields();
     this.refreshList();
-    this.refreshModelList();
     this.previewLeftSec = previewAfterSec;
   }
 
@@ -491,24 +485,7 @@ export class EditMode {
     return this.selection.filter((id) => locate(this.data, id)?.list === 'boxes');
   }
 
-  /** The model chooser at the top of "Selected": a search box and the kits' model files; a click puts that model on every selected box. */
-  private buildModelChooser(): HTMLElement {
-    this.modelBox.style.cssText = listStyle;
-    const title = document.createElement('div');
-    title.textContent = 'Model (from the kits folder; the box stays the collision)';
-    const search = document.createElement('input');
-    search.type = 'search';
-    search.placeholder = 'search models (name or kit, several words)';
-    search.style.cssText = 'width:100%;box-sizing:border-box;margin:4px 0';
-    search.addEventListener('input', () => {
-      this.modelSearch = search.value;
-      this.refreshModelList();
-    });
-    this.modelListBody.style.cssText = 'max-height:180px;overflow-y:auto';
-    this.modelBox.append(title, search, this.modelListBody);
-    return this.modelBox;
-  }
-
+  /** Asks the dev server for the kits' model files (once, when the editor first opens); the asset browser shows them. */
   private async loadKitList(): Promise<void> {
     try {
       const response = await fetch(kitListUrl);
@@ -516,37 +493,7 @@ export class EditMode {
     } catch {
       this.kitFiles = [];
     }
-    this.refreshModelList();
-  }
-
-  /** The chooser's rows for the current search; shown only while a box is selected. */
-  private refreshModelList(): void {
-    const boxIds = this.selectedBoxIds();
-    this.modelBox.style.display = boxIds.length > 0 ? 'block' : 'none';
-    this.modelListBody.replaceChildren();
-    if (boxIds.length === 0) return;
-    if (this.kitFiles === null) {
-      this.modelListBody.textContent = 'listing the kits...';
-      return;
-    }
-    if (this.kitFiles.length === 0) {
-      this.modelListBody.textContent = 'no model files found in the kits folder (see vite.config.ts)';
-      return;
-    }
-    const main = picked(this.data, boxIds[boxIds.length - 1]) as LevelBox | undefined;
-    const words = this.modelSearch.toLowerCase().split(/\s+/).filter((word) => word !== '');
-    const matches = this.kitFiles.filter((file) => words.every((word) => file.path.toLowerCase().includes(word)));
-    for (const file of matches.slice(0, maxModelRows)) {
-      const name = kitPrefix + file.path;
-      const row = document.createElement('div');
-      row.textContent = `${file.path} (${(file.bytes / 1e6).toFixed(1)} MB)`;
-      row.title = name;
-      row.style.cssText = `cursor:pointer;padding:1px 4px;${main?.model === name ? selectedRowStyle : ''}`;
-      row.addEventListener('click', () => this.change(setFieldMany(this.data, boxIds, 'model', name)));
-      this.modelListBody.append(row);
-    }
-    if (matches.length > maxModelRows) this.modelListBody.append(`${matches.length - maxModelRows} more: type to narrow the list`);
-    if (matches.length === 0) this.modelListBody.append('no match');
+    this.browser.refresh();
   }
 
   /** Takes the model off every selected box: they are grey boxes again. */

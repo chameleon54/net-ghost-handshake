@@ -31,18 +31,34 @@ const loaded = new Map<string, Promise<LoadedModel>>();
 export function loadModel(name: string): Promise<LoadedModel> {
   let model = loaded.get(name);
   if (!model) {
-    model = load(name);
+    model = loadModelOnce(name);
     loaded.set(name, model);
   }
   return model;
 }
 
-async function load(name: string): Promise<LoadedModel> {
+/** True if the model was already asked for through `loadModel` (it is kept, so it must not be freed). */
+export const isModelKept = (name: string): boolean => loaded.has(name);
+
+/** Frees a model loaded with `loadModelOnce`: its geometry, materials and their textures. */
+export function disposeModel(model: LoadedModel): void {
+  for (const part of model.parts) {
+    part.geometry.dispose();
+    for (const material of [part.material].flat()) {
+      for (const value of Object.values(material)) if (value instanceof THREE.Texture) value.dispose();
+      material.dispose();
+    }
+  }
+}
+
+/** Loads a model without keeping it (the editor's asset browser draws a picture of it, then frees it with `disposeModel`). */
+export async function loadModelOnce(name: string): Promise<LoadedModel> {
   const url = modelUrl(name);
   if (!url) throw new Error(`There is no model file for "${name}"`);
   const root = /\.obj$/i.test(url) ? await loadObj(url) : (await new GLTFLoader().loadAsync(url)).scene;
   return flattenModel(root);
 }
+
 
 /** An OBJ file (only some kits come without glTF), with the materials of the .mtl beside it if there is one. Its loaders are fetched only when needed. */
 async function loadObj(url: string): Promise<THREE.Object3D> {

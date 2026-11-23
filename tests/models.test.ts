@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RoomBox } from '../src/data/greyboxRoom';
 import { checkLevel, LevelError, levelToJson } from '../src/level/levelData';
 import { boxSizeFittedToModel, fitScale, gameModelPattern, isKitModel, modelMatrix } from '../src/level/modelFit';
-import { drawBoxModels, flattenModel } from '../src/level/models';
+import { disposeModel, drawBoxModels, flattenModel } from '../src/level/models';
 
 // Models on boxes (5.5b, decision 287): the model is fitted inside its box, and the level files only use game models.
 
@@ -84,6 +84,20 @@ describe('loaded models', () => {
     const [mesh] = drawBoxModels([box], new Map([['kit:a/b.glb', model]]));
     expect(Object.keys(mesh.geometry.morphAttributes)).toEqual([]);
     expect(mesh.morphTargetInfluences).toBeUndefined();
+  });
+});
+
+describe('freeing a model drawn only for its picture (the asset browser, 5.2d)', () => {
+  it('frees its geometry, its materials and their textures', () => {
+    const texture = new THREE.Texture();
+    const material = new THREE.MeshStandardMaterial({ map: texture });
+    const model = flattenModel(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material));
+    const freed: string[] = [];
+    model.parts[0].geometry.addEventListener('dispose', () => freed.push('geometry'));
+    material.addEventListener('dispose', () => freed.push('material'));
+    texture.addEventListener('dispose', () => freed.push('texture'));
+    disposeModel(model);
+    expect(freed.sort()).toEqual(['geometry', 'material', 'texture']);
   });
 });
 
