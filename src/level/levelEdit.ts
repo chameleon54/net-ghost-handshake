@@ -4,6 +4,7 @@ import { unusedId, type LevelBox, type LevelData, type LevelSpot } from './level
 // deleting and adding, and undo. Each takes a level and returns a new one (the old one is left as it was, which is what
 // undo keeps). Plain functions, no drawing, so they can be tested; src/debug/editMode.ts drives them in game.
 // Since 5.2b (decision 281) a selection is the item's id, so it never points at the wrong thing after a delete or undo.
+// Since 5.2c (decision 285) a selection is a list of ids, and the `...Many` functions edit all of them as one change.
 
 /** What is selected: the id of a box, a dummy, an enemy spawn, or Rook's start. */
 export type Pick = string;
@@ -182,6 +183,87 @@ export function setField(level: LevelData, id: Pick, field: string, value: unkno
     else next[field] = value;
     return next;
   });
+}
+
+// ---- Many pieces at once (5.2c, decision 285). Each applies the single-item operation to every id in turn, so the editor
+// pushes the level once and the whole thing is one undo step. An id that is gone is skipped.
+
+/** Moves every selected item by (dx, dy, dz). */
+export function moveMany(level: LevelData, ids: readonly Pick[], dx: number, dy: number, dz: number): LevelData {
+  return ids.reduce((next, id) => moveBy(next, id, dx, dy, dz), level);
+}
+
+/** Turns every selected item 90 degrees, each around its own centre. */
+export function turnMany(level: LevelData, ids: readonly Pick[]): LevelData {
+  return ids.reduce((next, id) => turn(next, id), level);
+}
+
+/** Sets one field of every selected item. `undefined` takes an optional field out. */
+export function setFieldMany(level: LevelData, ids: readonly Pick[], field: string, value: unknown): LevelData {
+  return ids.reduce((next, id) => setField(next, id, field, value), level);
+}
+
+/** The level without the selected items (Rook's start is left alone); null if there was nothing to remove. */
+export function removeMany(level: LevelData, ids: readonly Pick[]): LevelData | null {
+  let next = level;
+  for (const id of ids) next = remove(next, id) ?? next;
+  return next === level ? null : next;
+}
+
+/** A copy of each selected item (not Rook's start), 1 m east; the copies are the new selection. Null if nothing could be copied. */
+export function duplicateMany(level: LevelData, ids: readonly Pick[]): { level: LevelData; picks: Pick[] } | null {
+  let next = level;
+  const picks: Pick[] = [];
+  for (const id of ids) {
+    const copy = duplicate(next, id);
+    if (!copy) continue;
+    next = copy.level;
+    picks.push(copy.pick);
+  }
+  return picks.length > 0 ? { level: next, picks } : null;
+}
+
+/** One line of the editor's list: an item's id and what to call it. */
+export interface ListEntry {
+  id: Pick;
+  label: string;
+}
+
+/** A folder of the editor's list: the boxes that share a `group`, or the two folders for the rest. */
+export interface ListGroup {
+  name: string;
+  entries: ListEntry[];
+}
+
+export const noGroupName = '(no group)';
+export const markersGroupName = '(markers)';
+
+/**
+ * What the editor's list shows: every box and marker whose label, id or group contains `search` (any case), in folders:
+ * the named groups in alphabetical order, then the boxes with no group, then the markers. An empty folder is left out.
+ */
+export function listGroups(level: LevelData, search: string): ListGroup[] {
+  const needle = search.trim().toLowerCase();
+  const matches = (...texts: (string | undefined)[]) => needle === '' || texts.some((text) => text?.toLowerCase().includes(needle));
+  const named = new Map<string, ListEntry[]>();
+  const loose: ListEntry[] = [];
+  for (const box of level.boxes) {
+    if (!matches(box.label, box.id, box.group)) continue;
+    const entry = { id: box.id, label: box.label };
+    if (box.group) named.set(box.group, [...(named.get(box.group) ?? []), entry]);
+    else loose.push(entry);
+  }
+  const markers: ListEntry[] = [];
+  const marker = (id: string, label: string) => {
+    if (matches(label, id)) markers.push({ id, label });
+  };
+  marker(level.start.id, "Rook's start");
+  level.dummies.forEach((spot) => marker(spot.id, 'dummy'));
+  level.spawns.forEach((spot) => marker(spot.id, `enemy spawn (${spot.role})`));
+  const groups: ListGroup[] = [...named.keys()].sort().map((name) => ({ name, entries: named.get(name)! }));
+  if (loose.length > 0) groups.push({ name: noGroupName, entries: loose });
+  if (markers.length > 0) groups.push({ name: markersGroupName, entries: markers });
+  return groups;
 }
 
 /**

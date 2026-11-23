@@ -7,14 +7,19 @@ import type { CoverPoint } from './cover';
 // dev server's edit mode. `formatVersion` lets the format grow. Some lists are reserved: typed and checked now, used later
 // (glass in 5.4, acoustic zones in 7d, the announcer's speakers, wave arrival areas in 7.1). No drawing here.
 
-/** Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; a version 1 file still loads and gets them. */
-export const levelFormatVersion = 2;
+/**
+ * Version 2 (5.2b, decision 281) gave the start, dummies and spawns an `id`; version 3 (5.2c, decision 285) lets a box carry
+ * a `group`. A file of version 1 or 2 still loads (a version 1 file gets the ids) and is written back as version 3.
+ */
+export const levelFormatVersion = 3;
 
 /** A box in the level: a wall or a piece of equipment. `id` is unique in the level; `label` says what it is ("prep bench A"). */
 export interface LevelBox extends RoomBox {
   id: string;
   label: string;
   kind: 'wall' | 'prop';
+  /** A folder for the editor's list ("ring", "core"); only the editor uses it (5.2c). Left out: no group. */
+  group?: string;
 }
 
 /** Where something stands and which way it faces, in degrees (0 = north, -z; 90 = west: positive turns left, as the player's yaw). */
@@ -181,6 +186,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   const ramp = r.optional(o.ramp, () => r.oneOf(o.ramp, `${path}.ramp`, rampRises));
   const drawn = r.flag(o.drawn, `${path}.drawn`);
   const solid = r.flag(o.solid, `${path}.solid`);
+  const group = r.optional(o.group, () => r.text(o.group, `${path}.group`));
   if (yM !== undefined) box.yM = yM;
   if (climbable !== undefined) box.climbable = climbable;
   if (surface !== undefined) box.surface = surface;
@@ -188,6 +194,7 @@ function readBox(r: Reader, value: unknown, path: string): LevelBox {
   if (ramp !== undefined) box.ramp = ramp;
   if (drawn !== undefined) box.drawn = drawn;
   if (solid !== undefined) box.solid = solid;
+  if (group !== undefined) box.group = group;
   if (drawn === false && solid === false) r.problems.push(`${path} is neither drawn nor solid, so it does nothing`);
   return box;
 }
@@ -213,7 +220,7 @@ export function checkLevel(raw: unknown): LevelData {
   const r = new Reader();
   const o = r.object(raw, 'level');
   const version = r.number(o.formatVersion, 'formatVersion');
-  if (version !== 1 && version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be 1 or ${levelFormatVersion} (this game reads both)`);
+  if (version !== 1 && version !== 2 && version !== levelFormatVersion && r.problems.length === 0) r.problems.push(`formatVersion must be 1, 2 or ${levelFormatVersion} (this game reads all of them)`);
   const name = r.text(o.name, 'name');
   if (!levelNamePattern.test(name)) r.problems.push('name must be lowercase letters, digits and hyphens (it is also the file name)');
   const floorIn = r.object(o.floor, 'floor');
@@ -228,7 +235,7 @@ export function checkLevel(raw: unknown): LevelData {
   };
   const boxes = r.list(o.boxes, 'boxes').map((b, i) => readBox(r, b, `boxes[${i}]`));
   const level: LevelData = {
-    formatVersion: levelFormatVersion, // a version 1 file is upgraded as it is read: it gains the markers' ids
+    formatVersion: levelFormatVersion, // an older file is upgraded as it is read (a version 1 file gains the markers' ids)
     name,
     floor,
     start: r.spot(o.start, 'start'),
