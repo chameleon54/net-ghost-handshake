@@ -52,6 +52,8 @@ export const soundNames = [
   'pickup',
   'enemy-pistol-fire',
   'enemy-mg-fire',
+  'glass-crack',
+  'glass-break',
 ] as const;
 
 export type SoundName = (typeof soundNames)[number];
@@ -350,6 +352,34 @@ export const recipes: Record<SoundName, Recipe> = {
       thunk(s, sr, 0, 0.5, between(rng, 140, 180), 80);
       addNoise(s, sr, { duration: 0.02, decay: 0.004, gain: 0.3, highpass: 4000, rng });
       return finish(s, sr, { peak: 0.6 });
+    },
+  },
+  // Glass (5.4): a bullet going through a whole pane makes a short, bright crack; a pane shattering is a sharp burst with a
+  // shower of small tinkles after it.
+  'glass-crack': {
+    group: 'impact',
+    variants: 3,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.25);
+      addNoise(s, sr, { duration: 0.03, decay: 0.007, gain: 0.9, highpass: between(rng, 3500, 5000), attack: 0.0002, rng });
+      addTone(s, sr, { duration: 0.2, freq: between(rng, 3200, 4600), decay: 0.05, gain: 0.35 });
+      addTone(s, sr, { start: 0.012, duration: 0.15, freq: between(rng, 5200, 6800), decay: 0.035, gain: 0.25 });
+      return finish(s, sr, { peak: 0.7 });
+    },
+  },
+  'glass-break': {
+    group: 'impact',
+    variants: 3,
+    make: (sr, rng) => {
+      const s = createSamples(sr, 0.9);
+      addNoise(s, sr, { duration: 0.06, decay: 0.014, gain: 1.0, highpass: between(rng, 2500, 3500), attack: 0.0002, rng });
+      addNoise(s, sr, { start: 0.01, duration: 0.4, decay: 0.12, gain: 0.55, highpass: 1800, lowpass: 9000, rng });
+      thunk(s, sr, 0, 0.35, between(rng, 160, 220), 90);
+      for (let i = 0; i < 9; i++) {
+        const start = 0.05 + rng() * 0.5;
+        addTone(s, sr, { start, duration: 0.14, freq: between(rng, 3000, 7500), decay: 0.03, gain: 0.18 + rng() * 0.15 });
+      }
+      return finish(s, sr, { peak: 0.9, drive: 1.6 });
     },
   },
   // Brass bouncing on a hard floor: a small, high ring.

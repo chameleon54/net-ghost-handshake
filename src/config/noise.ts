@@ -21,6 +21,8 @@ export const noiseConfigDefaults = {
   /** A grenade bouncing, and its blast. */
   grenadeBounceM: 8,
   grenadeBlastM: 80,
+  /** A pane of glass shattering (5.4): about like a bullet impact. */
+  glassBreakM: 15,
   /** Footsteps (milestone 3.4): crouching is close to silent, sprinting is loud (gameplay.md). */
   walkStepM: 6,
   crouchStepM: 2,

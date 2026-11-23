@@ -19,4 +19,7 @@ export const navigationConfig = {
   /** How far around a point (sideways, and up or down) to look for the mesh when a point is off it, such as Rook on a crate. */
   searchSidewaysM: 2,
   searchUpDownM: 0.5,
+  /** A room with breakable floor glass (5.4) is built in tiles this many cells across (the library suggests 32 to 64), and each tile may hold this many floors (storeys). */
+  tileSizeCells: 48,
+  layersPerTile: 4,
 } as const;

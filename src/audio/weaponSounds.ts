@@ -127,6 +127,9 @@ export class WeaponSounds {
     events.on('shot:landed', ({ hit, end }) => {
       if (hit) this.player.play('impact', { position: end, rate: this.rate() }); // a bullet in a wall or the floor, where it landed
     });
+    // Glass (5.4): a crack for each bullet through a whole pane, the shatter when it breaks, both from where it was hit.
+    events.on('glass:cracked', ({ position }) => this.player.play('glass-crack', { position, rate: this.rate(), note: 'glass cracks' }));
+    events.on('glass:broken', ({ position }) => this.player.play('glass-break', { position, rate: this.rate(), note: 'glass shatters' }));
     events.on('grenade:pin', () => this.play('grenade-pin'));
     events.on('grenade:thrown', () => this.play('grenade-throw'));
     events.on('grenade:bounced', ({ position, speedMps }) => {

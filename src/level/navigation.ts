@@ -1,11 +1,13 @@
-import { Vector3, type BufferGeometry } from 'three';
-import { getNavMeshPositionsAndIndices, init, NavMeshQuery, type NavMesh } from 'recast-navigation';
-import { generateSoloNavMesh } from 'recast-navigation/generators';
+import { Vector3, type Box3, type BufferGeometry } from 'three';
+import { getNavMeshPositionsAndIndices, init, NavMeshQuery, type NavMesh, type Obstacle, type TileCache } from 'recast-navigation';
+import { generateSoloNavMesh, generateTileCache } from 'recast-navigation/generators';
 import { navigationConfig } from '../config/navigation';
 
 /** Metres to whole grid cells, rounding up so the margin is never smaller than asked. */
 /** A path that ends this close to its goal is good enough: the other height is not tried. */
 const nearEnoughM = 0.5;
+/** Obstacle slots kept free beyond the panes, for a pane put back while others are still being rebuilt. */
+const obstacleSpare = 4;
 /** Recast puts the mesh one cell height above the real floor; heights going in and out of this class are real floor heights. */
 const meshLiftM = navigationConfig.cellHeightM;
 
@@ -17,16 +19,33 @@ const cells = (metres: number, cellM: number): number => Math.ceil(metres / cell
 // and Godot use. No drawing code here; the dev overlay draws `triangles()`.
 // The library treats a prop as hollow, so the floor sealed inside one taller than an enemy (the 1.9 m platform) becomes a
 // patch of its own. Nothing can reach it, and a path aimed there stops at the nearest floor that can be reached, so it is harmless.
-// shortcut: one mesh for the whole room, built once (a "solo" mesh). Glass that breaks open (phase 5) needs a tile cache,
-// which rebuilds only the part that changed.
+// A room without floor-standing glass is one mesh built once (a "solo" mesh). A room with some (5.4) is built as a tile
+// cache instead, with each pane an obstacle in it: breaking a pane removes its obstacle and only the tiles around it are
+// rebuilt (about 0.5 ms), so the gap becomes a route in the middle of a fight. The two meshes are not identical (a few routes
+// differ by a metre or two), so a room without such glass keeps the solo mesh and its tuned routes.
+/** A pane the mesh must be able to open: where it stands (the obstacle is its box, grown by the body's radius). */
+export interface NavigationPane {
+  readonly id: string;
+  readonly bounds: Box3;
+}
+/** The most rounds of tile rebuilding one change gets; a pane touches a handful of tiles, so a few rounds finish it. */
+const maxTileCacheRounds = 20;
+/** Extra height the obstacle has above and below its pane, so it cannot miss by a rounding error. */
+const obstacleSlackM = 0.1;
+
 export class Navigation {
   private readonly searchBox = { x: navigationConfig.searchSidewaysM, y: navigationConfig.searchUpDownM, z: navigationConfig.searchSidewaysM };
   private readonly floorPoint = { x: 0, y: 0, z: 0 };
 
   /** `null` when the library could not start: then there is no mesh, and no path is ever found. */
+  private readonly obstacles = new Map<string, Obstacle>();
+
   private constructor(
     private readonly navMesh: NavMesh | null,
     private readonly query: NavMeshQuery | null,
+    private readonly tileCache: TileCache | null = null,
+    private readonly panes: readonly NavigationPane[] = [],
+    private readonly obstacleGrowM = 0,
   ) {}
 
   /** A navigation with no mesh, for when the library fails to start: every path and floor query fails (decision 219). */
@@ -36,9 +55,10 @@ export class Navigation {
 
   /**
    * Starts the library (once) and builds the mesh from `geometry`, which must include the floor. `body` changes who it is
-   * for (the level editor's check for Rook on foot, 5.2b, uses his crouched height); left out, an enemy.
+   * for (the level editor's check for Rook on foot, 5.2b, uses his crouched height); left out, an enemy. With `panes`, the
+   * geometry must leave them out: they are added as obstacles that `openPane` takes away (5.4).
    */
-  static async create(geometry: BufferGeometry, body: { readonly agentRadiusM?: number; readonly agentHeightM?: number } = {}): Promise<Navigation> {
+  static async create(geometry: BufferGeometry, body: { readonly agentRadiusM?: number; readonly agentHeightM?: number } = {}, panes: readonly NavigationPane[] = []): Promise<Navigation> {
     await init(); // the library's WebAssembly must start first; later calls return at once
     const { cellSizeM: cs, cellHeightM: ch, agentStepM, maxSlopeDeg } = navigationConfig;
     const agentRadiusM = body.agentRadiusM ?? navigationConfig.agentRadiusM;
@@ -46,16 +66,58 @@ export class Navigation {
     const positions = geometry.getAttribute('position').array;
     const indices = geometry.getIndex()?.array;
     if (!indices) throw new Error('The navigation geometry needs an index');
-    const result = generateSoloNavMesh(positions, indices, {
+    const settings = {
       cs,
       ch,
       walkableRadius: cells(agentRadiusM, cs),
       walkableHeight: cells(agentHeightM, ch),
       walkableClimb: Math.floor(agentStepM / ch), // rounded down: never a step higher than asked
       walkableSlopeAngle: maxSlopeDeg,
-    });
+    };
+    if (panes.length === 0) {
+      const result = generateSoloNavMesh(positions, indices, settings);
+      if (!result.success) throw new Error(`Could not build the navigation mesh: ${result.error}`);
+      return new Navigation(result.navMesh, new NavMeshQuery(result.navMesh));
+    }
+    const result = generateTileCache(positions, indices, { ...settings, tileSize: navigationConfig.tileSizeCells, expectedLayersPerTile: navigationConfig.layersPerTile, maxObstacles: panes.length + obstacleSpare });
     if (!result.success) throw new Error(`Could not build the navigation mesh: ${result.error}`);
-    return new Navigation(result.navMesh, new NavMeshQuery(result.navMesh));
+    const navigation = new Navigation(result.navMesh, new NavMeshQuery(result.navMesh), result.tileCache, panes, agentRadiusM);
+    for (const pane of panes) navigation.addObstacle(pane);
+    navigation.rebuildTiles();
+    return navigation;
+  }
+
+  /** A broken pane is a gap: takes its obstacle away so routes may go through it. Does nothing for a pane the mesh does not know. */
+  openPane(id: string): void {
+    const obstacle = this.obstacles.get(id);
+    if (!obstacle || !this.tileCache) return;
+    this.tileCache.removeObstacle(obstacle);
+    this.obstacles.delete(id);
+    this.rebuildTiles();
+  }
+
+  /** A pane whole again (a new run): puts its obstacle back. */
+  closePane(id: string): void {
+    const pane = this.panes.find((candidate) => candidate.id === id);
+    if (!pane || !this.tileCache || this.obstacles.has(id)) return;
+    this.addObstacle(pane);
+    this.rebuildTiles();
+  }
+
+  private addObstacle(pane: NavigationPane): void {
+    const { min, max } = pane.bounds;
+    const added = this.tileCache!.addBoxObstacle(
+      { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2 + meshLiftM, z: (min.z + max.z) / 2 },
+      { x: (max.x - min.x) / 2 + this.obstacleGrowM, y: (max.y - min.y) / 2 + obstacleSlackM, z: (max.z - min.z) / 2 + this.obstacleGrowM }, // the mesh is already kept off walls by the body's radius; an obstacle is not, so it is grown by hand
+      0,
+    );
+    if (!added.success) throw new Error(`Could not add the glass pane ${pane.id} to the navigation mesh`);
+    this.obstacles.set(pane.id, added.obstacle);
+  }
+
+  /** Lets the tile cache rebuild the tiles an added or removed obstacle touched. */
+  private rebuildTiles(): void {
+    for (let round = 0; round < maxTileCacheRounds; round++) if (this.tileCache!.update(this.navMesh!).upToDate) return;
   }
 
   /**
@@ -100,6 +162,7 @@ export class Navigation {
   /** Frees the mesh (the library's memory is not freed by itself). For the level editor's previews, rebuilt after each edit. */
   dispose(): void {
     this.query?.destroy();
+    this.tileCache?.destroy();
     this.navMesh?.destroy();
   }
 

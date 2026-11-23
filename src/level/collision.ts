@@ -41,9 +41,18 @@ export class LevelCollision {
   private readonly ray = new Ray();
   private readonly contact: Contact = { up: false, down: false };
 
+  /** What bodies bump into: the level, plus the panes of glass still whole (5.4). Rays do not see the glass: sight, cover and bullets pass through it. */
+  private solids: MeshBVH[];
+
   constructor(geometry: BufferGeometry, climbableGeometry: BufferGeometry | null = null) {
     this.bvh = new MeshBVH(geometry);
+    this.solids = [this.bvh];
     this.climbableBvh = climbableGeometry ? new MeshBVH(climbableGeometry) : null;
+  }
+
+  /** Sets the panes of glass that block walking (null: none). Called when the level loads and each time a pane breaks. */
+  setGlass(geometry: BufferGeometry | null): void {
+    this.solids = geometry ? [this.bvh, new MeshBVH(geometry)] : [this.bvh];
   }
 
   /**
@@ -103,11 +112,15 @@ export class LevelCollision {
     searchBox.min.addScalar(-radiusM);
     searchBox.max.addScalar(radiusM);
 
-    return this.bvh.shapecast({
-      intersectsBounds: (box) => box.intersectsBox(searchBox),
-      // Returning true stops the search: one overlapping triangle is enough.
-      intersectsTriangle: (triangle) => triangle.closestPointToSegment(segment, onTriangle, onSegment) < radiusM - toleranceM,
-    });
+    for (const bvh of this.solids) {
+      const overlaps = bvh.shapecast({
+        intersectsBounds: (box) => box.intersectsBox(searchBox),
+        // Returning true stops the search: one overlapping triangle is enough.
+        intersectsTriangle: (triangle) => triangle.closestPointToSegment(segment, onTriangle, onSegment) < radiusM - toleranceM,
+      });
+      if (overlaps) return true;
+    }
+    return false;
   }
 
   /**
@@ -133,39 +146,41 @@ export class LevelCollision {
       searchBox.max.addScalar(radiusM);
 
       let pushed = false;
-      this.bvh.shapecast({
-        intersectsBounds: (box) => box.intersectsBox(searchBox),
-        intersectsTriangle: (triangle) => {
-          const distanceM = triangle.closestPointToSegment(segment, onTriangle, onSegment);
-          if (distanceM >= radiusM) return false; // false keeps searching the remaining triangles
+      for (const bvh of this.solids) {
+        bvh.shapecast({
+          intersectsBounds: (box) => box.intersectsBox(searchBox),
+          intersectsTriangle: (triangle) => {
+            const distanceM = triangle.closestPointToSegment(segment, onTriangle, onSegment);
+            if (distanceM >= radiusM) return false; // false keeps searching the remaining triangles
 
-          if (distanceM > 1e-6) {
-            push.subVectors(onSegment, onTriangle);
-          } else {
-            // The centre line passes through the triangle itself, so there is no direction to use; take its face.
-            triangle.getNormal(triNormal);
-            push.copy(triNormal);
-          }
-          if (!vertical) push.y = 0;
-          if (push.lengthSq() < 1e-12) return false; // nothing to push in the allowed directions
-          push.normalize();
-          if (push.y > 0.5) {
-            // Walkable ground (a floor, a prop's top, a ramp): lift straight up, as far as it takes to clear it along the
-            // surface, so walking up a slope keeps its speed instead of being pushed back down it (5.3 follow-up).
-            contact.up = true;
-            push.set(0, (radiusM - distanceM) / push.y, 0);
-          } else {
-            if (push.y < -0.5) contact.down = true;
-            push.multiplyScalar(radiusM - distanceM);
-          }
+            if (distanceM > 1e-6) {
+              push.subVectors(onSegment, onTriangle);
+            } else {
+              // The centre line passes through the triangle itself, so there is no direction to use; take its face.
+              triangle.getNormal(triNormal);
+              push.copy(triNormal);
+            }
+            if (!vertical) push.y = 0;
+            if (push.lengthSq() < 1e-12) return false; // nothing to push in the allowed directions
+            push.normalize();
+            if (push.y > 0.5) {
+              // Walkable ground (a floor, a prop's top, a ramp): lift straight up, as far as it takes to clear it along the
+              // surface, so walking up a slope keeps its speed instead of being pushed back down it (5.3 follow-up).
+              contact.up = true;
+              push.set(0, (radiusM - distanceM) / push.y, 0);
+            } else {
+              if (push.y < -0.5) contact.down = true;
+              push.multiplyScalar(radiusM - distanceM);
+            }
 
-          segment.start.add(push);
-          segment.end.add(push);
-          position.add(push);
-          pushed = true;
-          return false;
-        },
-      });
+            segment.start.add(push);
+            segment.end.add(push);
+            position.add(push);
+            pushed = true;
+            return false;
+          },
+        });
+      }
 
       if (!pushed) break;
     }

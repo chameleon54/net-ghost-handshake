@@ -4,6 +4,7 @@ import type { EnemyGun } from '../config/enemyGuns';
 import type { HitZone } from '../enemies/dummy';
 import type { Surface } from '../data/greyboxRoom';
 import type { DamageSource } from '../player/playerHealth';
+import type { GlassPane } from '../level/glass';
 import type { Noise } from '../stealth/noise';
 import type { MagazineCheck } from './magazineFeel';
 
@@ -104,6 +105,10 @@ export type WeaponEvents = {
   'grenade:beep': { position: Vector3 };
   /** A grenade went off. Glass (phase 5) and enemies (4.12) will react to this; enemies hear it too. The position vector is reused. */
   'grenade:exploded': { position: Vector3; radiusM: number };
+  /** A bullet went through a whole pane of glass and cracked it (5.4): `hits` so far, at `position` (a reused vector). */
+  'glass:cracked': { pane: GlassPane; position: Vector3; hits: number };
+  /** A pane shattered (5.4). `position` is where it was hit (a reused vector), `direction` the way the bullet or blast came from it. */
+  'glass:broken': { pane: GlassPane; position: Vector3; direction: Vector3; by: 'player' | 'enemy' | 'blast' };
   /** A blast hurt the player by `damage` (the health system has already taken it). */
   'player:blast': { damage: number; distanceM: number };
   /** The player took damage; `health` is what is left. The screen effects (3.3) and PP's lines (phase 6) listen. */

@@ -6,6 +6,7 @@ import { uiText } from './data/uiText';
 import type { DebugTools } from './debug';
 import { buildGreybox } from './level/greybox';
 import { Navigation } from './level/navigation';
+import { GlassSystem } from './level/glassSystem';
 import { CoverPoints, levelCover } from './level/cover';
 import { onFocusLost } from './platform/focus';
 import { attachInputListeners } from './platform/inputListeners';
@@ -47,6 +48,7 @@ import type { CalloutKind } from './weapons/events';
 import type { NoiseKind } from './stealth/noise';
 import { BulletMarks } from './fx/bulletMarks';
 import { Tracers } from './fx/tracers';
+import { GlassFx } from './fx/glassFx';
 import { ImpactSparks } from './fx/impactSparks';
 import { Exposure, type Glimpse } from './player/exposure';
 import { pistolConfig } from './config/pistol';
@@ -104,11 +106,12 @@ const levelFloor = levelLayout(levelData);
 const level = buildGreybox(levelData.boxes, levelFloor);
 scene.add(level.group);
 // The navigation mesh (4.2): built once from the room, where enemies can walk. Takes milliseconds, before the first frame.
+// A room with floor-standing glass (5.4) gets a mesh that can open a gap when a pane breaks; one without is as before.
 // If the library cannot start, the game still runs: enemies find no routes and stand still, and the start screen says so.
 let navigation: Navigation;
 let navigationFailed = false;
 try {
-  navigation = await Navigation.create(level.navigationGeometry);
+  navigation = await Navigation.create(level.navigationGeometryWithoutFloorGlass, {}, level.floorGlass);
 } catch (error) {
   console.error('Navigation could not load:', error);
   navigation = Navigation.unavailable();
@@ -327,7 +330,10 @@ const storeyPush = new StoreyPush();
 const activeStandIns: typeof standIns = [];
 const activeEnemies: StandInEnemy[] = [];
 // Each stand-in keeps its line of fire clear of the others in the room (4.16).
-for (const { world } of standIns) world.squadmates = activeEnemies;
+for (const { world } of standIns) {
+  world.squadmates = activeEnemies;
+  world.glass = level.glass; // their misses prefer to strike glass near Rook (5.4)
+}
 /** Keeping apart (4.16): each stand-in's body, and whether it holds its spot (in cover, or standing) this update. */
 const spacedBodies = standIns.map(({ enemy }) => ({ feet: enemy.feet, fixed: false, enemy }));
 const spacedMoved: typeof spacedBodies = [];
@@ -340,6 +346,9 @@ const targets: Target[] = [];
 const shooter = new Shooter(weaponEvents, level.collision, camera, viewmodel.muzzles, targets, gunConfigs);
 new KnifeStrike(weaponEvents, level.collision, camera, targets);
 const tracers = new Tracers(scene, weaponEvents);
+// Breakable glass (5.4): bullets and blasts crack and shatter panes; the effects show it, the sound and the noise follow.
+const glassSystem = new GlassSystem(weaponEvents, level, navigation);
+const glassFx = new GlassFx(scene, weaponEvents, level.glassMeshes);
 const impactSparks = new ImpactSparks(scene, weaponEvents);
 const barrelSmoke = new BarrelSmoke(scene, camera, viewmodel.muzzles.rifle);
 // Sound: the audio system starts from the Play click (browser rule); the weapon sounds listen to the weapon events.
@@ -470,6 +479,8 @@ function restart(): void {
   placeSquad();
   coverPoints.clearClaims();
   bulletMarks.clear();
+  glassSystem.reset();
+  glassFx.clear();
   tracers.clear();
   impactSparks.clear();
   exposure.reset();
@@ -580,6 +591,7 @@ const loop = new Loop(
     shooter.recoil.update(stepSec);
     tracers.update(stepSec);
     impactSparks.update(stepSec);
+    glassFx.update(stepSec);
     casings.update(stepSec);
     weaponSounds.update(stepSec);
     audio.update(stepSec);

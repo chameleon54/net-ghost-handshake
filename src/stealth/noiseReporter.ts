@@ -44,6 +44,10 @@ export class NoiseReporter {
     );
     events.on('grenade:bounced', ({ position }) => this.at('grenade-bounce', position, noiseConfig.grenadeBounceM));
     events.on('grenade:exploded', ({ position }) => this.at('grenade-blast', position, noiseConfig.grenadeBlastM));
+    // Glass shattering is loud (decision 179). A pane an enemy's bullet breaks is not a noise the player made.
+    events.on('glass:broken', ({ position, by }) => {
+      if (by !== 'enemy') this.at('glass-break', position, noiseConfig.glassBreakM);
+    });
   }
 
   private fromPlayer(kind: NoiseKind, radiusM: number): void {

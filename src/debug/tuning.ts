@@ -395,6 +395,7 @@ export const noiseFolder: Folder<NoiseKey> = {
     { key: 'knifeStabM', label: 'Knife stab (m)', min: 0, max: 20, step: 0.5 },
     { key: 'grenadeBounceM', label: 'Grenade bounce (m)', min: 0, max: 40, step: 1 },
     { key: 'grenadeBlastM', label: 'Grenade blast (m)', min: 0, max: 200, step: 5 },
+    { key: 'glassBreakM', label: 'Glass shattering (m)', min: 0, max: 60, step: 1 },
     { key: 'walkStepM', label: 'Footstep, walking (m)', min: 0, max: 40, step: 0.5 },
     { key: 'crouchStepM', label: 'Footstep, crouching (m)', min: 0, max: 40, step: 0.5 },
     { key: 'sprintStepM', label: 'Footstep, sprinting (m)', min: 0, max: 60, step: 0.5 },

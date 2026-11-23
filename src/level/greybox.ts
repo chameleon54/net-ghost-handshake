@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { greyboxLayout, greyboxRoom, isClimbable, type RoomBox, type RoomLayout } from '../data/greyboxRoom';
 import { LevelCollision } from './collision';
+import { GlassPanes, standsOnFloor, type GlassPane } from './glass';
 
 export interface GreyboxLevel {
   /** Everything to draw. */
@@ -12,6 +13,16 @@ export interface GreyboxLevel {
   collision: LevelCollision;
   /** Every box plus the floor, as one set of triangles: what the navigation mesh is built from (4.2). */
   navigationGeometry: THREE.BufferGeometry;
+  /** The breakable glass (5.4): the panes and what each has taken. Walking is blocked by the panes still whole (`collision`), rays pass them. */
+  glass: GlassPanes;
+  /** The mesh of each pane, by its id: hidden when it breaks. They are also in `boxMeshes`. */
+  glassMeshes: Map<string, THREE.Mesh>;
+  /** The panes still whole, as triangles for `collision.setGlass`; null if none is left. */
+  glassGeometry: () => THREE.BufferGeometry | null;
+  /** The panes that stand on the floor: a broken one is a gap to walk through, so the navigation mesh follows them (5.4). */
+  floorGlass: GlassPane[];
+  /** `navigationGeometry` without the floor-standing panes, for a navigation mesh that opens them when they break. The same geometry if there are none. */
+  navigationGeometryWithoutFloorGlass: THREE.BufferGeometry;
 }
 
 const shades = { wall: 0x4a4f55, prop: 0x8a9097, marker: 0xff7a1a, floor: 0x2b2f33, glass: 0x7fc8e8 } as const;
@@ -47,19 +58,24 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   // one per box (the chamber has about 190 boxes, 5.3). The edit mode hides these while it draws its own copy (5.2).
   const boxMeshes: THREE.Mesh[] = [];
   const looks = new Map<string, THREE.BufferGeometry[]>();
+  const glass = new GlassPanes(boxes);
+  const glassMeshes = new Map<string, THREE.Mesh>();
+  const glassMaterial = new THREE.MeshStandardMaterial({ color: shades.glass, transparent: true, opacity: 0.35, depthWrite: false }); // see-through
   boxes.forEach((box, index) => {
     if (!isDrawn(box)) return; // a stair's ramp: walked on, not seen
-    const look = box.glass ? 'glass' : box.kind;
-    looks.set(look, [...(looks.get(look) ?? []), geometries[index]]);
+    if (box.glass) return; // glass is drawn pane by pane below, so a broken one can disappear
+    looks.set(box.kind, [...(looks.get(box.kind) ?? []), geometries[index]]);
   });
   for (const [look, parts] of looks) {
     const geometry = mergeGeometries(parts, false);
     if (!geometry) throw new Error(`Could not merge the room's ${look} boxes for drawing`);
-    const material =
-      look === 'glass'
-        ? new THREE.MeshStandardMaterial({ color: shades.glass, transparent: true, opacity: 0.35, depthWrite: false }) // see-through (5.4 breaks it)
-        : new THREE.MeshStandardMaterial({ color: shades[look as RoomBox['kind']] });
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: shades[look as RoomBox['kind']] }));
+    boxMeshes.push(mesh);
+    group.add(mesh);
+  }
+  for (const pane of glass.panes) {
+    const mesh = new THREE.Mesh(boxGeometry(pane.box), glassMaterial);
+    glassMeshes.set(pane.id, mesh);
     boxMeshes.push(mesh);
     group.add(mesh);
   }
@@ -97,16 +113,26 @@ export function buildGreybox(boxes: readonly RoomBox[] = greyboxRoom, layout: Ro
   grid.position.y = 0.01;
   group.add(grid);
 
-  // Collision gets every solid box (not a stair's drawn steps); a second copy of just the climbable boxes tells the ledge
-  // check what Space may climb.
+  // Collision gets every solid box (not a stair's drawn steps, and not glass: that has its own, 5.4); a second copy of just
+  // the climbable boxes tells the ledge check what Space may climb (never glass).
   const solidBoxes = boxes.filter(isSolid);
-  const merged = mergeGeometries(geometries.filter((_, index) => isSolid(boxes[index])), false);
+  const hardBoxes = solidBoxes.filter((box) => !box.glass);
+  const merged = mergeGeometries(hardBoxes.map(boxGeometry), false);
   if (!merged) throw new Error('Could not merge the room geometry for collision');
-  const climbableBoxes = solidBoxes.filter(isClimbable);
+  const climbableBoxes = hardBoxes.filter(isClimbable);
   const climbable = climbableBoxes.length > 0 ? mergeGeometries(climbableBoxes.map(boxGeometry), false) : null;
   // The navigation mesh needs the floor too (collision treats height 0 as the floor instead).
   const floorGeometry = new THREE.PlaneGeometry(size.widthM, size.depthM).rotateX(-Math.PI / 2);
   const navigationGeometry = mergeGeometries([...solidBoxes.map(boxGeometry), floorGeometry], false);
   if (!navigationGeometry) throw new Error('Could not merge the room geometry for navigation');
-  return { group, boxMeshes, collision: new LevelCollision(merged, climbable), navigationGeometry };
+  const floorGlass = glass.panes.filter(standsOnFloor);
+  const withoutFloorGlass = floorGlass.length === 0 ? navigationGeometry : mergeGeometries([...solidBoxes.filter((box) => !floorGlass.some((pane) => pane.box === box)).map(boxGeometry), floorGeometry.clone()], false);
+  if (!withoutFloorGlass) throw new Error('Could not merge the room geometry for navigation');
+  const glassGeometry = () => {
+    const whole = glass.intactBoxes();
+    return whole.length === 0 ? null : mergeGeometries(whole.map(boxGeometry), false);
+  };
+  const collision = new LevelCollision(merged, climbable);
+  collision.setGlass(glassGeometry());
+  return { group, boxMeshes, collision, navigationGeometry, glass, glassMeshes, glassGeometry, floorGlass, navigationGeometryWithoutFloorGlass: withoutFloorGlass };
 }

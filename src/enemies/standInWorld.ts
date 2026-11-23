@@ -4,6 +4,7 @@ import { dummyConfig } from '../config/dummy';
 import { enemyGrenadeConfig } from '../config/enemyGrenades';
 import { enemyGunConfig } from '../config/enemyGuns';
 import { exposureConfig } from '../config/exposure';
+import { glassConfig } from '../config/glass';
 import { grenadeConfig } from '../config/grenade';
 import { navigationConfig } from '../config/navigation';
 import { playerConfig } from '../config/player';
@@ -12,6 +13,7 @@ import { standInConfig } from '../config/standInEnemy';
 import type { EventBus } from '../core/events';
 import { createRayHit, type LevelCollision } from '../level/collision';
 import { bestByPromise, type CoverPoint, type CoverPoints } from '../level/cover';
+import type { GlassPanes } from '../level/glass';
 import type { Navigation } from '../level/navigation';
 import { hitChance, missOffsetM, type Glimpse } from '../player/exposure';
 import { squadConfig } from '../config/squad';
@@ -105,6 +107,8 @@ export function describeFlankRejects(r: FlankRejects): string {
 export class StandInWorld implements StandInHooks {
   /** The enemies in the room (the game's list, changed in place), for keeping its line of fire clear of them (4.16). */
   squadmates: readonly StandInEnemy[] = [];
+  /** The level's breakable glass (5.4), set by the game; null where there is none. Misses prefer to strike it. */
+  glass: GlassPanes | null = null;
   private readonly enemyEyes = new Vector3();
   private readonly routeToCover: Vector3[] = [];
   private readonly spot = new Vector3();
@@ -123,6 +127,8 @@ export class StandInWorld implements StandInHooks {
   private readonly hit = createRayHit();
   private readonly chestNow = new Vector3();
   private readonly firstMiss = new Vector3();
+  private readonly solidMiss = new Vector3();
+  private readonly glassPoint = new Vector3();
   private readonly bulletPath = new Line3();
   private readonly hips = new Vector3();
   private readonly peekEyes = new Vector3();
@@ -891,7 +897,10 @@ export class StandInWorld implements StandInHooks {
     let onSurface = false;
     if (shot === 'hit') {
       this.end.copy(this.aim);
-      this.damagePlayer(enemyGunConfig[enemy.gun].damagePerHit, this.muzzle); // the gun decides the damage (4.12)
+      // A shot through a whole pane cracks it (the glass system counts the line) and still hurts him, unless the setting says
+      // the glass takes the shot (5.4, decision 283).
+      const glassTakesIt = !glassConfig.enemyHitsLandThroughGlass && this.glass?.intactOnSegment(this.muzzle, this.aim);
+      if (!glassTakesIt) this.damagePlayer(enemyGunConfig[enemy.gun].damagePerHit, this.muzzle); // the gun decides the damage (4.12)
     } else {
       if (shot === 'miss') this.placeMiss();
       this.direction.subVectors(this.aim, this.muzzle).normalize();
@@ -910,11 +919,14 @@ export class StandInWorld implements StandInHooks {
 
   /**
    * Picks a miss's aim point (in `aim`, which holds Rook's chest): a few tries off his chest, keeping the first that
-   * strikes a surface near him (his cover takes the fire); if none does, the first try, which flies past him.
+   * strikes a surface near him (his cover takes the fire); if none does, the first try, which flies past him. A whole pane of
+   * glass near him is better still: a try whose line goes through one wins at once, so panes burst around him (5.4).
    */
   private placeMiss(): void {
     this.chestNow.copy(this.aim);
     const offsetM = missOffsetM(this.quarry.exposure);
+    const glass = this.glass?.anyIntact() ? this.glass : null;
+    let hasSolidMiss = false;
     for (let i = 0; i < missTries; i++) {
       this.aim.copy(this.chestNow);
       this.direction.subVectors(this.aim, this.muzzle).normalize();
@@ -922,9 +934,19 @@ export class StandInWorld implements StandInHooks {
       if (i === 0) this.firstMiss.copy(this.aim);
       this.direction.subVectors(this.aim, this.muzzle).normalize();
       const struck = this.collision.raycast(this.muzzle, this.direction, rifleConfig.maxRangeM, this.hit);
-      if (struck && this.hit.point.distanceTo(this.chestNow) <= exposureConfig.missNearSurfaceM) return;
+      if (glass && this.glassNearHim(glass, struck ? this.hit.point : this.aim)) return;
+      if (struck && this.hit.point.distanceTo(this.chestNow) <= exposureConfig.missNearSurfaceM) {
+        if (!glass) return;
+        if (!hasSolidMiss) this.solidMiss.copy(this.aim); // keep looking for glass; this is the fallback
+        hasSolidMiss = true;
+      }
     }
-    this.aim.copy(this.firstMiss);
+    this.aim.copy(hasSolidMiss ? this.solidMiss : this.firstMiss);
+  }
+
+  /** True if the line from the muzzle to `end` goes through a whole pane within the near-surface distance of Rook's chest. */
+  private glassNearHim(glass: GlassPanes, end: Vector3): boolean {
+    return glass.panes.some((pane) => !pane.broken && glass.crossing(pane, this.muzzle, end, this.glassPoint) && this.glassPoint.distanceTo(this.chestNow) <= exposureConfig.missNearSurfaceM);
   }
 
   /** A round that flew past his head within the crack radius (not one that stopped short of him) sends `shot:near-miss`. */
