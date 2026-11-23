@@ -38,7 +38,8 @@ const style = {
     'position:fixed;right:12px;top:60px;width:560px;height:620px;min-width:360px;min-height:300px;resize:both;overflow:hidden;' +
     'display:none;flex-direction:column;background:#16191d;color:#ddd;font:11px sans-serif;border:1px solid #444;border-radius:4px;z-index:13;box-shadow:0 4px 18px #000a',
   header: 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:#23272d;cursor:move;user-select:none',
-  grid: 'flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;padding:6px;align-content:start',
+  // Rows keep their tiles' full height: without max-content, a grid with more tiles than fit squashes them to thin bars.
+  grid: 'flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:max-content;gap:6px;padding:6px;align-content:start',
   tile: 'cursor:pointer;background:#1f2328;border:1px solid #333;border-radius:3px;padding:3px;text-align:center;overflow:hidden',
   tileSelected: 'border-color:#ffc23d',
   picture: `width:${thumbPx}px;height:${thumbPx}px;display:block;margin:0 auto;background:#2a2f35;object-fit:contain`,
