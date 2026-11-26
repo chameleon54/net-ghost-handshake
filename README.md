@@ -2,7 +2,9 @@
 
 A single-player browser first-person shooter built with three.js.
 
-Work in progress.
+**Development has moved to a Unity version.** This three.js version is kept as a reference and is no longer developed.
+
+Play it in the browser: https://net-ghost-handshake.vercel.app/
 
 ## Run it
 
